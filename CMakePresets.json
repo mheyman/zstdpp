@@ -1,0 +1,219 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_CXX_STANDARD": "23",
+        "CMAKE_CXX_STANDARD_REQUIRED": "ON",
+        "CMAKE_CXX_EXTENSIONS": "OFF"
+      }
+    },
+    {
+      "name": "msvc-base",
+      "hidden": true,
+      "inherits": "base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "clang-base",
+      "hidden": true,
+      "inherits": "base",
+      "environment": {
+        "CC": "clang",
+        "CXX": "clang++"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "gcc-base",
+      "hidden": true,
+      "inherits": "base",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "environment": {
+        "CC": "gcc",
+        "CXX": "g++"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "msvc-debug",
+      "displayName": "MSVC Debug tests",
+      "inherits": "msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SPH_ZSTDPP_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "msvc-release",
+      "displayName": "MSVC Release",
+      "inherits": "msvc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SPH_ZSTDPP_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "msvc-release-reference",
+      "displayName": "MSVC Release reference zstd",
+      "inherits": "msvc-release",
+      "cacheVariables": {
+        "SPH_ZSTDPP_BUILD_REFERENCE": "ON"
+      }
+    },
+    {
+      "name": "msvc-release-eval",
+      "displayName": "MSVC Release evaluation matrix",
+      "inherits": "msvc-release-reference",
+      "cacheVariables": {
+        "SPH_ZSTDPP_BUILD_EVAL": "ON"
+      }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "Clang Debug tests",
+      "inherits": "clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SPH_ZSTDPP_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "clang-release-reference",
+      "displayName": "Clang Release reference zstd",
+      "inherits": "clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SPH_ZSTDPP_BUILD_TESTS": "OFF",
+        "SPH_ZSTDPP_BUILD_REFERENCE": "ON"
+      }
+    },
+    {
+      "name": "clang-release-eval",
+      "displayName": "Clang Release evaluation matrix",
+      "inherits": "clang-release-reference",
+      "cacheVariables": {
+        "SPH_ZSTDPP_BUILD_EVAL": "ON"
+      }
+    },
+    {
+      "name": "gcc-debug",
+      "displayName": "GCC Debug tests",
+      "inherits": "gcc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SPH_ZSTDPP_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "gcc-release-reference",
+      "displayName": "GCC Release reference zstd",
+      "inherits": "gcc-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SPH_ZSTDPP_BUILD_TESTS": "OFF",
+        "SPH_ZSTDPP_BUILD_REFERENCE": "ON"
+      }
+    },
+    {
+      "name": "gcc-release-eval",
+      "displayName": "GCC Release evaluation matrix",
+      "inherits": "gcc-release-reference",
+      "cacheVariables": {
+        "SPH_ZSTDPP_BUILD_EVAL": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "msvc-debug", "configurePreset": "msvc-debug" },
+    { "name": "msvc-release", "configurePreset": "msvc-release" },
+    {
+      "name": "msvc-release-reference",
+      "configurePreset": "msvc-release-reference",
+      "targets": ["libzstd_static"]
+    },
+    {
+      "name": "msvc-release-eval",
+      "configurePreset": "msvc-release-eval",
+      "targets": ["zstdpp_eval"]
+    },
+    {
+      "name": "msvc-run-eval",
+      "configurePreset": "msvc-release-eval",
+      "targets": ["run_eval"]
+    },
+    { "name": "clang-debug", "configurePreset": "clang-debug" },
+    {
+      "name": "clang-release-reference",
+      "configurePreset": "clang-release-reference",
+      "targets": ["libzstd_static"]
+    },
+    {
+      "name": "clang-release-eval",
+      "configurePreset": "clang-release-eval",
+      "targets": ["zstdpp_eval"]
+    },
+    {
+      "name": "clang-run-eval",
+      "configurePreset": "clang-release-eval",
+      "targets": ["run_eval"]
+    },
+    { "name": "gcc-debug", "configurePreset": "gcc-debug" },
+    {
+      "name": "gcc-release-reference",
+      "configurePreset": "gcc-release-reference",
+      "targets": ["libzstd_static"]
+    },
+    {
+      "name": "gcc-release-eval",
+      "configurePreset": "gcc-release-eval",
+      "targets": ["zstdpp_eval"]
+    },
+    {
+      "name": "gcc-run-eval",
+      "configurePreset": "gcc-release-eval",
+      "targets": ["run_eval"]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "gcc-debug",
+      "configurePreset": "gcc-debug",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
