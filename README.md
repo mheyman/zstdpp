@@ -55,18 +55,27 @@ and parsed frame information.
 The current working slice provides:
 
 - valid standard and magicless frame headers;
-- streaming raw and RLE compression;
-- raw and RLE decompression;
-- compressed blocks containing raw/RLE literals and zero match sequences;
+- streaming raw, RLE, and single-match compressed-block output;
+- a linear fast match finder with a compile-time-selected hash-table size;
+- one-symbol FSE/RLE sequence entropy encoding with raw-literal fallback;
+- native Huffman literal encoding for direct-weight alphabets, with one/four streams;
+- Huffman literal decoding (new/repeat tables and one/four bitstreams), including
+  direct and FSE-compressed Huffman weights;
+- predefined, RLE, compressed, and repeat FSE sequence tables;
+- repeat-offset execution against an overlap-safe history bounded by the frame window;
 - content-size fields and XXH64 content checksums;
 - concatenated and skippable frames;
 - explicit truncation, checksum, size, format, and state errors;
-- interoperability tests against the downloaded reference library; and
-- unmodified reference golden-frame tests for RLE and zero-sequence blocks.
+- interoperability tests in both directions against the downloaded reference library;
+- reference-produced entropy frames at compression levels 1, 3, and 9; and
+- corruption tests for matches outside the retained history window.
 
-The next porting layers are Huffman literal decoding, FSE sequence decoding, match execution with a
-bounded history window, and then the compression match finders and entropy encoders. Dictionary and
-multi-threaded modes are intentionally rejected until their implementations exist.
+The compressor's current entropy path intentionally emits one match per block and one-symbol
+sequence tables. Its Huffman encoder uses direct weights when the alphabet permits and otherwise
+falls back to raw literals. The next compression slice is multi-sequence parsing, normalized FSE
+table/state encoding, and FSE-compressed Huffman weights; the decoder side already consumes those
+formats. Dictionary and multi-threaded modes are intentionally rejected until their implementations
+exist.
 
 ## Build and test
 
@@ -118,16 +127,16 @@ Compression workers receive identical input. Decompression workers both consume 
 xychart-beta
     title "Compressed size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "KiB" 0 --> 846
-    bar [769, 259, 769, 274, 769, 274, 769, 260, 769, 260]
+    y-axis "KiB" 0 --> 345
+    bar [313, 259, 313, 274, 313, 274, 313, 260, 313, 260]
 ```
 
 ```mermaid
 xychart-beta
     title "Compression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 2450
-    bar [2205, 1490, 2081, 960, 2024, 754, 2227, 344, 2122, 153]
+    y-axis "MiB/s" 0 --> 1604
+    bar [296, 1458, 305, 861, 276, 731, 302, 338, 270, 156]
 ```
 
 ```mermaid
@@ -143,7 +152,7 @@ xychart-beta
     title "Compression executable size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
     y-axis "KiB" 0 --> 421
-    bar [49, 382, 49, 382, 49, 382, 49, 382, 49, 382]
+    bar [63, 382, 63, 382, 63, 382, 63, 382, 63, 382]
 ```
 
 ### Decompression
@@ -152,16 +161,16 @@ xychart-beta
 xychart-beta
     title "Decompression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 4775
-    bar [1843, 4035, 1953, 4265, 2151, 4340, 2122, 4324, 2150, 3983]
+    y-axis "MiB/s" 0 --> 4282
+    bar [356, 3246, 359, 3840, 364, 3856, 313, 3892, 382, 3871]
 ```
 
 ```mermaid
 xychart-beta
     title "Decompression peak memory"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB" 0 --> 10
-    bar [9, 8, 9, 8, 9, 8, 9, 8, 9, 8]
+    y-axis "MiB" 0 --> 12
+    bar [10, 8, 10, 8, 10, 8, 10, 8, 10, 8]
 ```
 
 ```mermaid
@@ -169,9 +178,8 @@ xychart-beta
     title "Decompression executable size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
     y-axis "KiB" 0 --> 126
-    bar [53, 114, 53, 114, 53, 114, 53, 114, 53, 114]
+    bar [79, 114, 79, 114, 79, 114, 79, 114, 79, 114]
 ```
 
 <!-- SPH_ZSTDPP_EVAL_END -->
-
 
