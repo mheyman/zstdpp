@@ -267,8 +267,8 @@ namespace
             << "executable; memory is peak resident set "
             << "size, so both intentionally include runtime overhead.\n\n"
             << "Compression workers receive identical input. Decompression workers both consume the same "
-            << "sph-zstd++-generated frame at each level because general reference-compressed blocks are not "
-            << "supported by the C++ decoder yet.\n\n"
+            << "reference-zstd-generated frame at each level, so their throughput and memory results use "
+            << "identical compressed bytes.\n\n"
             << "### Compression\n\n";
         output << chart("Compressed size", "KiB", sph_compressed_size, reference_compressed_size);
         output << chart("Compression throughput", "MiB/s", sph_compress_speed, reference_compress_speed);
@@ -406,9 +406,9 @@ int main(int argc, char** argv)
             run_worker(reference_compress_executable,
                 {corpus_path, reference_frame, iterations_text, reference_compress_metrics});
             run_worker(sph_decompress_executable,
-                {sph_frame, corpus_path, iterations_text, sph_decompress_metrics});
+                {reference_frame, corpus_path, iterations_text, sph_decompress_metrics});
             run_worker(reference_decompress_executable,
-                {sph_frame, corpus_path, iterations_text, reference_decompress_metrics});
+                {reference_frame, corpus_path, iterations_text, reference_decompress_metrics});
 
             results.push_back({
                 .level = level,
