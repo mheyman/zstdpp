@@ -8,8 +8,10 @@
 #include <span>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <sph/zstd++/zstd_common.h>
+#include <sph/zstd++/detail/zstd_compression.h>
 
 namespace sph::zstd
 {
@@ -21,8 +23,8 @@ namespace sph::zstd
      * Parameters is a structural non-type template parameter, so every option is visible
      * to the optimizer and unsupported combinations can fail during compilation.
      *
-     * The first porting milestone emits standards-compliant raw and RLE blocks. Match
-     * finders and entropy-coded blocks will be added behind this unchanged interface.
+     * The fast strategy uses a bounded hash table to find profitable matches and
+     * emits interoperable entropy-coded sequence blocks, with raw/RLE fallbacks.
      */
     template <compression_parameters Parameters = {}, typename Callback = std::function<void(std::span<std::uint8_t const>)>>
         requires output_callback<Callback>
@@ -224,8 +226,24 @@ namespace sph::zstd
             auto const bytes{std::span<std::uint8_t const>{block_buffer_}.first(buffered_size_)};
             auto const is_rle{bytes.size() > 1 && std::ranges::all_of(bytes,
                 [first = bytes.front()](std::uint8_t byte) { return byte == first; })};
-            auto const block_type{is_rle ? 1U : 0U};
-            auto const block_header{(static_cast<std::uint32_t>(buffered_size_) << 3U) |
+            constexpr auto hash_log{Parameters.hash_log == 0U ? 15U : Parameters.hash_log};
+            std::vector<std::uint8_t> compressed;
+            if (!is_rle)
+            {
+                auto const selected{detail::find_best_fast_match(bytes, hash_log)};
+                if (selected && selected->length >= 4U)
+                {
+                    auto candidate{detail::encode_single_match_block(bytes, *selected)};
+                    if (candidate.size() < bytes.size())
+                    {
+                        compressed = std::move(candidate);
+                    }
+                }
+            }
+
+            auto const block_type{is_rle ? 1U : compressed.empty() ? 0U : 2U};
+            auto const stored_size{compressed.empty() ? buffered_size_ : compressed.size()};
+            auto const block_header{(static_cast<std::uint32_t>(stored_size) << 3U) |
                 (block_type << 1U) | (last ? 1U : 0U)};
             std::array<std::uint8_t, 3> encoded_header{
                 static_cast<std::uint8_t>(block_header),
@@ -236,6 +254,10 @@ namespace sph::zstd
             if (is_rle)
             {
                 emit(bytes.first<1>());
+            }
+            else if (!compressed.empty())
+            {
+                emit(compressed);
             }
             else
             {

@@ -40,8 +40,8 @@ namespace sph::zstd
     /**
      * Compile-time equivalents of the stable reference compressor parameters.
      * Zero retains Zstandard's parameter-dependent default. Fields which are not
-     * used by the initial raw/RLE backend are retained here so later match finders
-     * can specialize without changing the public template.
+     * used by the baseline fast backend are retained here so additional match-finder
+     * and entropy strategies can specialize without changing the public template.
      */
     struct compression_parameters
     {
