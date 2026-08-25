@@ -114,6 +114,39 @@ namespace
         return decoded;
     }
 
+    auto reference_compress(std::span<std::uint8_t const> input, int level) -> std::vector<std::uint8_t>
+    {
+        std::vector<std::uint8_t> encoded(ZSTD_compressBound(input.size()));
+        auto const result{ZSTD_compress(encoded.data(), encoded.size(), input.data(), input.size(), level)};
+        check(ZSTD_isError(result) == 0U, "reference zstd creates entropy-coded test frame");
+        if (ZSTD_isError(result) != 0U)
+        {
+            throw std::runtime_error{ZSTD_getErrorName(result)};
+        }
+        encoded.resize(result);
+        return encoded;
+    }
+
+    auto make_entropy_input() -> std::vector<std::uint8_t>
+    {
+        constexpr std::string_view paragraph{
+            "Header-only compression makes specialization visible to the optimizer. "
+            "Huffman coding handles the literals while FSE reconstructs match sequences.\n"};
+        std::vector<std::uint8_t> input;
+        input.reserve(600U * 1024U);
+        for (std::size_t index{}; input.size() < 600U * 1024U; ++index)
+        {
+            for (auto const character : paragraph)
+            {
+                input.push_back(static_cast<std::uint8_t>(character));
+            }
+            input.push_back(static_cast<std::uint8_t>(index));
+            input.push_back(static_cast<std::uint8_t>(index >> 8U));
+        }
+        input.resize(600U * 1024U);
+        return input;
+    }
+
     void test_reference_interoperability()
     {
         // Adapted from the reference zstreamtest round-trip and tiny-chunk cases.
@@ -198,6 +231,101 @@ namespace
             "reference two-byte zero-sequence block decodes raw literals");
     }
 
+    void test_reference_entropy_frames()
+    {
+        auto const input{make_entropy_input()};
+        for (auto const level : {1, 3, 9})
+        {
+            auto const encoded{reference_compress(input, level)};
+            check(encoded.size() < input.size() / 4U, "reference entropy frame is genuinely compressed");
+
+            std::vector<std::uint8_t> decoded;
+            auto decompressor = sph::zstd::zstd_decompress{
+                [&decoded](std::span<std::uint8_t const> output)
+                {
+                    decoded.insert(decoded.end(), output.begin(), output.end());
+                }};
+            for (auto chunk : std::span<std::uint8_t const>{encoded} | std::views::chunk(13))
+            {
+                decompressor.update(chunk);
+            }
+            decompressor.finish();
+            check(decoded == input, "Huffman/FSE reference frame decodes at each tested level");
+            check(decompressor.decoded_size() == input.size(), "entropy decoder reports decoded size");
+        }
+    }
+
+    void test_cpp_match_compression()
+    {
+        constexpr std::string_view pattern{"fast-match-finder entropy sequence "};
+        std::vector<std::uint8_t> input;
+        input.reserve(300U * 1024U);
+        while (input.size() < 300U * 1024U)
+        {
+            input.insert(input.end(), pattern.begin(), pattern.end());
+        }
+        input.resize(300U * 1024U);
+        auto const encoded{compress(input)};
+        check(encoded.size() < input.size() / 3U, "fast match finder materially reduces repetitive input");
+        check(reference_decompress(encoded, input.size()) == input,
+            "reference zstd accepts sph::zstd sequence entropy blocks");
+
+        std::vector<std::uint8_t> decoded;
+        auto decompressor = sph::zstd::zstd_decompress{
+            [&decoded](std::span<std::uint8_t const> output)
+            {
+                decoded.insert(decoded.end(), output.begin(), output.end());
+            }};
+        decompressor.update(encoded);
+        decompressor.finish();
+        check(decoded == input, "sph::zstd decodes its own sequence entropy blocks");
+    }
+
+    void test_cpp_huffman_literal_compression()
+    {
+        std::vector<std::uint8_t> input{1, 2, 3, 4};
+        input.reserve(6000U);
+        std::uint32_t random{0x12345678U};
+        while (input.size() < 5000U)
+        {
+            random = random * 1664525U + 1013904223U;
+            input.push_back(static_cast<std::uint8_t>('a' + (random >> 29U)));
+        }
+        input.insert(input.end(), input.begin(), input.begin() + 1000);
+
+        auto const encoded{compress(input)};
+        check(encoded.size() < 4000U, "Huffman literals reduce a skewed direct-weight alphabet");
+        check(reference_decompress(encoded, input.size()) == input,
+            "reference zstd accepts sph::zstd Huffman literal output");
+
+        std::vector<std::uint8_t> decoded;
+        auto decompressor = sph::zstd::zstd_decompress{
+            [&decoded](std::span<std::uint8_t const> output)
+            {
+                decoded.insert(decoded.end(), output.begin(), output.end());
+            }};
+        decompressor.update(encoded);
+        decompressor.finish();
+        check(decoded == input, "sph::zstd decodes its own Huffman literal output");
+    }
+
+    void test_invalid_match_history()
+    {
+        // One sequence requests a three-byte match at offset four before any output exists.
+        std::array<std::uint8_t, 16> const encoded{
+            0x28, 0xB5, 0x2F, 0xFD, 0x00, 0x00, // frame and window header
+            0x3D, 0x00, 0x00,                   // final compressed block, seven-byte payload
+            0x00,                               // zero raw literals
+            0x01, 0x54, 0x00, 0x02, 0x00,       // one sequence; RLE LL/OF/ML codes
+            0x07                                // offset extra bits 11 and end marker
+        };
+        auto sink = [](std::span<std::uint8_t const>) {};
+        auto decompressor = sph::zstd::zstd_decompress{sink};
+        check_error([&decompressor, &encoded] { decompressor.update(encoded); },
+            sph::zstd::error_code::invalid_frame,
+            "match offsets outside the bounded history window are rejected");
+    }
+
     void test_concatenated_and_skippable_frames()
     {
         auto const first_input{make_input(49)};
@@ -274,6 +402,10 @@ int main()
         test_rle_blocks();
         test_reference_rle_golden_frame();
         test_reference_zero_sequence_golden_frames();
+        test_reference_entropy_frames();
+        test_cpp_match_compression();
+        test_cpp_huffman_literal_compression();
+        test_invalid_match_history();
         test_concatenated_and_skippable_frames();
         test_error_reporting();
         test_flush_and_reset();
