@@ -308,6 +308,11 @@ namespace
         {
             contents.replace(begin, end + report_end.size() - begin, report);
         }
+        while (!contents.empty() && (contents.back() == '\n' || contents.back() == '\r'))
+        {
+            contents.pop_back();
+        }
+        contents.push_back('\n');
         std::ofstream output{path, std::ios::trunc};
         if (!output) throw std::runtime_error{"cannot update README: " + path.string()};
         output << contents;
