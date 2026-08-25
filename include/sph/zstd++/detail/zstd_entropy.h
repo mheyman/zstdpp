@@ -192,7 +192,15 @@ namespace sph::zstd::detail
                 }
             }
             --count;
-            remaining -= count;
+            if (count >= 0)
+            {
+                remaining -= count;
+            }
+            else
+            {
+                // A -1 normalized count represents one low-probability state.
+                remaining += count;
+            }
             result.values[symbol++] = static_cast<std::int16_t>(count);
             previous_zero = count == 0;
 
