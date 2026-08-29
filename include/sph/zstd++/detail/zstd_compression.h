@@ -153,10 +153,22 @@ namespace sph::zstd::detail
 
     struct parsed_sequence
     {
-        std::size_t literal_position{};
-        std::size_t literal_length{};
-        std::size_t match_length{};
-        std::size_t offset{};
+        constexpr parsed_sequence() = default;
+
+        constexpr parsed_sequence(std::size_t literal_position_value,
+            std::size_t literal_length_value, std::size_t match_length_value,
+            std::size_t offset_value, std::uint8_t repeat_code_value) noexcept
+            : literal_position{static_cast<std::uint32_t>(literal_position_value)},
+              literal_length{static_cast<std::uint32_t>(literal_length_value)},
+              match_length{static_cast<std::uint32_t>(match_length_value)},
+              offset{static_cast<std::uint32_t>(offset_value)}, repeat_code{repeat_code_value}
+        {
+        }
+
+        std::uint32_t literal_position{};
+        std::uint32_t literal_length{};
+        std::uint32_t match_length{};
+        std::uint32_t offset{};
         std::uint8_t repeat_code{};
 
         constexpr auto operator==(parsed_sequence const&) const -> bool = default;
@@ -1313,45 +1325,59 @@ namespace sph::zstd::detail
         void reset() noexcept
         {
             bytes_.clear();
+            bit_container_ = 0U;
             bit_count_ = 0U;
         }
 
         void append(std::uint32_t value, unsigned count)
         {
-            while (count != 0U)
+            if (count == 0U)
             {
-                auto const bit_offset{static_cast<unsigned>(bit_count_ & 7U)};
-                if (bit_offset == 0U)
+                return;
+            }
+            auto const mask{count == 32U ? std::numeric_limits<std::uint32_t>::max() :
+                (std::uint32_t{1} << count) - 1U};
+            bit_container_ |= static_cast<std::uint64_t>(value & mask) << bit_count_;
+            bit_count_ += count;
+            if (bit_count_ >= 32U)
+            {
+                auto const previous_size{bytes_.size()};
+                bytes_.resize(previous_size + sizeof(std::uint32_t));
+                auto completed{static_cast<std::uint32_t>(bit_container_)};
+                if constexpr (std::endian::native == std::endian::big)
                 {
-                    bytes_.push_back(0U);
+                    completed = std::byteswap(completed);
                 }
-                auto const available{8U - bit_offset};
-                auto const consumed{std::min(count, available)};
-                auto const mask{(std::uint32_t{1} << consumed) - 1U};
-                bytes_.back() |= static_cast<std::uint8_t>((value & mask) << bit_offset);
-                value >>= consumed;
-                count -= consumed;
-                bit_count_ += consumed;
+                std::memcpy(bytes_.data() + previous_size, &completed, sizeof(completed));
+                bit_container_ >>= 32U;
+                bit_count_ -= 32U;
             }
         }
 
         [[nodiscard]] auto finish() const -> std::vector<std::uint8_t>
         {
-            auto output{bytes_};
-            finish_marker(output);
+            std::vector<std::uint8_t> output;
+            finish_into(output);
             return output;
         }
 
         void finish_into(std::vector<std::uint8_t>& output) const
         {
             output.assign(bytes_.begin(), bytes_.end());
+            auto remaining{bit_container_};
+            auto const byte_count{(bit_count_ + 7U) / 8U};
+            for (unsigned index{}; index < byte_count; ++index)
+            {
+                output.push_back(static_cast<std::uint8_t>(remaining));
+                remaining >>= 8U;
+            }
             finish_marker(output);
         }
 
     private:
         void finish_marker(std::vector<std::uint8_t>& output) const
         {
-            auto const bit_offset{static_cast<unsigned>(bit_count_ & 7U)};
+            auto const bit_offset{bit_count_ & 7U};
             if (bit_offset == 0U)
             {
                 output.push_back(1U);
@@ -1363,7 +1389,8 @@ namespace sph::zstd::detail
         }
 
         std::vector<std::uint8_t> bytes_;
-        std::size_t bit_count_{};
+        std::uint64_t bit_container_{};
+        unsigned bit_count_{};
     };
 
     struct fse_compression_transform
@@ -1691,10 +1718,10 @@ namespace sph::zstd::detail
         return result;
     }
 
-    [[nodiscard]] inline auto write_normalized_counts(normalized_counts const& counts)
-        -> std::vector<std::uint8_t>
+    inline void write_normalized_counts(
+        normalized_counts const& counts, std::vector<std::uint8_t>& output)
     {
-        std::vector<std::uint8_t> output;
+        output.clear();
         std::uint32_t bit_stream{counts.table_log - 5U};
         auto bit_count{4};
         auto remaining{static_cast<int>((1U << counts.table_log) + 1U)};
@@ -1756,20 +1783,29 @@ namespace sph::zstd::detail
         }
         output.push_back(static_cast<std::uint8_t>(bit_stream));
         if (bit_count > 8) output.push_back(static_cast<std::uint8_t>(bit_stream >> 8U));
+    }
+
+    [[nodiscard]] inline auto write_normalized_counts(normalized_counts const& counts)
+        -> std::vector<std::uint8_t>
+    {
+        std::vector<std::uint8_t> output;
+        write_normalized_counts(counts, output);
         return output;
     }
 
-    [[nodiscard]] inline auto compress_fse_bytes(std::span<std::uint8_t const> input,
-        fse_compression_table const& table) -> std::vector<std::uint8_t>
+    inline void compress_fse_bytes(std::span<std::uint8_t const> input,
+        fse_compression_table const& table, forward_bit_writer& bits,
+        std::vector<std::uint8_t>& output)
     {
+        output.clear();
         if (input.size() <= 2U)
         {
-            return {};
+            return;
         }
         auto position{input.size()};
         fse_compression_state state_one{table};
         fse_compression_state state_two{table};
-        forward_bit_writer bits;
+        bits.reset();
         if ((input.size() & 1U) != 0U)
         {
             state_one.initialize(input[--position]);
@@ -1799,7 +1835,16 @@ namespace sph::zstd::detail
         }
         state_two.flush(bits);
         state_one.flush(bits);
-        return bits.finish();
+        bits.finish_into(output);
+    }
+
+    [[nodiscard]] inline auto compress_fse_bytes(std::span<std::uint8_t const> input,
+        fse_compression_table const& table) -> std::vector<std::uint8_t>
+    {
+        forward_bit_writer bits;
+        std::vector<std::uint8_t> output;
+        compress_fse_bytes(input, table, bits, output);
+        return output;
     }
 
     template <std::size_t Count>
@@ -1818,6 +1863,58 @@ namespace sph::zstd::detail
             }
         }
         throw entropy_error{"value cannot be represented by a Zstandard sequence code"};
+    }
+
+    [[nodiscard]] inline auto literal_length_symbol(std::size_t length) -> std::uint8_t
+    {
+        static constexpr std::array<std::uint8_t, 64> codes{
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+            16, 16, 17, 17, 18, 18, 19, 19,
+            20, 20, 20, 20, 21, 21, 21, 21,
+            22, 22, 22, 22, 22, 22, 22, 22,
+            23, 23, 23, 23, 23, 23, 23, 23,
+            24, 24, 24, 24, 24, 24, 24, 24,
+            24, 24, 24, 24, 24, 24, 24, 24
+        };
+        if (length < codes.size())
+        {
+            return codes[length];
+        }
+        auto const code{static_cast<unsigned>(std::bit_width(length)) - 1U + 19U};
+        if (code >= literal_length_base.size())
+        {
+            throw entropy_error{"literal length cannot be represented by Zstandard"};
+        }
+        return static_cast<std::uint8_t>(code);
+    }
+
+    [[nodiscard]] inline auto match_length_symbol(std::size_t length) -> std::uint8_t
+    {
+        static constexpr std::array<std::uint8_t, 128> codes{
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+            16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+            32, 32, 33, 33, 34, 34, 35, 35, 36, 36, 36, 36, 37, 37, 37, 37,
+            38, 38, 38, 38, 38, 38, 38, 38, 39, 39, 39, 39, 39, 39, 39, 39,
+            40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40, 40,
+            41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41, 41,
+            42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42,
+            42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42
+        };
+        if (length < 3U)
+        {
+            throw entropy_error{"match length is below the Zstandard minimum"};
+        }
+        auto const base{length - 3U};
+        if (base < codes.size())
+        {
+            return codes[base];
+        }
+        auto const code{static_cast<unsigned>(std::bit_width(base)) - 1U + 36U};
+        if (code >= match_length_base.size())
+        {
+            throw entropy_error{"match length cannot be represented by Zstandard"};
+        }
+        return static_cast<std::uint8_t>(code);
     }
 
     [[nodiscard]] inline auto find_offset_symbol(std::size_t value) -> std::uint8_t
@@ -1875,20 +1972,9 @@ namespace sph::zstd::detail
         }
     }
 
-    struct encoded_sequence
-    {
-        std::uint32_t literal_length{};
-        std::uint32_t match_base{};
-        std::uint32_t offset_base_value{};
-        std::uint8_t literal_code{};
-        std::uint8_t match_code{};
-        std::uint8_t offset_code{};
-    };
-
     struct compression_workspace
     {
         std::vector<std::uint8_t> literals;
-        std::vector<encoded_sequence> sequences;
         std::vector<std::uint8_t> raw_literals;
         std::vector<std::uint8_t> literal_codes;
         std::vector<std::uint8_t> offset_codes;
@@ -1898,6 +1984,10 @@ namespace sph::zstd::detail
         std::vector<std::uint8_t> huffman_body;
         std::vector<std::uint8_t> compressed_weights;
         std::vector<std::uint8_t> huffman_output;
+        std::array<std::vector<std::uint8_t>, 3> table_descriptions;
+        forward_bit_writer weight_bits;
+        std::vector<std::uint8_t> weight_description;
+        std::vector<std::uint8_t> weight_bitstream;
         std::array<forward_bit_writer, 4> huffman_bits;
         std::array<std::vector<std::uint8_t>, 4> huffman_streams;
     };
@@ -1914,7 +2004,6 @@ namespace sph::zstd::detail
     {
         sequence_table_mode mode{};
         fse_compression_table table;
-        std::vector<std::uint8_t> description;
     };
 
     [[nodiscard]] inline auto make_default_normalized_counts(
@@ -1957,8 +2046,10 @@ namespace sph::zstd::detail
         std::span<std::int16_t const> default_counts,
         unsigned default_log,
         unsigned maximum_log,
-        bool predefined_allowed) -> selected_sequence_table
+        bool predefined_allowed,
+        std::vector<std::uint8_t>& description) -> selected_sequence_table
     {
+        description.clear();
         std::array<unsigned, 256> counts{};
         unsigned maximum_symbol{};
         for (auto const code : codes)
@@ -1973,9 +2064,10 @@ namespace sph::zstd::detail
             if (predefined_allowed && codes.size() <= 2U)
             {
                 return {sequence_table_mode::predefined,
-                    default_fse_compression_table(default_counts), {}};
+                    default_fse_compression_table(default_counts)};
             }
-            return {sequence_table_mode::run_length, make_run_length_fse_table(codes.front()), {codes.front()}};
+            description.push_back(codes.front());
+            return {sequence_table_mode::run_length, make_run_length_fse_table(codes.front())};
         }
 
         if (predefined_allowed)
@@ -1986,7 +2078,7 @@ namespace sph::zstd::detail
                 most_frequent < (codes.size() >> (default_log - 1U)))
             {
                 return {sequence_table_mode::predefined,
-                    default_fse_compression_table(default_counts), {}};
+                    default_fse_compression_table(default_counts)};
             }
         }
 
@@ -2000,8 +2092,8 @@ namespace sph::zstd::detail
         auto const table_log{optimal_fse_table_log(maximum_log, codes.size(), maximum_symbol)};
         auto const normalized{normalize_counts(adjusted_counts, adjusted_size, maximum_symbol,
             table_log, adjusted_size >= 2048U)};
-        return {sequence_table_mode::compressed, build_fse_compression_table(normalized),
-            write_normalized_counts(normalized)};
+        write_normalized_counts(normalized, description);
+        return {sequence_table_mode::compressed, build_fse_compression_table(normalized)};
     }
 
     [[nodiscard]] inline auto encode_huffman_literals(std::span<std::uint8_t const> literals,
@@ -2018,10 +2110,16 @@ namespace sph::zstd::detail
         }
 
         auto& literals{workspace.literals};
-        auto& sequences{workspace.sequences};
+        auto& literal_codes{workspace.literal_codes};
+        auto& offset_codes{workspace.offset_codes};
+        auto& match_codes{workspace.match_codes};
         literals.clear();
-        sequences.clear();
-        sequences.reserve(parsed.sequences.size());
+        literal_codes.clear();
+        offset_codes.clear();
+        match_codes.clear();
+        literal_codes.reserve(parsed.sequences.size());
+        offset_codes.reserve(parsed.sequences.size());
+        match_codes.reserve(parsed.sequences.size());
         for (auto const& sequence : parsed.sequences)
         {
             literals.insert(literals.end(),
@@ -2036,13 +2134,9 @@ namespace sph::zstd::detail
                 output.clear();
                 return;
             }
-            sequences.push_back(encoded_sequence{
-                static_cast<std::uint32_t>(sequence.literal_length),
-                static_cast<std::uint32_t>(sequence.match_length - 3U),
-                offset_base_value,
-                find_length_symbol(sequence.literal_length, literal_length_base, literal_length_bits),
-                find_length_symbol(sequence.match_length, match_length_base, match_length_bits),
-                static_cast<std::uint8_t>(offset_code)});
+            literal_codes.push_back(literal_length_symbol(sequence.literal_length));
+            offset_codes.push_back(static_cast<std::uint8_t>(offset_code));
+            match_codes.push_back(match_length_symbol(sequence.match_length));
         }
         literals.insert(literals.end(),
             input.begin() + static_cast<std::ptrdiff_t>(parsed.trailing_literal_position),
@@ -2057,65 +2151,63 @@ namespace sph::zstd::detail
         if (encode_huffman_literals(literals, workspace, huffman_literals) &&
             huffman_literals.size() < raw_literals.size())
         {
-            output.assign(huffman_literals.begin(), huffman_literals.end());
+            output.swap(huffman_literals);
         }
         else
         {
-            output = std::move(raw_literals);
-        }
-        auto& literal_codes{workspace.literal_codes};
-        auto& offset_codes{workspace.offset_codes};
-        auto& match_codes{workspace.match_codes};
-        literal_codes.clear();
-        offset_codes.clear();
-        match_codes.clear();
-        literal_codes.reserve(sequences.size());
-        offset_codes.reserve(sequences.size());
-        match_codes.reserve(sequences.size());
-        for (auto const& sequence : sequences)
-        {
-            literal_codes.push_back(sequence.literal_code);
-            offset_codes.push_back(sequence.offset_code);
-            match_codes.push_back(sequence.match_code);
+            output.swap(raw_literals);
         }
         auto const literal_table{select_sequence_table(literal_codes,
-            literal_length_default_norm, 6U, 9U, true)};
+            literal_length_default_norm, 6U, 9U, true, workspace.table_descriptions[0])};
         auto const offset_table{select_sequence_table(offset_codes,
-            offset_default_norm, 5U, 8U, *std::max_element(offset_codes.begin(), offset_codes.end()) <= 28U)};
+            offset_default_norm, 5U, 8U, *std::max_element(offset_codes.begin(), offset_codes.end()) <= 28U,
+            workspace.table_descriptions[1])};
         auto const match_table{select_sequence_table(match_codes,
-            match_length_default_norm, 6U, 9U, true)};
+            match_length_default_norm, 6U, 9U, true, workspace.table_descriptions[2])};
 
-        append_sequence_count(output, sequences.size());
+        append_sequence_count(output, parsed.sequences.size());
         output.push_back(static_cast<std::uint8_t>(
             (static_cast<unsigned>(literal_table.mode) << 6U) |
             (static_cast<unsigned>(offset_table.mode) << 4U) |
             (static_cast<unsigned>(match_table.mode) << 2U)));
-        output.insert(output.end(), literal_table.description.begin(), literal_table.description.end());
-        output.insert(output.end(), offset_table.description.begin(), offset_table.description.end());
-        output.insert(output.end(), match_table.description.begin(), match_table.description.end());
+        for (auto const& description : workspace.table_descriptions)
+        {
+            output.insert(output.end(), description.begin(), description.end());
+        }
 
         fse_compression_state literal_state{literal_table.table};
         fse_compression_state offset_state{offset_table.table};
         fse_compression_state match_state{match_table.table};
-        auto const& last{sequences.back()};
-        literal_state.initialize(last.literal_code);
-        offset_state.initialize(last.offset_code);
-        match_state.initialize(last.match_code);
+        auto const last_index{parsed.sequences.size() - 1U};
+        auto const& last{parsed.sequences[last_index]};
+        auto const last_literal_code{literal_codes[last_index]};
+        auto const last_offset_code{offset_codes[last_index]};
+        auto const last_match_code{match_codes[last_index]};
+        auto const last_offset_base{last.repeat_code != 0U ?
+            static_cast<std::uint32_t>(last.repeat_code) : last.offset + 3U};
+        literal_state.initialize(last_literal_code);
+        offset_state.initialize(last_offset_code);
+        match_state.initialize(last_match_code);
 
         auto& bits{workspace.sequence_bits};
         bits.reset();
-        bits.append(last.literal_length, literal_length_bits[last.literal_code]);
-        bits.append(last.match_base, match_length_bits[last.match_code]);
-        bits.append(last.offset_base_value, last.offset_code);
-        for (std::size_t index{sequences.size() - 1U}; index-- > 0U;)
+        bits.append(last.literal_length, literal_length_bits[last_literal_code]);
+        bits.append(last.match_length - 3U, match_length_bits[last_match_code]);
+        bits.append(last_offset_base, last_offset_code);
+        for (std::size_t index{last_index}; index-- > 0U;)
         {
-            auto const& sequence{sequences[index]};
-            offset_state.encode(bits, sequence.offset_code);
-            match_state.encode(bits, sequence.match_code);
-            literal_state.encode(bits, sequence.literal_code);
-            bits.append(sequence.literal_length, literal_length_bits[sequence.literal_code]);
-            bits.append(sequence.match_base, match_length_bits[sequence.match_code]);
-            bits.append(sequence.offset_base_value, sequence.offset_code);
+            auto const& sequence{parsed.sequences[index]};
+            auto const literal_code{literal_codes[index]};
+            auto const offset_code{offset_codes[index]};
+            auto const match_code{match_codes[index]};
+            auto const encoded_offset{sequence.repeat_code != 0U ?
+                static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
+            offset_state.encode(bits, offset_code);
+            match_state.encode(bits, match_code);
+            literal_state.encode(bits, literal_code);
+            bits.append(sequence.literal_length, literal_length_bits[literal_code]);
+            bits.append(sequence.match_length - 3U, match_length_bits[match_code]);
+            bits.append(encoded_offset, offset_code);
         }
         match_state.flush(bits);
         offset_state.flush(bits);
@@ -2506,13 +2598,15 @@ namespace sph::zstd::detail
             auto const weight_table_log{optimal_fse_table_log(6U, explicit_weights, maximum_weight)};
             auto const normalized{normalize_counts(weight_counts, explicit_weights, maximum_weight,
                 weight_table_log, false)};
-            auto description{write_normalized_counts(normalized)};
-            auto stream{compress_fse_bytes(
+            auto& description{workspace.weight_description};
+            auto& stream{workspace.weight_bitstream};
+            write_normalized_counts(normalized, description);
+            compress_fse_bytes(
                 std::span<std::uint8_t const>{weights}.first(explicit_weights),
-                build_fse_compression_table(normalized))};
+                build_fse_compression_table(normalized), workspace.weight_bits, stream);
             if (!stream.empty())
             {
-                compressed_weights = std::move(description);
+                compressed_weights.assign(description.begin(), description.end());
                 compressed_weights.insert(compressed_weights.end(), stream.begin(), stream.end());
             }
         }
@@ -2627,10 +2721,8 @@ namespace sph::zstd::detail
         }
         auto const trailing_size{input.size() - selected.position - selected.length};
         auto const literal_size{selected.position + trailing_size};
-        auto const literal_symbol{find_length_symbol(selected.position,
-            literal_length_base, literal_length_bits)};
-        auto const match_symbol{find_length_symbol(selected.length,
-            match_length_base, match_length_bits)};
+        auto const literal_symbol{literal_length_symbol(selected.position)};
+        auto const match_symbol{match_length_symbol(selected.length)};
         auto const selected_offset_symbol{find_offset_symbol(selected.offset)};
 
         std::vector<std::uint8_t> literals;
