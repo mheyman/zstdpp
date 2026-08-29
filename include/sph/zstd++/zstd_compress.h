@@ -43,10 +43,20 @@ namespace sph::zstd
                     effective_parameters_.strategy == compression_strategy::greedy ||
                     effective_parameters_.strategy == compression_strategy::lazy2,
                     std::conditional_t<effective_parameters_.strategy == compression_strategy::greedy,
-                        detail::greedy_match_state<>, detail::greedy_match_state<2U>>,
+                        detail::greedy_match_state<0U, false,
+                            effective_parameters_.window_log, effective_parameters_.hash_log,
+                            effective_parameters_.chain_log, effective_parameters_.search_log,
+                            effective_parameters_.minimum_match>,
+                        detail::greedy_match_state<2U, false,
+                            effective_parameters_.window_log, effective_parameters_.hash_log,
+                            effective_parameters_.chain_log, effective_parameters_.search_log,
+                            effective_parameters_.minimum_match>>,
                     std::conditional_t<
                         effective_parameters_.strategy == compression_strategy::binary_tree_lazy2,
-                        detail::greedy_match_state<2U, true>, detail::empty_match_state>>>>;
+                        detail::greedy_match_state<2U, true,
+                            effective_parameters_.window_log, effective_parameters_.hash_log,
+                            effective_parameters_.chain_log, effective_parameters_.search_log,
+                            effective_parameters_.minimum_match>, detail::empty_match_state>>>>;
 
         static_assert(Parameters.block_size > 0 && Parameters.block_size <= maximum_block_size,
             "zstd_compress block_size must be in [1, 128 KiB]");
@@ -371,16 +381,17 @@ namespace sph::zstd
                 [first = bytes.front()](std::uint8_t byte) { return byte == first; })};
             auto const block_begin{history_.size()};
             history_.insert(history_.end(), bytes.begin(), bytes.end());
-            std::vector<std::uint8_t> compressed;
+            compressed_.clear();
+            auto& compressed{compressed_};
             if constexpr (effective_parameters_.strategy == compression_strategy::fast)
             {
                 parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
                 if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
-                    if (candidate.size() < bytes.size())
+                    detail::encode_sequences_block(history_, parsed_, compression_workspace_, compressed);
+                    if (compressed.size() >= bytes.size())
                     {
-                        compressed = std::move(candidate);
+                        compressed.clear();
                     }
                 }
             }
@@ -389,10 +400,10 @@ namespace sph::zstd
                 parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
                 if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
-                    if (candidate.size() < bytes.size())
+                    detail::encode_sequences_block(history_, parsed_, compression_workspace_, compressed);
+                    if (compressed.size() >= bytes.size())
                     {
-                        compressed = std::move(candidate);
+                        compressed.clear();
                     }
                 }
             }
@@ -401,10 +412,10 @@ namespace sph::zstd
                 parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
                 if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
-                    if (candidate.size() < bytes.size())
+                    detail::encode_sequences_block(history_, parsed_, compression_workspace_, compressed);
+                    if (compressed.size() >= bytes.size())
                     {
-                        compressed = std::move(candidate);
+                        compressed.clear();
                     }
                 }
             }
@@ -413,10 +424,10 @@ namespace sph::zstd
                 parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
                 if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
-                    if (candidate.size() < bytes.size())
+                    detail::encode_sequences_block(history_, parsed_, compression_workspace_, compressed);
+                    if (compressed.size() >= bytes.size())
                     {
-                        compressed = std::move(candidate);
+                        compressed.clear();
                     }
                 }
             }
@@ -425,10 +436,10 @@ namespace sph::zstd
                 parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
                 if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
-                    if (candidate.size() < bytes.size())
+                    detail::encode_sequences_block(history_, parsed_, compression_workspace_, compressed);
+                    if (compressed.size() >= bytes.size())
                     {
-                        compressed = std::move(candidate);
+                        compressed.clear();
                     }
                 }
             }
@@ -616,6 +627,8 @@ namespace sph::zstd
         std::int64_t compression_savings_{};
         std::vector<std::uint8_t> history_;
         detail::parsed_block parsed_;
+        detail::compression_workspace compression_workspace_;
+        std::vector<std::uint8_t> compressed_;
         match_state_type match_state_{make_match_state()};
     };
 
