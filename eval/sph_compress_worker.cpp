@@ -26,20 +26,6 @@ namespace
         value.pledged_source_size = SPH_EVAL_CORPUS_SIZE;
         return value;
     }();
-
-    auto compress(std::span<std::uint8_t const> input) -> std::vector<std::uint8_t>
-    {
-        std::vector<std::uint8_t> output;
-        output.reserve(input.size() + input.size() / 128U + 64U);
-        auto compressor = sph::zstd::make_zstd_compress<parameters>(
-            [&output](std::span<std::uint8_t const> bytes)
-            {
-                output.insert(output.end(), bytes.begin(), bytes.end());
-            });
-        compressor.update(input);
-        compressor.finish();
-        return output;
-    }
 }
 
 int main(int argc, char** argv)
@@ -56,11 +42,25 @@ int main(int argc, char** argv)
             throw std::invalid_argument{"input size does not match compile-time corpus size"};
         }
         auto const iterations{sph::zstd::eval::parse_iterations(argv[3])};
-        auto output{compress(input)}; // Warm caches and instantiate all lazy state before timing.
+        std::vector<std::uint8_t> output;
+        output.reserve(input.size() + input.size() / 128U + 64U);
+        auto compressor = sph::zstd::make_zstd_compress<parameters>(
+            [&output](std::span<std::uint8_t const> bytes)
+            {
+                output.insert(output.end(), bytes.begin(), bytes.end());
+            });
+        auto const compress = [&]
+        {
+            output.clear();
+            compressor.reset();
+            compressor.update(input);
+            compressor.finish();
+        };
+        compress(); // Warm caches and allocate reusable stream storage before timing.
         auto const start{sph::zstd::eval::clock::now()};
         for (std::uint64_t iteration{}; iteration < iterations; ++iteration)
         {
-            output = compress(input);
+            compress();
         }
         auto const end{sph::zstd::eval::clock::now()};
         sph::zstd::eval::write_binary(argv[2], output);
