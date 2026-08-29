@@ -33,6 +33,21 @@ namespace sph::zstd
     {
         static constexpr auto effective_parameters_{detail::resolve_parameters(Parameters)};
 
+        using match_state_type = std::conditional_t<
+            effective_parameters_.strategy == compression_strategy::fast,
+            detail::fast_match_state,
+            std::conditional_t<
+                effective_parameters_.strategy == compression_strategy::double_fast,
+                detail::double_fast_match_state,
+                std::conditional_t<
+                    effective_parameters_.strategy == compression_strategy::greedy ||
+                    effective_parameters_.strategy == compression_strategy::lazy2,
+                    std::conditional_t<effective_parameters_.strategy == compression_strategy::greedy,
+                        detail::greedy_match_state<>, detail::greedy_match_state<2U>>,
+                    std::conditional_t<
+                        effective_parameters_.strategy == compression_strategy::binary_tree_lazy2,
+                        detail::greedy_match_state<2U, true>, detail::empty_match_state>>>>;
+
         static_assert(Parameters.block_size > 0 && Parameters.block_size <= maximum_block_size,
             "zstd_compress block_size must be in [1, 128 KiB]");
         static_assert(effective_parameters_.window_log >= 10 && effective_parameters_.window_log <= 31,
@@ -41,7 +56,19 @@ namespace sph::zstd
             "the header-only zstd compressor does not yet implement multi-threaded frames");
 
     public:
-        explicit zstd_compress(Callback callback) : callback_{std::move(callback)} {}
+        explicit zstd_compress(Callback callback) : callback_{std::move(callback)}
+        {
+            parsed_.sequences.reserve(Parameters.block_size / 4U + 1U);
+            if constexpr (Parameters.pledged_source_size != unknown_content_size &&
+                Parameters.pledged_source_size <= std::numeric_limits<std::size_t>::max())
+            {
+                history_.reserve(static_cast<std::size_t>(Parameters.pledged_source_size));
+            }
+            else
+            {
+                history_.reserve(std::size_t{1} << effective_parameters_.window_log);
+            }
+        }
 
         zstd_compress(zstd_compress const&) = delete;
         auto operator=(zstd_compress const&) -> zstd_compress& = delete;
@@ -52,7 +79,10 @@ namespace sph::zstd
         {
             require_writable();
             begin_frame();
-            checksum_.update(input);
+            if constexpr (Parameters.checksum)
+            {
+                checksum_.update(input);
+            }
             source_size_ += input.size();
 
             if (buffered_size_ == Parameters.block_size && !input.empty())
@@ -140,11 +170,7 @@ namespace sph::zstd
             block_count_ = 0;
             compression_savings_ = 0;
             history_.clear();
-            fast_match_state_.reset();
-            double_fast_match_state_.reset();
-            greedy_match_state_.reset();
-            lazy2_match_state_.reset();
-            binary_tree_lazy2_match_state_.reset();
+            match_state_.reset();
             checksum_.reset();
             status_ = stream_status::ready;
         }
@@ -159,6 +185,44 @@ namespace sph::zstd
         }
 
     private:
+        [[nodiscard]] static auto make_match_state() -> match_state_type
+        {
+            if constexpr (effective_parameters_.strategy == compression_strategy::fast)
+            {
+                return match_state_type{effective_parameters_.window_log,
+                    effective_parameters_.hash_log, effective_parameters_.minimum_match,
+                    effective_parameters_.target_length};
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::double_fast)
+            {
+                return match_state_type{effective_parameters_.window_log,
+                    effective_parameters_.hash_log, effective_parameters_.chain_log,
+                    effective_parameters_.minimum_match};
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::greedy)
+            {
+                return match_state_type{effective_parameters_.window_log,
+                    effective_parameters_.hash_log, effective_parameters_.chain_log,
+                    effective_parameters_.search_log, effective_parameters_.minimum_match};
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::lazy2)
+            {
+                return match_state_type{effective_parameters_.window_log,
+                    effective_parameters_.hash_log, effective_parameters_.chain_log,
+                    effective_parameters_.search_log, effective_parameters_.minimum_match};
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::binary_tree_lazy2)
+            {
+                return match_state_type{effective_parameters_.window_log,
+                    effective_parameters_.hash_log, effective_parameters_.chain_log,
+                    effective_parameters_.search_log, effective_parameters_.minimum_match};
+            }
+            else
+            {
+                return match_state_type{};
+            }
+        }
+
         void require_writable()
         {
             if (status_ == stream_status::failed)
@@ -310,10 +374,10 @@ namespace sph::zstd
             std::vector<std::uint8_t> compressed;
             if constexpr (effective_parameters_.strategy == compression_strategy::fast)
             {
-                auto const parsed{fast_match_state_.parse(history_, block_begin, bytes.size())};
-                if (!parsed.sequences.empty())
+                parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
+                if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
                     if (candidate.size() < bytes.size())
                     {
                         compressed = std::move(candidate);
@@ -322,10 +386,10 @@ namespace sph::zstd
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::double_fast)
             {
-                auto const parsed{double_fast_match_state_.parse(history_, block_begin, bytes.size())};
-                if (!parsed.sequences.empty())
+                parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
+                if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
                     if (candidate.size() < bytes.size())
                     {
                         compressed = std::move(candidate);
@@ -334,10 +398,10 @@ namespace sph::zstd
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::greedy)
             {
-                auto const parsed{greedy_match_state_.parse(history_, block_begin, bytes.size())};
-                if (!parsed.sequences.empty())
+                parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
+                if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
                     if (candidate.size() < bytes.size())
                     {
                         compressed = std::move(candidate);
@@ -346,10 +410,10 @@ namespace sph::zstd
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::lazy2)
             {
-                auto const parsed{lazy2_match_state_.parse(history_, block_begin, bytes.size())};
-                if (!parsed.sequences.empty())
+                parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
+                if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
                     if (candidate.size() < bytes.size())
                     {
                         compressed = std::move(candidate);
@@ -358,37 +422,38 @@ namespace sph::zstd
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::binary_tree_lazy2)
             {
-                auto const parsed{
-                    binary_tree_lazy2_match_state_.parse(history_, block_begin, bytes.size())};
-                if (!parsed.sequences.empty())
+                parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
+                if (!parsed_.sequences.empty())
                 {
-                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    auto candidate{detail::encode_sequences_block(history_, parsed_)};
                     if (candidate.size() < bytes.size())
                     {
                         compressed = std::move(candidate);
                     }
                 }
             }
-            if (compressed.empty() && !input_is_rle)
-            {
-                auto const selected{detail::find_best_fast_match(bytes, effective_parameters_.hash_log,
-                    effective_parameters_.minimum_match)};
-                if (selected)
-                {
-                    auto candidate{detail::encode_single_match_block(bytes, *selected)};
-                    if (candidate.size() < bytes.size())
-                    {
-                        compressed = std::move(candidate);
-                    }
-                }
-            }
-
             constexpr bool has_reference_parser =
                 effective_parameters_.strategy == compression_strategy::fast ||
                 effective_parameters_.strategy == compression_strategy::double_fast ||
                 effective_parameters_.strategy == compression_strategy::greedy ||
                 effective_parameters_.strategy == compression_strategy::lazy2 ||
                 effective_parameters_.strategy == compression_strategy::binary_tree_lazy2;
+            if constexpr (!has_reference_parser)
+            {
+                if (compressed.empty() && !input_is_rle)
+                {
+                    auto const selected{detail::find_best_fast_match(bytes, effective_parameters_.hash_log,
+                        effective_parameters_.minimum_match)};
+                    if (selected)
+                    {
+                        auto candidate{detail::encode_single_match_block(bytes, *selected)};
+                        if (candidate.size() < bytes.size())
+                        {
+                            compressed = std::move(candidate);
+                        }
+                    }
+                }
+            }
             auto const is_rle = input_is_rle && (!has_reference_parser ||
                 (block_count_ != 0U && !compressed.empty() && compressed.size() < 25U));
 
@@ -550,21 +615,8 @@ namespace sph::zstd
         std::size_t block_count_{};
         std::int64_t compression_savings_{};
         std::vector<std::uint8_t> history_;
-        detail::fast_match_state fast_match_state_{effective_parameters_.window_log,
-            effective_parameters_.hash_log, effective_parameters_.minimum_match,
-            effective_parameters_.target_length};
-        detail::double_fast_match_state double_fast_match_state_{effective_parameters_.window_log,
-            effective_parameters_.hash_log, effective_parameters_.chain_log,
-            effective_parameters_.minimum_match};
-        detail::greedy_match_state greedy_match_state_{effective_parameters_.window_log,
-            effective_parameters_.hash_log, effective_parameters_.chain_log,
-            effective_parameters_.search_log, effective_parameters_.minimum_match};
-        detail::greedy_match_state lazy2_match_state_{effective_parameters_.window_log,
-            effective_parameters_.hash_log, effective_parameters_.chain_log,
-            effective_parameters_.search_log, effective_parameters_.minimum_match, 2U};
-        detail::greedy_match_state binary_tree_lazy2_match_state_{effective_parameters_.window_log,
-            effective_parameters_.hash_log, effective_parameters_.chain_log,
-            effective_parameters_.search_log, effective_parameters_.minimum_match, 2U, true};
+        detail::parsed_block parsed_;
+        match_state_type match_state_{make_match_state()};
     };
 
     template <typename Callback>

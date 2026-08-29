@@ -5,6 +5,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <span>
@@ -14,6 +15,58 @@
 
 namespace sph::zstd::detail
 {
+    [[nodiscard]] inline auto load_native_u32(std::span<std::uint8_t const> input,
+        std::size_t position) noexcept -> std::uint32_t
+    {
+        std::uint32_t value{};
+        std::memcpy(&value, input.data() + position, sizeof(value));
+        return value;
+    }
+
+    [[nodiscard]] inline auto load_native_u64(std::span<std::uint8_t const> input,
+        std::size_t position) noexcept -> std::uint64_t
+    {
+        std::uint64_t value{};
+        std::memcpy(&value, input.data() + position, sizeof(value));
+        return value;
+    }
+
+    [[nodiscard]] inline auto load_little_u64(std::span<std::uint8_t const> input,
+        std::size_t position) noexcept -> std::uint64_t
+    {
+        auto const value{load_native_u64(input, position)};
+        if constexpr (std::endian::native == std::endian::big)
+        {
+            return std::byteswap(value);
+        }
+        return value;
+    }
+
+    [[nodiscard]] inline auto equal_four_bytes(std::span<std::uint8_t const> input,
+        std::size_t left, std::size_t right) noexcept -> bool
+    {
+        return load_native_u32(input, left) == load_native_u32(input, right);
+    }
+
+    [[nodiscard]] inline auto count_matching_bytes(std::span<std::uint8_t const> input,
+        std::size_t position, std::size_t match_position, std::size_t end,
+        std::size_t initial) noexcept -> std::size_t
+    {
+        auto length{initial};
+        while (position + length + sizeof(std::uint64_t) <= end &&
+            load_native_u64(input, position + length) ==
+                load_native_u64(input, match_position + length))
+        {
+            length += sizeof(std::uint64_t);
+        }
+        while (position + length < end &&
+            input[position + length] == input[match_position + length])
+        {
+            ++length;
+        }
+        return length;
+    }
+
     struct match
     {
         std::size_t position{};
@@ -39,6 +92,11 @@ namespace sph::zstd::detail
         std::size_t trailing_literal_length{};
     };
 
+    struct empty_match_state
+    {
+        constexpr void reset() const noexcept {}
+    };
+
     /**
      * Persistent no-dictionary match state for the reference `fast` parser.
      * Positions are stored with Zstandard's two-index bias so zero remains the
@@ -61,9 +119,10 @@ namespace sph::zstd::detail
         }
 
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
-            std::size_t block_begin, std::size_t block_size) -> parsed_block
+            std::size_t block_begin, std::size_t block_size,
+            parsed_block result = {}) -> parsed_block
         {
-            parsed_block result;
+            result.sequences.clear();
             result.trailing_literal_position = block_begin;
             result.trailing_literal_length = block_size;
             if (block_size < hash_read_size || block_begin > input.size() ||
@@ -196,11 +255,8 @@ namespace sph::zstd::detail
                         ++match_length;
                     }
                 }
-                while (position + match_length < block_end &&
-                    input[position + match_length] == input[match_position + match_length])
-                {
-                    ++match_length;
-                }
+                match_length = count_matching_bytes(
+                    input, position, match_position, block_end, match_length);
 
                 result.sequences.push_back(parsed_sequence{
                     anchor, position - anchor, match_length, offset, repeat_code});
@@ -218,12 +274,8 @@ namespace sph::zstd::detail
                     {
                         while (position <= limit && equal_four(input, position, position - repeat_two))
                         {
-                            auto repeat_length{4U};
-                            while (position + repeat_length < block_end &&
-                                input[position + repeat_length] == input[position + repeat_length - repeat_two])
-                            {
-                                ++repeat_length;
-                            }
+                            auto const repeat_length{count_matching_bytes(
+                                input, position, position - repeat_two, block_end, 4U)};
                             std::swap(repeat_one, repeat_two);
                             hash_table_[hash(input, position)] =
                                 static_cast<std::uint32_t>(position + index_bias);
@@ -252,11 +304,7 @@ namespace sph::zstd::detail
         [[nodiscard]] auto hash(std::span<std::uint8_t const> input, std::size_t position) const
             -> std::size_t
         {
-            std::uint64_t value{};
-            for (std::size_t index{}; index < 8U; ++index)
-            {
-                value |= static_cast<std::uint64_t>(input[position + index]) << (index * 8U);
-            }
+            auto const value{load_little_u64(input, position)};
             switch (minimum_match_)
             {
             case 5U:
@@ -274,7 +322,7 @@ namespace sph::zstd::detail
         [[nodiscard]] static auto equal_four(std::span<std::uint8_t const> input,
             std::size_t left, std::size_t right) -> bool
         {
-            return std::ranges::equal(input.subspan(left, 4U), input.subspan(right, 4U));
+            return equal_four_bytes(input, left, right);
         }
 
         [[nodiscard]] static auto matches(std::span<std::uint8_t const> input,
@@ -315,9 +363,10 @@ namespace sph::zstd::detail
         }
 
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
-            std::size_t block_begin, std::size_t block_size) -> parsed_block
+            std::size_t block_begin, std::size_t block_size,
+            parsed_block result = {}) -> parsed_block
         {
-            parsed_block result;
+            result.sequences.clear();
             result.trailing_literal_position = block_begin;
             result.trailing_literal_length = block_size;
             if (block_size < hash_read_size || block_begin > input.size() ||
@@ -493,12 +542,7 @@ namespace sph::zstd::detail
         [[nodiscard]] static auto read_word(std::span<std::uint8_t const> input,
             std::size_t position) -> std::uint64_t
         {
-            std::uint64_t value{};
-            for (std::size_t index{}; index < 8U; ++index)
-            {
-                value |= static_cast<std::uint64_t>(input[position + index]) << (index * 8U);
-            }
-            return value;
+            return load_little_u64(input, position);
         }
 
         [[nodiscard]] auto long_hash(std::span<std::uint8_t const> input,
@@ -543,7 +587,7 @@ namespace sph::zstd::detail
         [[nodiscard]] static auto equal_four(std::span<std::uint8_t const> input,
             std::size_t left, std::size_t right) -> bool
         {
-            return std::ranges::equal(input.subspan(left, 4U), input.subspan(right, 4U));
+            return equal_four_bytes(input, left, right);
         }
 
         [[nodiscard]] static auto equal_eight(std::span<std::uint8_t const> input,
@@ -556,12 +600,7 @@ namespace sph::zstd::detail
             std::size_t position, std::size_t match_position, std::size_t end,
             std::size_t initial) -> std::size_t
         {
-            auto length{initial};
-            while (position + length < end && input[position + length] == input[match_position + length])
-            {
-                ++length;
-            }
-            return length;
+            return count_matching_bytes(input, position, match_position, end, initial);
         }
 
         static void catch_up(std::span<std::uint8_t const> input,
@@ -587,15 +626,14 @@ namespace sph::zstd::detail
     };
 
     /** Persistent match state for reference zstd's greedy and lazy parsers. */
+    template <unsigned LazyDepth = 0U, bool BinaryTree = false>
     class greedy_match_state
     {
     public:
         greedy_match_state(unsigned window_log, unsigned hash_log, unsigned chain_log,
-            unsigned search_log, unsigned minimum_match, unsigned lazy_depth = 0U,
-            bool binary_tree = false)
+            unsigned search_log, unsigned minimum_match)
             : window_log_{window_log}, hash_log_{hash_log}, chain_log_{chain_log},
               search_log_{search_log}, minimum_match_{std::clamp(minimum_match, 4U, 6U)},
-              lazy_depth_{lazy_depth}, binary_tree_{binary_tree},
               hash_table_(std::size_t{1} << hash_log), chain_table_(std::size_t{1} << chain_log)
         {
         }
@@ -609,9 +647,10 @@ namespace sph::zstd::detail
         }
 
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
-            std::size_t block_begin, std::size_t block_size) -> parsed_block
+            std::size_t block_begin, std::size_t block_size,
+            parsed_block result = {}) -> parsed_block
         {
-            parsed_block result;
+            result.sequences.clear();
             result.trailing_literal_position = block_begin;
             result.trailing_literal_length = block_size;
             if (block_size < hash_read_size || block_begin > input.size() ||
@@ -651,7 +690,7 @@ namespace sph::zstd::detail
                     repeat_code = 1U;
                     baseline_repeat = true;
                 }
-                if (!baseline_repeat || lazy_depth_ != 0U)
+                if (!baseline_repeat || LazyDepth != 0U)
                 {
                     auto const found{find_best_match(input, position, block_end)};
                     if (found.length > match_length)
@@ -670,7 +709,7 @@ namespace sph::zstd::detail
                     continue;
                 }
 
-                if (lazy_depth_ >= 1U)
+                if constexpr (LazyDepth >= 1U)
                 {
                     while (position < limit)
                     {
@@ -707,39 +746,42 @@ namespace sph::zstd::detail
                             continue;
                         }
 
-                        if (lazy_depth_ == 2U && position < limit)
+                        if constexpr (LazyDepth == 2U)
                         {
-                            ++position;
-                            if (repeat_one != 0U && equal_four(input, position, position - repeat_one))
+                            if (position < limit)
                             {
-                                auto const repeat_length{count_match(
-                                    input, position, position - repeat_one, block_end, 4U)};
-                                auto const repeat_gain{static_cast<std::int64_t>(repeat_length * 4U)};
-                                auto const current_repeat_gain{static_cast<std::int64_t>(match_length * 4U) -
-                                    static_cast<std::int64_t>(high_bit(encoded_offset_base)) + 1};
-                                if (repeat_gain > current_repeat_gain)
+                                ++position;
+                                if (repeat_one != 0U && equal_four(input, position, position - repeat_one))
                                 {
-                                    match_length = repeat_length;
-                                    offset = repeat_one;
-                                    encoded_offset_base = 1U;
-                                    repeat_code = 1U;
-                                    match_start = position;
+                                    auto const repeat_length{count_match(
+                                        input, position, position - repeat_one, block_end, 4U)};
+                                    auto const repeat_gain{static_cast<std::int64_t>(repeat_length * 4U)};
+                                    auto const current_repeat_gain{static_cast<std::int64_t>(match_length * 4U) -
+                                        static_cast<std::int64_t>(high_bit(encoded_offset_base)) + 1};
+                                    if (repeat_gain > current_repeat_gain)
+                                    {
+                                        match_length = repeat_length;
+                                        offset = repeat_one;
+                                        encoded_offset_base = 1U;
+                                        repeat_code = 1U;
+                                        match_start = position;
+                                    }
                                 }
-                            }
-                            candidate = find_best_match(input, position, block_end);
-                            candidate_base = candidate.offset + 3U;
-                            auto const second_candidate_gain{static_cast<std::int64_t>(candidate.length * 4U) -
-                                static_cast<std::int64_t>(high_bit(candidate_base))};
-                            auto const second_current_gain{static_cast<std::int64_t>(match_length * 4U) -
-                                static_cast<std::int64_t>(high_bit(encoded_offset_base)) + 7};
-                            if (candidate.length >= 4U && second_candidate_gain > second_current_gain)
-                            {
-                                match_length = candidate.length;
-                                offset = candidate.offset;
-                                encoded_offset_base = candidate_base;
-                                repeat_code = 0U;
-                                match_start = position;
-                                continue;
+                                candidate = find_best_match(input, position, block_end);
+                                candidate_base = candidate.offset + 3U;
+                                auto const second_candidate_gain{static_cast<std::int64_t>(candidate.length * 4U) -
+                                    static_cast<std::int64_t>(high_bit(candidate_base))};
+                                auto const second_current_gain{static_cast<std::int64_t>(match_length * 4U) -
+                                    static_cast<std::int64_t>(high_bit(encoded_offset_base)) + 7};
+                                if (candidate.length >= 4U && second_candidate_gain > second_current_gain)
+                                {
+                                    match_length = candidate.length;
+                                    offset = candidate.offset;
+                                    encoded_offset_base = candidate_base;
+                                    repeat_code = 0U;
+                                    match_start = position;
+                                    continue;
+                                }
                             }
                         }
                         break;
@@ -804,8 +846,14 @@ namespace sph::zstd::detail
         [[nodiscard]] auto find_best_match(std::span<std::uint8_t const> input,
             std::size_t position, std::size_t block_end) -> match_result
         {
-            return binary_tree_ ? find_best_binary_tree_match(input, position, block_end) :
-                find_best_hash_chain_match(input, position, block_end);
+            if constexpr (BinaryTree)
+            {
+                return find_best_binary_tree_match(input, position, block_end);
+            }
+            else
+            {
+                return find_best_hash_chain_match(input, position, block_end);
+            }
         }
 
         [[nodiscard]] auto find_best_hash_chain_match(std::span<std::uint8_t const> input,
@@ -1053,12 +1101,7 @@ namespace sph::zstd::detail
         [[nodiscard]] static auto read_word(std::span<std::uint8_t const> input,
             std::size_t position) -> std::uint64_t
         {
-            std::uint64_t value{};
-            for (std::size_t index{}; index < 8U; ++index)
-            {
-                value |= static_cast<std::uint64_t>(input[position + index]) << (index * 8U);
-            }
-            return value;
+            return load_little_u64(input, position);
         }
 
         [[nodiscard]] auto hash(std::span<std::uint8_t const> input,
@@ -1080,19 +1123,14 @@ namespace sph::zstd::detail
         [[nodiscard]] static auto equal_four(std::span<std::uint8_t const> input,
             std::size_t left, std::size_t right) -> bool
         {
-            return std::ranges::equal(input.subspan(left, 4U), input.subspan(right, 4U));
+            return equal_four_bytes(input, left, right);
         }
 
         [[nodiscard]] static auto count_match(std::span<std::uint8_t const> input,
             std::size_t position, std::size_t match_position, std::size_t end,
             std::size_t initial) -> std::size_t
         {
-            auto length{initial};
-            while (position + length < end && input[position + length] == input[match_position + length])
-            {
-                ++length;
-            }
-            return length;
+            return count_matching_bytes(input, position, match_position, end, initial);
         }
 
         unsigned window_log_{};
@@ -1100,8 +1138,6 @@ namespace sph::zstd::detail
         unsigned chain_log_{};
         unsigned search_log_{};
         unsigned minimum_match_{};
-        unsigned lazy_depth_{};
-        bool binary_tree_{};
         std::vector<std::uint32_t> hash_table_;
         std::vector<std::uint32_t> chain_table_;
         std::uint32_t next_to_update_{index_bias};
@@ -1168,62 +1204,46 @@ namespace sph::zstd::detail
         return best;
     }
 
-    class reverse_bit_writer
-    {
-    public:
-        void append(std::uint32_t value, unsigned count)
-        {
-            for (unsigned index{}; index < count; ++index)
-            {
-                auto const shift{count - index - 1U};
-                bits_.push_back(static_cast<std::uint8_t>((value >> shift) & 1U));
-            }
-        }
-
-        [[nodiscard]] auto finish() const -> std::vector<std::uint8_t>
-        {
-            auto const data_bits{bits_.size()};
-            std::vector<std::uint8_t> output(data_bits / 8U + 1U);
-            output[data_bits / 8U] |= static_cast<std::uint8_t>(1U << (data_bits % 8U));
-            for (std::size_t index{}; index < data_bits; ++index)
-            {
-                if (bits_[index] != 0U)
-                {
-                    auto const destination{data_bits - index - 1U};
-                    output[destination / 8U] |= static_cast<std::uint8_t>(1U << (destination % 8U));
-                }
-            }
-            return output;
-        }
-
-    private:
-        std::vector<std::uint8_t> bits_;
-    };
-
     class forward_bit_writer
     {
     public:
         void append(std::uint32_t value, unsigned count)
         {
-            for (unsigned index{}; index < count; ++index)
+            while (count != 0U)
             {
-                bits_.push_back(static_cast<std::uint8_t>((value >> index) & 1U));
+                auto const bit_offset{static_cast<unsigned>(bit_count_ & 7U)};
+                if (bit_offset == 0U)
+                {
+                    bytes_.push_back(0U);
+                }
+                auto const available{8U - bit_offset};
+                auto const consumed{std::min(count, available)};
+                auto const mask{(std::uint32_t{1} << consumed) - 1U};
+                bytes_.back() |= static_cast<std::uint8_t>((value & mask) << bit_offset);
+                value >>= consumed;
+                count -= consumed;
+                bit_count_ += consumed;
             }
         }
 
         [[nodiscard]] auto finish() const -> std::vector<std::uint8_t>
         {
-            std::vector<std::uint8_t> output(bits_.size() / 8U + 1U);
-            for (std::size_t index{}; index < bits_.size(); ++index)
+            auto output{bytes_};
+            auto const bit_offset{static_cast<unsigned>(bit_count_ & 7U)};
+            if (bit_offset == 0U)
             {
-                output[index / 8U] |= static_cast<std::uint8_t>(bits_[index] << (index % 8U));
+                output.push_back(1U);
             }
-            output[bits_.size() / 8U] |= static_cast<std::uint8_t>(1U << (bits_.size() % 8U));
+            else
+            {
+                output.back() |= static_cast<std::uint8_t>(1U << bit_offset);
+            }
             return output;
         }
 
     private:
-        std::vector<std::uint8_t> bits_;
+        std::vector<std::uint8_t> bytes_;
+        std::size_t bit_count_{};
     };
 
     struct fse_compression_transform
@@ -1234,8 +1254,8 @@ namespace sph::zstd::detail
 
     struct fse_compression_table
     {
-        std::vector<std::uint16_t> states;
-        std::vector<fse_compression_transform> transforms;
+        std::array<std::uint16_t, 1U << 12U> states{};
+        std::array<fse_compression_transform, 256> transforms{};
         unsigned table_log{};
         std::optional<unsigned> run_length_symbol;
     };
@@ -1246,8 +1266,8 @@ namespace sph::zstd::detail
         auto const table_size{std::size_t{1} << counts.table_log};
         auto const table_mask{table_size - 1U};
         auto const step{(table_size >> 1U) + (table_size >> 3U) + 3U};
-        std::vector<std::uint16_t> cumulative(counts.maximum_symbol + 2U);
-        std::vector<std::uint8_t> symbols(table_size);
+        std::array<std::uint16_t, 257> cumulative{};
+        std::array<std::uint8_t, 1U << 12U> symbols{};
         auto high_threshold{table_size - 1U};
 
         for (unsigned symbol{1U}; symbol <= counts.maximum_symbol + 1U; ++symbol)
@@ -1282,11 +1302,8 @@ namespace sph::zstd::detail
             throw entropy_error{"invalid Zstandard FSE compression symbol spread"};
         }
 
-        fse_compression_table result{
-            std::vector<std::uint16_t>(table_size),
-            std::vector<fse_compression_transform>(counts.maximum_symbol + 1U),
-            counts.table_log,
-            {}};
+        fse_compression_table result{};
+        result.table_log = counts.table_log;
         auto next{cumulative};
         for (std::size_t index{}; index < table_size; ++index)
         {
@@ -1345,11 +1362,11 @@ namespace sph::zstd::detail
                 value_ = 0U;
                 return;
             }
-            auto const transform{table_->transforms.at(symbol)};
+            auto const transform{table_->transforms[symbol]};
             auto const number_bits{(transform.delta_number_bits + (1U << 15U)) >> 16U};
             value_ = (number_bits << 16U) - transform.delta_number_bits;
             auto const index{static_cast<std::int64_t>(value_ >> number_bits) + transform.delta_find_state};
-            value_ = table_->states.at(static_cast<std::size_t>(index));
+            value_ = table_->states[static_cast<std::size_t>(index)];
         }
 
         void encode(forward_bit_writer& bits, unsigned symbol)
@@ -1362,11 +1379,11 @@ namespace sph::zstd::detail
                 }
                 return;
             }
-            auto const transform{table_->transforms.at(symbol)};
+            auto const transform{table_->transforms[symbol]};
             auto const number_bits{(value_ + transform.delta_number_bits) >> 16U};
             bits.append(value_, number_bits);
             auto const index{static_cast<std::int64_t>(value_ >> number_bits) + transform.delta_find_state};
-            value_ = table_->states.at(static_cast<std::size_t>(index));
+            value_ = table_->states[static_cast<std::size_t>(index)];
         }
 
         void flush(forward_bit_writer& bits) const
@@ -2212,10 +2229,10 @@ namespace sph::zstd::detail
         std::span<std::uint8_t const> input,
         std::array<huffman_code, 256> const& codes) -> std::vector<std::uint8_t>
     {
-        reverse_bit_writer bits;
-        for (auto const symbol : input)
+        forward_bit_writer bits;
+        for (auto position{input.size()}; position-- > 0U;)
         {
-            auto const code{codes[symbol]};
+            auto const code{codes[input[position]]};
             if (code.number_bits == 0U)
             {
                 throw entropy_error{"missing Zstandard Huffman encoding code"};
@@ -2444,13 +2461,13 @@ namespace sph::zstd::detail
         output.push_back(selected_offset_symbol);
         output.push_back(match_symbol);
 
-        reverse_bit_writer bits;
-        bits.append(static_cast<std::uint32_t>(selected.offset - offset_base[selected_offset_symbol]),
-            offset_bits[selected_offset_symbol]);
-        bits.append(static_cast<std::uint32_t>(selected.length - match_length_base[match_symbol]),
-            match_length_bits[match_symbol]);
+        forward_bit_writer bits;
         bits.append(static_cast<std::uint32_t>(selected.position - literal_length_base[literal_symbol]),
             literal_length_bits[literal_symbol]);
+        bits.append(static_cast<std::uint32_t>(selected.length - match_length_base[match_symbol]),
+            match_length_bits[match_symbol]);
+        bits.append(static_cast<std::uint32_t>(selected.offset - offset_base[selected_offset_symbol]),
+            offset_bits[selected_offset_symbol]);
         auto const bitstream{bits.finish()};
         output.insert(output.end(), bitstream.begin(), bitstream.end());
         return output;

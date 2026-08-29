@@ -137,14 +137,13 @@ namespace
         return blocks;
     }
 
+    template <unsigned LazyDepth = 0U, bool BinaryTree = false>
     auto cpp_greedy_sequence_blocks(std::span<std::uint8_t const> input,
-        sph::zstd::compression_parameters const& parameters,
-        unsigned lazy_depth = 0U, bool binary_tree = false)
+        sph::zstd::compression_parameters const& parameters)
         -> std::vector<sph::zstd::detail::parsed_block>
     {
-        sph::zstd::detail::greedy_match_state state{parameters.window_log, parameters.hash_log,
-            parameters.chain_log, parameters.search_log, parameters.minimum_match,
-            lazy_depth, binary_tree};
+        sph::zstd::detail::greedy_match_state<LazyDepth, BinaryTree> state{parameters.window_log,
+            parameters.hash_log, parameters.chain_log, parameters.search_log, parameters.minimum_match};
         std::vector<sph::zstd::detail::parsed_block> blocks;
         for (std::size_t begin{}; begin < input.size(); begin += sph::zstd::maximum_block_size)
         {
@@ -210,11 +209,11 @@ namespace
             }
             else if constexpr (Level == 9)
             {
-                return cpp_greedy_sequence_blocks(input, cpp_parameters, 2U);
+                return cpp_greedy_sequence_blocks<2U>(input, cpp_parameters);
             }
             else if constexpr (Level == 15)
             {
-                return cpp_greedy_sequence_blocks(input, cpp_parameters, 2U, true);
+                return cpp_greedy_sequence_blocks<2U, true>(input, cpp_parameters);
             }
             else
             {

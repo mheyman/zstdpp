@@ -20,13 +20,7 @@ namespace sph::zstd::detail
         explicit entropy_error(std::string_view message) : std::runtime_error{std::string{message}} {}
     };
 
-    /**
-     * Zstandard entropy streams are written forward but decoded backward. The
-     * highest set bit in the final byte is an end marker; it is not data. This
-     * reader expresses that format directly, one logical bit at a time. It is
-     * intentionally simple and bounds checked so the entropy port has a clear,
-     * portable correctness baseline before word-at-a-time optimizations are added.
-     */
+    /** Zstandard entropy streams are written forward but decoded backward. */
     class reverse_bit_reader
     {
     public:
@@ -51,23 +45,35 @@ namespace sph::zstd::detail
                 throw entropy_error{"truncated Zstandard entropy bitstream"};
             }
 
-            std::uint32_t value{};
-            for (unsigned index{}; index < count; ++index)
+            if (count == 0U)
             {
-                value <<= 1U;
-                if (remaining_bits_ != 0)
-                {
-                    --remaining_bits_;
-                    auto const byte_index{remaining_bits_ / 8U};
-                    auto const bit_index{remaining_bits_ % 8U};
-                    value |= static_cast<std::uint32_t>((bytes_[byte_index] >> bit_index) & 1U);
-                }
-                else
-                {
-                    overflow_ = true;
-                }
+                return 0U;
             }
-            return value;
+            auto const available{static_cast<unsigned>(
+                std::min<std::size_t>(count, remaining_bits_))};
+            auto const missing{count - available};
+            if (missing != 0U)
+            {
+                overflow_ = true;
+            }
+            if (available == 0U)
+            {
+                return 0U;
+            }
+
+            auto const first_bit{remaining_bits_ - available};
+            auto const first_byte{first_bit / 8U};
+            auto const bit_offset{static_cast<unsigned>(first_bit & 7U)};
+            auto const byte_count{(bit_offset + available + 7U) / 8U};
+            std::uint64_t packed{};
+            for (unsigned index{}; index < byte_count; ++index)
+            {
+                packed |= static_cast<std::uint64_t>(bytes_[first_byte + index]) << (index * 8U);
+            }
+            auto const mask{available == 32U ? std::numeric_limits<std::uint32_t>::max() :
+                (std::uint32_t{1} << available) - 1U};
+            remaining_bits_ = first_bit;
+            return static_cast<std::uint32_t>((packed >> bit_offset) & mask) << missing;
         }
 
         [[nodiscard]] auto peek(unsigned count, bool permit_overread = false) const -> std::uint32_t
@@ -100,13 +106,21 @@ namespace sph::zstd::detail
             {
                 throw entropy_error{"truncated Zstandard FSE table description"};
             }
-            std::uint32_t value{};
-            for (unsigned index{}; index < count; ++index)
+            if (count == 0U)
             {
-                auto const position{bit_offset_ + index};
-                value |= static_cast<std::uint32_t>((bytes_[position / 8U] >> (position % 8U)) & 1U) << index;
+                return 0U;
             }
-            return value;
+            auto const first_byte{bit_offset_ / 8U};
+            auto const within_byte{static_cast<unsigned>(bit_offset_ & 7U)};
+            auto const byte_count{(within_byte + count + 7U) / 8U};
+            std::uint64_t packed{};
+            for (unsigned index{}; index < byte_count; ++index)
+            {
+                packed |= static_cast<std::uint64_t>(bytes_[first_byte + index]) << (index * 8U);
+            }
+            auto const mask{count == 32U ? std::numeric_limits<std::uint32_t>::max() :
+                (std::uint32_t{1} << count) - 1U};
+            return static_cast<std::uint32_t>((packed >> within_byte) & mask);
         }
 
         [[nodiscard]] auto read(unsigned count) -> std::uint32_t

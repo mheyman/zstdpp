@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <optional>
@@ -631,16 +632,47 @@ namespace sph::zstd
             {
                 throw detail::entropy_error{"decoded Zstandard block is too large"};
             }
-            for (std::size_t index{}; index < match_length; ++index)
+            auto const old_size{output.size()};
+            auto const available{history_.size() + old_size};
+            if (match_offset == 0U || match_offset > available)
             {
-                auto const available{history_.size() + output.size()};
-                if (match_offset == 0U || match_offset > available)
-                {
-                    throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
-                }
-                auto const source_position{available - match_offset};
-                output.push_back(source_position < history_.size() ? history_[source_position] :
-                    output[source_position - history_.size()]);
+                throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
+            }
+            output.resize(old_size + match_length);
+            auto source_position{available - match_offset};
+            auto destination_position{old_size};
+            auto remaining{match_length};
+            if (source_position < history_.size())
+            {
+                auto const history_count{std::min(remaining, history_.size() - source_position)};
+                std::memcpy(output.data() + destination_position,
+                    history_.data() + source_position, history_count);
+                source_position += history_count;
+                destination_position += history_count;
+                remaining -= history_count;
+            }
+            if (remaining == 0U)
+            {
+                return;
+            }
+
+            auto const output_source{source_position - history_.size()};
+            auto const distance{destination_position - output_source};
+            if (distance >= remaining)
+            {
+                std::memcpy(output.data() + destination_position,
+                    output.data() + output_source, remaining);
+                return;
+            }
+            std::memcpy(output.data() + destination_position,
+                output.data() + output_source, distance);
+            auto written{distance};
+            while (written < remaining)
+            {
+                auto const count{std::min(written, remaining - written)};
+                std::memcpy(output.data() + destination_position + written,
+                    output.data() + destination_position, count);
+                written += count;
             }
         }
 
@@ -686,8 +718,7 @@ namespace sph::zstd
             auto offset_state{static_cast<std::size_t>(bits.read(offset_table_.table_log))};
             auto match_state{static_cast<std::size_t>(bits.read(match_length_table_.table_log))};
             std::vector<std::uint8_t> output;
-            output.reserve(std::min(Parameters.maximum_decoded_block_size,
-                literals.size() + sequence_count * 3U));
+            output.reserve(Parameters.maximum_decoded_block_size);
             std::size_t literal_offset{};
 
             for (std::size_t sequence_index{}; sequence_index < sequence_count; ++sequence_index)
@@ -846,7 +877,13 @@ namespace sph::zstd
             if (!output.empty())
             {
                 std::invoke(callback_, output);
-                checksum_.update(output);
+                if constexpr (!Parameters.ignore_checksum)
+                {
+                    if (information_.checksum)
+                    {
+                        checksum_.update(output);
+                    }
+                }
                 frame_decoded_size_ += output.size();
                 decoded_size_ += output.size();
                 remember(output);
