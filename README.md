@@ -148,29 +148,29 @@ xychart-beta
     y-axis "KiB" 0 --> 302
     bar [259, 259, 274, 274, 274, 274, 260, 260, 260, 260]
 ```
----
+
 ```mermaid
 xychart-beta
     title "Compression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 1645
-    bar [189, 1495, 109, 943, 61, 741, 37, 333, 34, 148]
+    y-axis "MiB/s" 0 --> 2499
+    bar [551, 2271, 674, 1812, 208, 2127, 150, 1178, 182, 536]
 ```
----
+
 ```mermaid
 xychart-beta
     title "Compression peak memory"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB" 0 --> 98
-    bar [9, 9, 14, 9, 27, 11, 73, 18, 89, 24]
+    y-axis "MiB" 0 --> 26
+    bar [8, 7, 8, 8, 11, 9, 19, 17, 23, 23]
 ```
----
+
 ```mermaid
 xychart-beta
     title "Compression executable size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "KiB" 0 --> 421
-    bar [102, 382, 103, 382, 105, 382, 105, 382, 105, 382]
+    y-axis "KiB" 0 --> 420
+    bar [95, 381, 96, 381, 95, 381, 96, 381, 97, 381]
 ```
 
 ### Decompression
@@ -179,24 +179,24 @@ xychart-beta
 xychart-beta
     title "Decompression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 3671
-    bar [306, 2011, 304, 2558, 265, 2429, 310, 3261, 280, 3337]
+    y-axis "MiB/s" 0 --> 15511
+    bar [1053, 3151, 1174, 5643, 1448, 5534, 2907, 14045, 7040, 14100]
 ```
 
 ```mermaid
 xychart-beta
     title "Decompression peak memory"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB" 0 --> 14
-    bar [9, 8, 12, 9, 12, 9, 12, 8, 12, 8]
+    y-axis "MiB" 0 --> 12
+    bar [8, 7, 9, 7, 9, 7, 10, 7, 9, 7]
 ```
 
 ```mermaid
 xychart-beta
     title "Decompression executable size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "KiB" 0 --> 126
-    bar [79, 114, 79, 114, 79, 114, 79, 114, 79, 114]
+    y-axis "KiB" 0 --> 125
+    bar [81, 113, 81, 113, 81, 113, 81, 113, 81, 113]
 ```
 
 <!-- SPH_ZSTDPP_EVAL_END -->
