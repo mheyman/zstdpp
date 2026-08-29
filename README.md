@@ -56,12 +56,18 @@ The current working slice provides:
 
 - valid standard and magicless frame headers;
 - streaming raw, RLE, and single-match compressed-block output;
+- compile-time resolution of the reference 1.6.0 compression-level presets, including
+  source-size adjustment and explicit per-field overrides;
 - a linear fast match finder with a compile-time-selected hash-table size;
-- one-symbol FSE/RLE sequence entropy encoding with raw-literal fallback;
+- a persistent reference-compatible level-1 fast parser, with sequence-field parity checked
+  against the bundled reference implementation;
+- persistent reference-compatible double-fast, greedy, lazy2 hash-chain, and binary-tree lazy2 parsers;
+- multi-sequence FSE entropy encoding with predefined, run-length, and normalized tables;
 - native Huffman literal encoding for direct-weight alphabets, with one/four streams;
 - Huffman literal decoding (new/repeat tables and one/four bitstreams), including
   direct and FSE-compressed Huffman weights;
-- predefined, RLE, compressed, and repeat FSE sequence tables;
+- deterministic reference-compatible Huffman tree construction and compressed weight tables;
+- the reference strategy-specific pre-block splitters;
 - repeat-offset execution against an overlap-safe history bounded by the frame window;
 - content-size fields and XXH64 content checksums;
 - concatenated and skippable frames;
@@ -70,12 +76,11 @@ The current working slice provides:
 - reference-produced entropy frames at compression levels 1, 3, and 9; and
 - corruption tests for matches outside the retained history window.
 
-The compressor's current entropy path intentionally emits one match per block and one-symbol
-sequence tables. Its Huffman encoder uses direct weights when the alphabet permits and otherwise
-falls back to raw literals. The next compression slice is multi-sequence parsing, normalized FSE
-table/state encoding, and FSE-compressed Huffman weights; the decoder side already consumes those
-formats. Dictionary and multi-threaded modes are intentionally rejected until their implementations
-exist.
+The level-1 fast, level-3 double-fast, level-5 greedy, level-9 lazy2, and level-15 binary-tree lazy2
+compressors produce byte-for-byte identical output to reference zstd 1.6.0 for the acceptance
+corpus. These paths include exact sequence parsing, Huffman construction, normalized FSE sequence
+tables, and strategy-specific automatic pre-block splitting. Dictionary and multi-threaded modes
+are intentionally rejected until their implementations exist.
 
 ## Build and test
 
@@ -88,6 +93,19 @@ ctest --test-dir out/build --output-on-failure
 Tests compile with warnings-as-errors on MSVC, Clang, and GCC-style frontends. The public
 `sph::zstdpp` CMake target is header-only and does not link the reference implementation; only the
 interoperability test target does.
+
+Compression parity is a separate acceptance gate. It compresses the deterministic 1 MiB mixed
+corpus at levels 1, 3, 5, 9, and 15 with both implementations, first verifies every resolved core
+compression parameter, and then requires the encoded bytes to match exactly:
+
+```text
+cmake --preset msvc-acceptance
+cmake --build --preset msvc-acceptance
+ctest --preset msvc-acceptance
+```
+
+Equivalent `clang-acceptance` and `gcc-acceptance` presets are provided. All five acceptance levels
+are byte-identical.
 
 ### Presets and reference builds
 
@@ -127,24 +145,24 @@ Compression workers receive identical input. Decompression workers both consume 
 xychart-beta
     title "Compressed size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "KiB" 0 --> 345
-    bar [313, 259, 313, 274, 313, 274, 313, 260, 313, 260]
+    y-axis "KiB" 0 --> 302
+    bar [259, 259, 274, 274, 274, 274, 260, 260, 260, 260]
 ```
 
 ```mermaid
 xychart-beta
     title "Compression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 1476
-    bar [299, 1341, 283, 914, 254, 652, 278, 310, 288, 142]
+    y-axis "MiB/s" 0 --> 1645
+    bar [189, 1495, 109, 943, 61, 741, 37, 333, 34, 148]
 ```
 
 ```mermaid
 xychart-beta
     title "Compression peak memory"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB" 0 --> 27
-    bar [7, 8, 7, 9, 7, 11, 7, 18, 7, 24]
+    y-axis "MiB" 0 --> 98
+    bar [9, 9, 14, 9, 27, 11, 73, 18, 89, 24]
 ```
 
 ```mermaid
@@ -152,7 +170,7 @@ xychart-beta
     title "Compression executable size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
     y-axis "KiB" 0 --> 421
-    bar [63, 382, 63, 382, 63, 382, 63, 382, 63, 382]
+    bar [102, 382, 103, 382, 105, 382, 105, 382, 105, 382]
 ```
 
 ### Decompression
@@ -161,16 +179,16 @@ xychart-beta
 xychart-beta
     title "Decompression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 3767
-    bar [240, 1582, 279, 2360, 240, 2443, 284, 2945, 300, 3424]
+    y-axis "MiB/s" 0 --> 3671
+    bar [306, 2011, 304, 2558, 265, 2429, 310, 3261, 280, 3337]
 ```
 
 ```mermaid
 xychart-beta
     title "Decompression peak memory"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB" 0 --> 13
-    bar [9, 8, 11, 8, 10, 8, 11, 8, 11, 8]
+    y-axis "MiB" 0 --> 14
+    bar [9, 8, 12, 9, 12, 9, 12, 8, 12, 8]
 ```
 
 ```mermaid
