@@ -7,6 +7,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -45,7 +46,10 @@ namespace sph::zstd
             "zstd_decompress maximum_decoded_block_size must be in [1, 128 KiB]");
 
     public:
-        explicit zstd_decompress(Callback callback) : callback_{std::move(callback)} {}
+        explicit zstd_decompress(Callback callback) : callback_{std::move(callback)}
+        {
+            literals_.reserve(Parameters.maximum_decoded_block_size);
+        }
 
         zstd_decompress(zstd_decompress const&) = delete;
         auto operator=(zstd_decompress const&) -> zstd_decompress& = delete;
@@ -110,6 +114,89 @@ namespace sph::zstd
         [[nodiscard]] static consteval auto parameters() noexcept -> decompression_parameters { return Parameters; }
 
     private:
+        class byte_buffer
+        {
+        public:
+            void clear() noexcept { size_ = 0U; }
+
+            [[nodiscard]] auto size() const noexcept -> std::size_t { return size_; }
+            [[nodiscard]] auto data() noexcept -> std::uint8_t* { return storage_.get(); }
+            [[nodiscard]] auto data() const noexcept -> std::uint8_t const* { return storage_.get(); }
+
+            [[nodiscard]] auto bytes() noexcept -> std::span<std::uint8_t>
+            {
+                return {data(), size_};
+            }
+
+            [[nodiscard]] auto bytes() const noexcept -> std::span<std::uint8_t const>
+            {
+                return {data(), size_};
+            }
+
+            void append(std::span<std::uint8_t const> source)
+            {
+                auto const destination{append_uninitialized(source.size())};
+                if (!source.empty())
+                {
+                    std::memcpy(destination.data(), source.data(), source.size());
+                }
+            }
+
+            void append(std::size_t count, std::uint8_t value)
+            {
+                auto const destination{append_uninitialized(count)};
+                if (count != 0U)
+                {
+                    std::memset(destination.data(), value, count);
+                }
+            }
+
+            [[nodiscard]] auto append_uninitialized(std::size_t count) -> std::span<std::uint8_t>
+            {
+                if (count == 0U)
+                {
+                    return {data(), 0U};
+                }
+                reserve(size_ + count);
+                auto result{std::span<std::uint8_t>{data() + size_, count}};
+                size_ += count;
+                return result;
+            }
+
+            void erase_prefix(std::size_t count) noexcept
+            {
+                if (count != 0U)
+                {
+                    std::memmove(data(), data() + count, size_ - count);
+                    size_ -= count;
+                }
+            }
+
+        private:
+            void reserve(std::size_t requested)
+            {
+                if (requested <= capacity_)
+                {
+                    return;
+                }
+                auto const doubled{capacity_ > std::numeric_limits<std::size_t>::max() / 2U ?
+                    requested : capacity_ * 2U};
+                auto const capacity{std::max(requested, std::max(doubled,
+                    Parameters.maximum_decoded_block_size))};
+                auto storage{std::make_unique_for_overwrite<std::uint8_t[]>(capacity)};
+                if (size_ != 0U)
+                {
+                    std::memcpy(storage.get(), data(), size_);
+                }
+                storage_ = std::move(storage);
+                capacity_ = capacity;
+            }
+
+            std::unique_ptr<std::uint8_t[]> storage_;
+            std::size_t size_{};
+            std::size_t capacity_{};
+        };
+
         enum class parse_state : std::uint8_t
         {
             frame_header,
@@ -357,7 +444,7 @@ namespace sph::zstd
                 {
                     return false;
                 }
-                emit(input().first(block_size_));
+                emit_input(input().first(block_size_));
                 consume(block_size_);
                 break;
             case block_type::run_length:
@@ -400,7 +487,7 @@ namespace sph::zstd
 
         struct literals_section
         {
-            std::vector<std::uint8_t> bytes;
+            std::span<std::uint8_t const> bytes;
             std::size_t sequence_offset{};
         };
 
@@ -409,7 +496,9 @@ namespace sph::zstd
             try
             {
                 auto literals{decode_literals(block)};
-                emit(decode_sequences(block.subspan(literals.sequence_offset), literals.bytes));
+                auto const decoded{decode_sequences(block.subspan(literals.sequence_offset), literals.bytes)};
+                deliver(decoded);
+                trim_history();
             }
             catch (detail::entropy_error const& error)
             {
@@ -510,17 +599,17 @@ namespace sph::zstd
                 {
                     throw detail::entropy_error{"Zstandard literals section exceeds compressed block size"};
                 }
-                std::vector<std::uint8_t> literals;
+                literals_.clear();
                 if (literals_type == 0U)
                 {
                     auto const stored{block.subspan(header_size, regenerated_size)};
-                    literals.assign(stored.begin(), stored.end());
+                    literals_.assign(stored.begin(), stored.end());
                 }
                 else
                 {
-                    literals.assign(regenerated_size, block[header_size]);
+                    literals_.assign(regenerated_size, block[header_size]);
                 }
-                return {std::move(literals), header_size + stored_size};
+                return {literals_, header_size + stored_size};
             }
 
             if (compressed_size == 0U || header_size + compressed_size > block.size())
@@ -530,23 +619,21 @@ namespace sph::zstd
             auto compressed{block.subspan(header_size, compressed_size)};
             if (literals_type == 2U)
             {
-                auto description{detail::read_huffman_table(compressed)};
-                huffman_table_ = std::move(description.table);
-                if (description.bytes_consumed >= compressed.size())
+                auto const description_size{detail::read_huffman_table(compressed, huffman_table_)};
+                if (description_size >= compressed.size())
                 {
                     throw detail::entropy_error{"Zstandard Huffman literals contain no bitstream"};
                 }
-                compressed = compressed.subspan(description.bytes_consumed);
+                compressed = compressed.subspan(description_size);
             }
             else if (!huffman_table_.valid)
             {
                 throw detail::entropy_error{"Zstandard Huffman repeat mode has no previous table"};
             }
 
-            return {
-                detail::decode_huffman_literals(compressed, regenerated_size, four_streams, huffman_table_),
-                header_size + compressed_size
-            };
+            literals_.resize(regenerated_size);
+            detail::decode_huffman_literals(compressed, literals_, four_streams, huffman_table_);
+            return {literals_, header_size + compressed_size};
         }
 
         template <std::size_t Count, std::size_t NormCount>
@@ -564,15 +651,23 @@ namespace sph::zstd
             switch (mode)
             {
             case 0:
-                table = detail::build_sequence_table(
-                    detail::make_normalized_counts(default_norm, default_log), bases, additional_bits);
+            {
+                static auto const default_table = [&]
+                {
+                    detail::sequence_table result;
+                    detail::build_sequence_table(
+                        detail::make_normalized_counts(default_norm, default_log), bases, additional_bits, result);
+                    return result;
+                }();
+                detail::copy_sequence_table(default_table, table);
                 return;
+            }
             case 1:
                 if (offset >= source.size())
                 {
                     throw detail::entropy_error{"truncated Zstandard RLE sequence table"};
                 }
-                table = detail::make_rle_sequence_table(source[offset++], bases, additional_bits);
+                detail::make_rle_sequence_table(source[offset++], bases, additional_bits, table);
                 return;
             case 2:
             {
@@ -583,7 +678,7 @@ namespace sph::zstd
                     throw detail::entropy_error{"Zstandard sequence FSE table log is too large"};
                 }
                 offset += counts.bytes_consumed;
-                table = detail::build_sequence_table(counts, bases, additional_bits);
+                detail::build_sequence_table(counts, bases, additional_bits, table);
                 return;
             }
             case 3:
@@ -626,60 +721,76 @@ namespace sph::zstd
             return 0x7F00U + source[1] + (static_cast<std::size_t>(source[2]) << 8U);
         }
 
-        void append_match(std::vector<std::uint8_t>& output, std::size_t match_offset, std::size_t match_length)
+        static void copy_nonoverlapping(
+            std::uint8_t* destination,
+            std::uint8_t const* source,
+            std::size_t count) noexcept
         {
-            if (match_length > Parameters.maximum_decoded_block_size - output.size())
+            if (count == 0U)
+            {
+                return;
+            }
+            if (count == 1U)
+            {
+                *destination = *source;
+                return;
+            }
+            if (count >= 8U && count <= 16U)
+            {
+                std::uint64_t first{};
+                std::uint64_t last{};
+                std::memcpy(&first, source, sizeof(first));
+                std::memcpy(&last, source + count - sizeof(last), sizeof(last));
+                std::memcpy(destination, &first, sizeof(first));
+                std::memcpy(destination + count - sizeof(last), &last, sizeof(last));
+                return;
+            }
+            std::memcpy(destination, source, count);
+        }
+
+        void append_sequence(
+            byte_buffer& output,
+            std::size_t block_begin,
+            std::span<std::uint8_t const> literals,
+            std::size_t match_offset,
+            std::size_t match_length)
+        {
+            auto const produced{output.size() - block_begin};
+            if (literals.size() > Parameters.maximum_decoded_block_size - produced ||
+                match_length > Parameters.maximum_decoded_block_size - produced - literals.size())
             {
                 throw detail::entropy_error{"decoded Zstandard block is too large"};
             }
             auto const old_size{output.size()};
-            auto const available{history_.size() + old_size};
-            if (match_offset == 0U || match_offset > available)
+            auto const match_begin{old_size + literals.size()};
+            if (match_offset == 0U || match_offset > match_begin)
             {
                 throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
             }
-            output.resize(old_size + match_length);
-            auto source_position{available - match_offset};
-            auto destination_position{old_size};
-            auto remaining{match_length};
-            if (source_position < history_.size())
+            auto const destination{output.append_uninitialized(literals.size() + match_length)};
+            copy_nonoverlapping(destination.data(), literals.data(), literals.size());
+            auto* const match_destination{destination.data() + literals.size()};
+            auto const source_position{match_begin - match_offset};
+            if (match_offset >= match_length)
             {
-                auto const history_count{std::min(remaining, history_.size() - source_position)};
-                std::memcpy(output.data() + destination_position,
-                    history_.data() + source_position, history_count);
-                source_position += history_count;
-                destination_position += history_count;
-                remaining -= history_count;
-            }
-            if (remaining == 0U)
-            {
+                copy_nonoverlapping(match_destination, output.data() + source_position, match_length);
                 return;
             }
-
-            auto const output_source{source_position - history_.size()};
-            auto const distance{destination_position - output_source};
-            if (distance >= remaining)
+            std::memcpy(match_destination, output.data() + source_position, match_offset);
+            auto written{match_offset};
+            while (written < match_length)
             {
-                std::memcpy(output.data() + destination_position,
-                    output.data() + output_source, remaining);
-                return;
-            }
-            std::memcpy(output.data() + destination_position,
-                output.data() + output_source, distance);
-            auto written{distance};
-            while (written < remaining)
-            {
-                auto const count{std::min(written, remaining - written)};
-                std::memcpy(output.data() + destination_position + written,
-                    output.data() + destination_position, count);
+                auto const count{std::min(written, match_length - written)};
+                std::memcpy(match_destination + written, match_destination, count);
                 written += count;
             }
         }
 
         [[nodiscard]] auto decode_sequences(
             std::span<std::uint8_t const> source,
-            std::span<std::uint8_t const> literals) -> std::vector<std::uint8_t>
+            std::span<std::uint8_t const> literals) -> std::span<std::uint8_t const>
         {
+            auto const block_begin{history_.size()};
             std::size_t offset{};
             auto const sequence_count{read_sequence_count(source, offset)};
             if (sequence_count == 0U)
@@ -688,7 +799,8 @@ namespace sph::zstd
                 {
                     throw detail::entropy_error{"zero-sequence Zstandard block has trailing data"};
                 }
-                return {literals.begin(), literals.end()};
+                history_.append(literals);
+                return history_.bytes().subspan(block_begin);
             }
             if (sequence_count > Parameters.maximum_decoded_block_size || offset >= source.size())
             {
@@ -717,15 +829,13 @@ namespace sph::zstd
             auto literal_state{static_cast<std::size_t>(bits.read(literal_length_table_.table_log))};
             auto offset_state{static_cast<std::size_t>(bits.read(offset_table_.table_log))};
             auto match_state{static_cast<std::size_t>(bits.read(match_length_table_.table_log))};
-            std::vector<std::uint8_t> output;
-            output.reserve(Parameters.maximum_decoded_block_size);
+            auto& output{history_};
             std::size_t literal_offset{};
-
             for (std::size_t sequence_index{}; sequence_index < sequence_count; ++sequence_index)
             {
-                if (literal_state >= literal_length_table_.entries.size() ||
-                    offset_state >= offset_table_.entries.size() ||
-                    match_state >= match_length_table_.entries.size())
+                if (literal_state >= literal_length_table_.size ||
+                    offset_state >= offset_table_.size ||
+                    match_state >= match_length_table_.size)
                 {
                     throw detail::entropy_error{"invalid Zstandard FSE sequence state"};
                 }
@@ -776,14 +886,13 @@ namespace sph::zstd
                 auto const literal_length{static_cast<std::size_t>(literal_entry.base_value) +
                     bits.read(literal_entry.additional_bits)};
                 if (literal_length > literals.size() - literal_offset ||
-                    literal_length > Parameters.maximum_decoded_block_size - output.size())
+                    literal_length > Parameters.maximum_decoded_block_size - (output.size() - block_begin))
                 {
                     throw detail::entropy_error{"Zstandard sequence consumes too many literals"};
                 }
-                output.insert(output.end(), literals.begin() + static_cast<std::ptrdiff_t>(literal_offset),
-                    literals.begin() + static_cast<std::ptrdiff_t>(literal_offset + literal_length));
+                auto const sequence_literals{literals.subspan(literal_offset, literal_length)};
                 literal_offset += literal_length;
-                append_match(output, match_offset, match_length);
+                append_sequence(output, block_begin, sequence_literals, match_offset, match_length);
 
                 if (sequence_index + 1U != sequence_count)
                 {
@@ -799,13 +908,14 @@ namespace sph::zstd
             {
                 throw detail::entropy_error{"Zstandard sequence bitstream has trailing bits"};
             }
-            if (literals.size() - literal_offset > Parameters.maximum_decoded_block_size - output.size())
+            if (literals.size() - literal_offset >
+                Parameters.maximum_decoded_block_size - (output.size() - block_begin))
             {
                 throw detail::entropy_error{"decoded Zstandard block is too large"};
             }
-            output.insert(output.end(), literals.begin() + static_cast<std::ptrdiff_t>(literal_offset), literals.end());
+            output.append(literals.subspan(literal_offset));
             fse_repeat_allowed_ = true;
-            return output;
+            return output.bytes().subspan(block_begin);
         }
 
         auto parse_frame_checksum() -> bool
@@ -840,39 +950,34 @@ namespace sph::zstd
         void reset_frame_state()
         {
             history_.clear();
-            huffman_table_ = {};
-            literal_length_table_ = {};
-            offset_table_ = {};
-            match_length_table_ = {};
+            huffman_table_.valid = false;
+            huffman_table_.size = 0U;
+            literal_length_table_.valid = false;
+            offset_table_.valid = false;
+            match_length_table_.valid = false;
             repeat_offsets_ = {1, 4, 8};
             fse_repeat_allowed_ = false;
         }
 
-        void remember(std::span<std::uint8_t const> output)
+        [[nodiscard]] auto history_limit() const noexcept -> std::size_t
         {
-            if (output.empty())
-            {
-                return;
-            }
             auto const configured_limit{information_.window_size == 0U ?
                 std::uint64_t{Parameters.maximum_decoded_block_size} : information_.window_size};
-            auto const limit{static_cast<std::size_t>(std::min<std::uint64_t>(
-                configured_limit, std::numeric_limits<std::size_t>::max()))};
-            if (output.size() >= limit)
-            {
-                history_.assign(output.end() - static_cast<std::ptrdiff_t>(limit), output.end());
-                return;
-            }
-            auto const excess{history_.size() + output.size() > limit ?
-                history_.size() + output.size() - limit : 0U};
-            if (excess != 0U)
-            {
-                history_.erase(history_.begin(), history_.begin() + static_cast<std::ptrdiff_t>(excess));
-            }
-            history_.insert(history_.end(), output.begin(), output.end());
+            return static_cast<std::size_t>(std::min<std::uint64_t>(
+                configured_limit, std::numeric_limits<std::size_t>::max()));
         }
 
-        void emit(std::span<std::uint8_t const> output)
+        void trim_history()
+        {
+            auto const limit{history_limit()};
+            auto const excess{history_.size() > limit ? history_.size() - limit : 0U};
+            if (excess != 0U)
+            {
+                history_.erase_prefix(excess);
+            }
+        }
+
+        void deliver(std::span<std::uint8_t const> output)
         {
             if (!output.empty())
             {
@@ -886,20 +991,23 @@ namespace sph::zstd
                 }
                 frame_decoded_size_ += output.size();
                 decoded_size_ += output.size();
-                remember(output);
             }
+        }
+
+        void emit_input(std::span<std::uint8_t const> input_bytes)
+        {
+            auto const output_begin{history_.size()};
+            history_.append(input_bytes);
+            deliver(history_.bytes().subspan(output_begin));
+            trim_history();
         }
 
         void emit_run(std::uint8_t byte, std::size_t count)
         {
-            std::array<std::uint8_t, 4096> output{};
-            output.fill(byte);
-            while (count != 0)
-            {
-                auto const chunk_size{std::min(count, output.size())};
-                emit(std::span<std::uint8_t const>{output}.first(chunk_size));
-                count -= chunk_size;
-            }
+            auto const output_begin{history_.size()};
+            history_.append(count, byte);
+            deliver(history_.bytes().subspan(output_begin));
+            trim_history();
         }
 
         Callback callback_;
@@ -911,7 +1019,8 @@ namespace sph::zstd
         bool last_block_{};
         frame_information information_{};
         detail::xxhash64 checksum_{};
-        std::vector<std::uint8_t> history_;
+        byte_buffer history_;
+        std::vector<std::uint8_t> literals_;
         detail::huffman_table huffman_table_{};
         detail::sequence_table literal_length_table_{};
         detail::sequence_table offset_table_{};

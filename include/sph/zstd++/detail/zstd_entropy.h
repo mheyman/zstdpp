@@ -5,6 +5,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <ranges>
 #include <span>
@@ -49,8 +50,7 @@ namespace sph::zstd::detail
             {
                 return 0U;
             }
-            auto const available{static_cast<unsigned>(
-                std::min<std::size_t>(count, remaining_bits_))};
+            auto const available{static_cast<unsigned>(std::min<std::size_t>(count, remaining_bits_))};
             auto const missing{count - available};
             if (missing != 0U)
             {
@@ -62,18 +62,14 @@ namespace sph::zstd::detail
             }
 
             auto const first_bit{remaining_bits_ - available};
-            auto const first_byte{first_bit / 8U};
-            auto const bit_offset{static_cast<unsigned>(first_bit & 7U)};
-            auto const byte_count{(bit_offset + available + 7U) / 8U};
-            std::uint64_t packed{};
-            for (unsigned index{}; index < byte_count; ++index)
+            if (first_bit < window_start_)
             {
-                packed |= static_cast<std::uint64_t>(bytes_[first_byte + index]) << (index * 8U);
+                reload_window();
             }
             auto const mask{available == 32U ? std::numeric_limits<std::uint32_t>::max() :
                 (std::uint32_t{1} << available) - 1U};
             remaining_bits_ = first_bit;
-            return static_cast<std::uint32_t>((packed >> bit_offset) & mask) << missing;
+            return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask) << missing;
         }
 
         [[nodiscard]] auto peek(unsigned count, bool permit_overread = false) const -> std::uint32_t
@@ -87,8 +83,27 @@ namespace sph::zstd::detail
         [[nodiscard]] auto overflowed() const noexcept -> bool { return overflow_; }
 
     private:
+        void reload_window() noexcept
+        {
+            constexpr std::size_t window_capacity{56U};
+            auto const end_bit{remaining_bits_};
+            window_start_ = end_bit > window_capacity ? end_bit - window_capacity : 0U;
+            auto const first_byte{window_start_ / 8U};
+            auto const bit_offset{static_cast<unsigned>(window_start_ & 7U)};
+            auto const bit_count{end_bit - window_start_};
+            auto const byte_count{static_cast<unsigned>((bit_offset + bit_count + 7U) / 8U)};
+            std::uint64_t packed{};
+            for (unsigned index{}; index < byte_count; ++index)
+            {
+                packed |= static_cast<std::uint64_t>(bytes_[first_byte + index]) << (index * 8U);
+            }
+            window_ = packed >> bit_offset;
+        }
+
         std::span<std::uint8_t const> bytes_;
         std::size_t remaining_bits_{};
+        std::uint64_t window_{};
+        std::size_t window_start_{std::numeric_limits<std::size_t>::max()};
         bool overflow_{};
     };
 
@@ -251,14 +266,18 @@ namespace sph::zstd::detail
 
     struct fse_table
     {
-        std::vector<fse_entry> entries;
+        static constexpr std::size_t maximum_size{std::size_t{1} << 12U};
+        std::array<fse_entry, maximum_size> entries;
+        std::size_t size{};
         unsigned table_log{};
     };
 
     [[nodiscard]] inline auto build_fse_table(normalized_counts const& counts) -> fse_table
     {
         auto const table_size{std::size_t{1} << counts.table_log};
-        fse_table result{std::vector<fse_entry>(table_size), counts.table_log};
+        fse_table result;
+        result.size = table_size;
+        result.table_log = counts.table_log;
         std::array<std::uint16_t, 256> symbol_next{};
         auto high_threshold{table_size - 1U};
 
@@ -333,10 +352,21 @@ namespace sph::zstd::detail
 
     struct sequence_table
     {
-        std::vector<sequence_entry> entries;
+        static constexpr std::size_t maximum_size{std::size_t{1} << 9U};
+        std::array<sequence_entry, maximum_size> entries;
+        std::size_t size{};
         unsigned table_log{};
         bool valid{};
     };
+
+    inline void copy_sequence_table(sequence_table const& source, sequence_table& destination) noexcept
+    {
+        std::memcpy(destination.entries.data(), source.entries.data(),
+            source.size * sizeof(sequence_entry));
+        destination.size = source.size;
+        destination.table_log = source.table_log;
+        destination.valid = source.valid;
+    }
 
     inline constexpr std::array<std::uint32_t, 36> literal_length_base{
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
@@ -398,51 +428,61 @@ namespace sph::zstd::detail
     }
 
     template <std::size_t Count>
-    [[nodiscard]] inline auto build_sequence_table(
+    inline void build_sequence_table(
         normalized_counts const& counts,
         std::array<std::uint32_t, Count> const& bases,
-        std::array<std::uint8_t, Count> const& additional_bits) -> sequence_table
+        std::array<std::uint8_t, Count> const& additional_bits,
+        sequence_table& result)
     {
         if (counts.maximum_symbol >= Count)
         {
             throw entropy_error{"Zstandard FSE sequence symbol is out of range"};
         }
         auto const symbols{build_fse_table(counts)};
-        sequence_table result{};
+        if (symbols.size > sequence_table::maximum_size)
+        {
+            throw entropy_error{"Zstandard sequence table is too large"};
+        }
+        result.size = symbols.size;
         result.table_log = symbols.table_log;
         result.valid = true;
-        result.entries.reserve(symbols.entries.size());
-        for (auto const& symbol : symbols.entries)
+        for (std::size_t index{}; index < symbols.size; ++index)
         {
-            result.entries.push_back(sequence_entry{
+            auto const& symbol{symbols.entries[index]};
+            result.entries[index] = sequence_entry{
                 symbol.next_state,
                 additional_bits[symbol.symbol],
                 symbol.number_bits,
                 bases[symbol.symbol]
-            });
+            };
         }
-        return result;
     }
 
     template <std::size_t Count>
-    [[nodiscard]] inline auto make_rle_sequence_table(
+    inline void make_rle_sequence_table(
         std::uint8_t symbol,
         std::array<std::uint32_t, Count> const& bases,
-        std::array<std::uint8_t, Count> const& additional_bits) -> sequence_table
+        std::array<std::uint8_t, Count> const& additional_bits,
+        sequence_table& result)
     {
         if (symbol >= Count)
         {
             throw entropy_error{"Zstandard RLE sequence symbol is out of range"};
         }
-        return sequence_table{
-            std::vector<sequence_entry>{sequence_entry{0, additional_bits[symbol], 0, bases[symbol]}},
-            0,
-            true
-        };
+        result.entries[0] = sequence_entry{0, additional_bits[symbol], 0, bases[symbol]};
+        result.size = 1U;
+        result.table_log = 0U;
+        result.valid = true;
     }
 
+    struct decoded_bytes
+    {
+        std::array<std::uint8_t, 256> values;
+        std::size_t size{};
+    };
+
     [[nodiscard]] inline auto fse_decompress_bytes(
-        std::span<std::uint8_t const> source, std::size_t capacity, unsigned maximum_table_log) -> std::vector<std::uint8_t>
+        std::span<std::uint8_t const> source, std::size_t capacity, unsigned maximum_table_log) -> decoded_bytes
     {
         auto const counts{read_normalized_counts(source, 255)};
         if (counts.table_log > maximum_table_log || counts.bytes_consumed >= source.size())
@@ -453,17 +493,21 @@ namespace sph::zstd::detail
         reverse_bit_reader bits{source.subspan(counts.bytes_consumed)};
         auto state_one{static_cast<std::size_t>(bits.read(table.table_log))};
         auto state_two{static_cast<std::size_t>(bits.read(table.table_log))};
-        std::vector<std::uint8_t> output;
-        output.reserve(capacity);
+        if (capacity > decoded_bytes{}.values.size())
+        {
+            throw entropy_error{"Zstandard FSE output capacity is too large"};
+        }
+        decoded_bytes output;
+        output.size = 0U;
 
         auto decode = [&bits, &table, &output, capacity](std::size_t& state)
         {
-            if (state >= table.entries.size() || output.size() >= capacity)
+            if (state >= table.size || output.size >= capacity)
             {
                 throw entropy_error{"invalid Zstandard FSE weight stream"};
             }
             auto const entry{table.entries[state]};
-            output.push_back(entry.symbol);
+            output.values[output.size++] = entry.symbol;
             state = static_cast<std::size_t>(entry.next_state) + bits.read(entry.number_bits, true);
         };
 
@@ -493,18 +537,15 @@ namespace sph::zstd::detail
 
     struct huffman_table
     {
-        std::vector<huffman_entry> entries;
+        static constexpr std::size_t maximum_size{std::size_t{1} << 12U};
+        std::array<huffman_entry, maximum_size> entries;
+        std::size_t size{};
         unsigned table_log{};
         bool valid{};
     };
 
-    struct huffman_description
-    {
-        huffman_table table;
-        std::size_t bytes_consumed{};
-    };
-
-    [[nodiscard]] inline auto read_huffman_table(std::span<std::uint8_t const> source) -> huffman_description
+    [[nodiscard]] inline auto read_huffman_table(
+        std::span<std::uint8_t const> source, huffman_table& table) -> std::size_t
     {
         if (source.empty())
         {
@@ -512,17 +553,17 @@ namespace sph::zstd::detail
         }
 
         auto const encoded_size{static_cast<std::size_t>(source[0])};
-        std::vector<std::uint8_t> weights;
+        std::array<std::uint8_t, 256> weights{};
+        std::size_t weight_count{};
         std::size_t bytes_consumed{};
         if (encoded_size >= 128U)
         {
-            auto const weight_count{encoded_size - 127U};
+            weight_count = encoded_size - 127U;
             auto const weight_bytes{(weight_count + 1U) / 2U};
             if (weight_bytes + 1U > source.size() || weight_count >= 256U)
             {
                 throw entropy_error{"invalid direct Zstandard Huffman weights"};
             }
-            weights.resize(weight_count);
             for (std::size_t index{}; index < weight_count; ++index)
             {
                 auto const packed{source[1U + index / 2U]};
@@ -537,13 +578,15 @@ namespace sph::zstd::detail
             {
                 throw entropy_error{"invalid FSE-compressed Zstandard Huffman weights"};
             }
-            weights = fse_decompress_bytes(source.subspan(1U, encoded_size), 255U, 6U);
+            auto const decoded{fse_decompress_bytes(source.subspan(1U, encoded_size), 255U, 6U)};
+            std::ranges::copy(std::span{decoded.values}.first(decoded.size), weights.begin());
+            weight_count = decoded.size;
             bytes_consumed = encoded_size + 1U;
         }
 
         std::array<std::uint32_t, 13> rank_counts{};
         std::uint32_t weight_total{};
-        for (auto const weight : weights)
+        for (auto const weight : std::span{weights}.first(weight_count))
         {
             if (weight > 12U)
             {
@@ -569,41 +612,41 @@ namespace sph::zstd::detail
             throw entropy_error{"invalid implied Zstandard Huffman weight"};
         }
         auto const last_weight{static_cast<std::uint8_t>(std::bit_width(rest))};
-        weights.push_back(last_weight);
+        weights[weight_count++] = last_weight;
         ++rank_counts[last_weight];
         if (rank_counts[1] < 2U || (rank_counts[1] & 1U) != 0U)
         {
             throw entropy_error{"invalid Zstandard Huffman tree"};
         }
 
-        std::array<std::vector<std::uint8_t>, 13> symbols_by_weight;
-        for (std::size_t symbol{}; symbol < weights.size(); ++symbol)
-        {
-            symbols_by_weight[weights[symbol]].push_back(static_cast<std::uint8_t>(symbol));
-        }
-
-        huffman_table table{std::vector<huffman_entry>(std::size_t{1} << table_log), table_log, true};
+        table.size = std::size_t{1} << table_log;
+        table.table_log = table_log;
         std::size_t table_index{};
         for (unsigned weight{1}; weight <= table_log; ++weight)
         {
             auto const run_length{(std::size_t{1} << weight) >> 1U};
             auto const number_bits{static_cast<std::uint8_t>(table_log + 1U - weight)};
-            for (auto const symbol : symbols_by_weight[weight])
+            for (std::size_t symbol{}; symbol < weight_count; ++symbol)
             {
-                if (table_index + run_length > table.entries.size())
+                if (weights[symbol] != weight)
+                {
+                    continue;
+                }
+                if (table_index + run_length > table.size)
                 {
                     throw entropy_error{"Zstandard Huffman tree overfills its decoding table"};
                 }
                 std::fill_n(table.entries.begin() + static_cast<std::ptrdiff_t>(table_index), run_length,
-                    huffman_entry{symbol, number_bits});
+                    huffman_entry{static_cast<std::uint8_t>(symbol), number_bits});
                 table_index += run_length;
             }
         }
-        if (table_index != table.entries.size())
+        if (table_index != table.size)
         {
             throw entropy_error{"Zstandard Huffman tree does not fill its decoding table"};
         }
-        return {std::move(table), bytes_consumed};
+        table.valid = true;
+        return bytes_consumed;
     }
 
     inline void decode_huffman_stream(
@@ -611,7 +654,7 @@ namespace sph::zstd::detail
         std::span<std::uint8_t const> source,
         huffman_table const& table)
     {
-        if (!table.valid || table.entries.empty())
+        if (!table.valid || table.size == 0U)
         {
             throw entropy_error{"Zstandard Huffman repeat mode has no previous table"};
         }
@@ -619,7 +662,7 @@ namespace sph::zstd::detail
         for (auto& byte : destination)
         {
             auto const index{bits.peek(table.table_log, true)};
-            if (index >= table.entries.size())
+            if (index >= table.size)
             {
                 throw entropy_error{"invalid Zstandard Huffman code"};
             }
@@ -633,18 +676,18 @@ namespace sph::zstd::detail
         }
     }
 
-    [[nodiscard]] inline auto decode_huffman_literals(
+    inline void decode_huffman_literals(
         std::span<std::uint8_t const> source,
-        std::size_t regenerated_size,
+        std::span<std::uint8_t> output,
         bool four_streams,
-        huffman_table const& table) -> std::vector<std::uint8_t>
+        huffman_table const& table)
     {
-        std::vector<std::uint8_t> output(regenerated_size);
         if (!four_streams)
         {
             decode_huffman_stream(output, source, table);
-            return output;
+            return;
         }
+        auto const regenerated_size{output.size()};
         if (source.size() < 10U || regenerated_size < 6U)
         {
             throw entropy_error{"invalid four-stream Zstandard Huffman section"};
@@ -673,11 +716,10 @@ namespace sph::zstd::detail
         for (std::size_t stream{}; stream < 4U; ++stream)
         {
             decode_huffman_stream(
-                std::span<std::uint8_t>{output}.subspan(output_offsets[stream],
+                output.subspan(output_offsets[stream],
                     output_offsets[stream + 1U] - output_offsets[stream]),
                 source.subspan(source_offset, lengths[stream]), table);
             source_offset += lengths[stream];
         }
-        return output;
     }
 }
