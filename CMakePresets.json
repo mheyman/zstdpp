@@ -69,6 +69,14 @@
       }
     },
     {
+      "name": "msvc-acceptance",
+      "displayName": "MSVC compression-parity acceptance tests",
+      "inherits": "msvc-debug",
+      "cacheVariables": {
+        "SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS": "ON"
+      }
+    },
+    {
       "name": "msvc-release",
       "displayName": "MSVC Release",
       "inherits": "msvc-base",
@@ -103,6 +111,14 @@
       }
     },
     {
+      "name": "clang-acceptance",
+      "displayName": "Clang compression-parity acceptance tests",
+      "inherits": "clang-debug",
+      "cacheVariables": {
+        "SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS": "ON"
+      }
+    },
+    {
       "name": "clang-release-reference",
       "displayName": "Clang Release reference zstd",
       "inherits": "clang-base",
@@ -130,6 +146,14 @@
       }
     },
     {
+      "name": "gcc-acceptance",
+      "displayName": "GCC compression-parity acceptance tests",
+      "inherits": "gcc-debug",
+      "cacheVariables": {
+        "SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS": "ON"
+      }
+    },
+    {
       "name": "gcc-release-reference",
       "displayName": "GCC Release reference zstd",
       "inherits": "gcc-base",
@@ -150,6 +174,7 @@
   ],
   "buildPresets": [
     { "name": "msvc-debug", "configurePreset": "msvc-debug" },
+    { "name": "msvc-acceptance", "configurePreset": "msvc-acceptance" },
     { "name": "msvc-release", "configurePreset": "msvc-release" },
     {
       "name": "msvc-release-reference",
@@ -167,6 +192,7 @@
       "targets": ["run_eval"]
     },
     { "name": "clang-debug", "configurePreset": "clang-debug" },
+    { "name": "clang-acceptance", "configurePreset": "clang-acceptance" },
     {
       "name": "clang-release-reference",
       "configurePreset": "clang-release-reference",
@@ -183,6 +209,7 @@
       "targets": ["run_eval"]
     },
     { "name": "gcc-debug", "configurePreset": "gcc-debug" },
+    { "name": "gcc-acceptance", "configurePreset": "gcc-acceptance" },
     {
       "name": "gcc-release-reference",
       "configurePreset": "gcc-release-reference",
@@ -206,13 +233,28 @@
       "output": { "outputOnFailure": true }
     },
     {
+      "name": "msvc-acceptance",
+      "configurePreset": "msvc-acceptance",
+      "output": { "outputOnFailure": true }
+    },
+    {
       "name": "clang-debug",
       "configurePreset": "clang-debug",
       "output": { "outputOnFailure": true }
     },
     {
+      "name": "clang-acceptance",
+      "configurePreset": "clang-acceptance",
+      "output": { "outputOnFailure": true }
+    },
+    {
       "name": "gcc-debug",
       "configurePreset": "gcc-debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "gcc-acceptance",
+      "configurePreset": "gcc-acceptance",
       "output": { "outputOnFailure": true }
     }
   ]

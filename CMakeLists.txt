@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.28)
 project(sph-zstdpp VERSION 0.1.0 LANGUAGES CXX)
 
 option(SPH_ZSTDPP_BUILD_TESTS "Build sph-zstd++ tests" ${PROJECT_IS_TOP_LEVEL})
+option(SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS "Build reference-parity acceptance tests" OFF)
 option(SPH_ZSTDPP_BUILD_REFERENCE "Make the downloaded reference zstd target available" OFF)
 option(SPH_ZSTDPP_BUILD_EVAL "Build implementation-comparison executables" OFF)
 
@@ -42,7 +43,8 @@ function(sph_zstdpp_enable_strict_warnings target)
     endif()
 endfunction()
 
-if(SPH_ZSTDPP_BUILD_REFERENCE OR SPH_ZSTDPP_BUILD_TESTS OR SPH_ZSTDPP_BUILD_EVAL)
+if(SPH_ZSTDPP_BUILD_REFERENCE OR SPH_ZSTDPP_BUILD_TESTS OR
+    SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS OR SPH_ZSTDPP_BUILD_EVAL)
     set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
     set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
     set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
@@ -53,7 +55,7 @@ if(SPH_ZSTDPP_BUILD_REFERENCE OR SPH_ZSTDPP_BUILD_TESTS OR SPH_ZSTDPP_BUILD_EVAL
     add_subdirectory(reference_zstd/build/cmake reference-zstd EXCLUDE_FROM_ALL)
 endif()
 
-if(SPH_ZSTDPP_BUILD_TESTS)
+if(SPH_ZSTDPP_BUILD_TESTS OR SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS)
     include(CTest)
     add_subdirectory(test)
 endif()

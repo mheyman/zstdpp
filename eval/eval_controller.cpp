@@ -1,4 +1,5 @@
 #include "eval_common.h"
+#include "eval_corpus.h"
 
 #include <algorithm>
 #include <array>
@@ -83,34 +84,6 @@ namespace
             }
         }
         return result;
-    }
-
-    auto make_corpus() -> std::vector<std::uint8_t>
-    {
-        static_assert(SPH_EVAL_CORPUS_SIZE % 4 == 0);
-        std::vector<std::uint8_t> corpus(SPH_EVAL_CORPUS_SIZE);
-        auto const quarter{corpus.size() / 4U};
-
-        std::fill_n(corpus.begin(), static_cast<std::ptrdiff_t>(quarter), std::uint8_t{});
-        constexpr std::string_view phrase{"The quick brown fox jumps over the lazy dog. Zstandard C++ evaluation.\n"};
-        for (std::size_t index{quarter}; index < quarter * 2U; ++index)
-        {
-            corpus[index] = static_cast<std::uint8_t>(phrase[(index - quarter) % phrase.size()]);
-        }
-        for (std::size_t index{quarter * 2U}; index < quarter * 3U; ++index)
-        {
-            auto const relative{index - quarter * 2U};
-            corpus[index] = static_cast<std::uint8_t>((relative / 16U + relative % 7U) & 0xFFU);
-        }
-        std::uint32_t random{0xC001D00DU};
-        for (std::size_t index{quarter * 3U}; index < corpus.size(); ++index)
-        {
-            random ^= random << 13U;
-            random ^= random >> 17U;
-            random ^= random << 5U;
-            corpus[index] = static_cast<std::uint8_t>(random);
-        }
-        return corpus;
     }
 
     auto quote(std::filesystem::path const& path) -> std::string
@@ -370,7 +343,7 @@ int main(int argc, char** argv)
     {
         auto const configuration{parse_options(argc, argv)};
         std::filesystem::create_directories(configuration.output_directory);
-        auto const corpus{make_corpus()};
+        auto const corpus{sph::zstd::eval::make_mixed_corpus(SPH_EVAL_CORPUS_SIZE)};
         auto const corpus_path{configuration.output_directory / "corpus.bin"};
         sph::zstd::eval::write_binary(corpus_path, corpus);
 

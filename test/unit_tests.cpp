@@ -1,6 +1,8 @@
 #include <sph/zstd++/zstd_compress.h>
 #include <sph/zstd++/zstd_decompress.h>
 
+#include "eval_corpus.h"
+
 #include <zstd.h>
 
 #include <algorithm>
@@ -149,28 +151,7 @@ namespace
 
     auto make_mixed_entropy_input() -> std::vector<std::uint8_t>
     {
-        std::vector<std::uint8_t> input(1024U * 1024U);
-        auto const quarter{input.size() / 4U};
-        std::fill_n(input.begin(), static_cast<std::ptrdiff_t>(quarter), std::uint8_t{});
-        constexpr std::string_view phrase{"The quick brown fox jumps over the lazy dog. Zstandard C++ evaluation.\n"};
-        for (std::size_t index{quarter}; index < quarter * 2U; ++index)
-        {
-            input[index] = static_cast<std::uint8_t>(phrase[(index - quarter) % phrase.size()]);
-        }
-        for (std::size_t index{quarter * 2U}; index < quarter * 3U; ++index)
-        {
-            auto const relative{index - quarter * 2U};
-            input[index] = static_cast<std::uint8_t>((relative / 16U + relative % 7U) & 0xFFU);
-        }
-        std::uint32_t random{0xC001D00DU};
-        for (std::size_t index{quarter * 3U}; index < input.size(); ++index)
-        {
-            random ^= random << 13U;
-            random ^= random >> 17U;
-            random ^= random << 5U;
-            input[index] = static_cast<std::uint8_t>(random);
-        }
-        return input;
+        return sph::zstd::eval::make_mixed_corpus(1024U * 1024U);
     }
 
     void test_reference_interoperability()
