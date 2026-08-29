@@ -148,7 +148,7 @@ xychart-beta
     y-axis "KiB" 0 --> 302
     bar [259, 259, 274, 274, 274, 274, 260, 260, 260, 260]
 ```
-
+---
 ```mermaid
 xychart-beta
     title "Compression throughput"
@@ -156,7 +156,7 @@ xychart-beta
     y-axis "MiB/s" 0 --> 1645
     bar [189, 1495, 109, 943, 61, 741, 37, 333, 34, 148]
 ```
-
+---
 ```mermaid
 xychart-beta
     title "Compression peak memory"
@@ -164,7 +164,7 @@ xychart-beta
     y-axis "MiB" 0 --> 98
     bar [9, 9, 14, 9, 27, 11, 73, 18, 89, 24]
 ```
-
+---
 ```mermaid
 xychart-beta
     title "Compression executable size"
