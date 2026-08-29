@@ -12,6 +12,7 @@
 
 #include <sph/zstd++/zstd_common.h>
 #include <sph/zstd++/detail/zstd_compression.h>
+#include <sph/zstd++/detail/zstd_parameters.h>
 
 namespace sph::zstd
 {
@@ -30,9 +31,11 @@ namespace sph::zstd
         requires output_callback<Callback>
     class zstd_compress
     {
+        static constexpr auto effective_parameters_{detail::resolve_parameters(Parameters)};
+
         static_assert(Parameters.block_size > 0 && Parameters.block_size <= maximum_block_size,
             "zstd_compress block_size must be in [1, 128 KiB]");
-        static_assert(Parameters.window_log >= 10 && Parameters.window_log <= 31,
+        static_assert(effective_parameters_.window_log >= 10 && effective_parameters_.window_log <= 31,
             "zstd_compress window_log must be in [10, 31]");
         static_assert(Parameters.worker_count == 0,
             "the header-only zstd compressor does not yet implement multi-threaded frames");
@@ -52,6 +55,11 @@ namespace sph::zstd
             checksum_.update(input);
             source_size_ += input.size();
 
+            if (buffered_size_ == Parameters.block_size && !input.empty())
+            {
+                emit_block(false);
+            }
+
             std::size_t offset{};
             while (offset < input.size())
             {
@@ -63,7 +71,13 @@ namespace sph::zstd
                 offset += count;
                 if (buffered_size_ == Parameters.block_size)
                 {
-                    emit_block(false);
+                    constexpr bool has_pledged_size = Parameters.pledged_source_size != unknown_content_size;
+                    auto const is_pledged_final_block{has_pledged_size &&
+                        source_size_ == Parameters.pledged_source_size && offset == input.size()};
+                    if (!is_pledged_final_block)
+                    {
+                        emit_block(false);
+                    }
                 }
             }
         }
@@ -102,7 +116,11 @@ namespace sph::zstd
                         "input size does not match zstd_compress pledged_source_size"};
                 }
             }
-            emit_block(true);
+            do
+            {
+                emit_block(true);
+            }
+            while (buffered_size_ != 0U);
             if constexpr (Parameters.checksum)
             {
                 std::array<std::uint8_t, 4> encoded_checksum{};
@@ -119,6 +137,14 @@ namespace sph::zstd
             source_size_ = 0;
             encoded_size_ = 0;
             frame_started_ = false;
+            block_count_ = 0;
+            compression_savings_ = 0;
+            history_.clear();
+            fast_match_state_.reset();
+            double_fast_match_state_.reset();
+            greedy_match_state_.reset();
+            lazy2_match_state_.reset();
+            binary_tree_lazy2_match_state_.reset();
             checksum_.reset();
             status_ = stream_status::ready;
         }
@@ -127,6 +153,10 @@ namespace sph::zstd
         [[nodiscard]] constexpr auto source_size() const noexcept -> std::uint64_t { return source_size_; }
         [[nodiscard]] constexpr auto encoded_size() const noexcept -> std::uint64_t { return encoded_size_; }
         [[nodiscard]] static consteval auto parameters() noexcept -> compression_parameters { return Parameters; }
+        [[nodiscard]] static consteval auto effective_parameters() noexcept -> compression_parameters
+        {
+            return effective_parameters_;
+        }
 
     private:
         void require_writable()
@@ -177,61 +207,173 @@ namespace sph::zstd
             std::uint8_t descriptor{Parameters.checksum ? std::uint8_t{0x04} : std::uint8_t{0x00}};
             constexpr bool has_known_size = Parameters.content_size &&
                 Parameters.pledged_source_size != unknown_content_size;
+            constexpr bool single_segment = has_known_size &&
+                Parameters.pledged_source_size <= (std::uint64_t{1} << effective_parameters_.window_log);
             if constexpr (has_known_size)
             {
-                descriptor |= 0x20U; // Single-segment frames use content size as their window size.
-                if constexpr (Parameters.pledged_source_size < 256U)
+                if constexpr (single_segment)
                 {
-                    header[size + 1] = static_cast<std::uint8_t>(Parameters.pledged_source_size);
+                    descriptor |= 0x20U;
+                }
+                if constexpr (single_segment && Parameters.pledged_source_size < 256U)
+                {
+                    // The zero content-size flag has a one-byte field only for single-segment frames.
                 }
                 else if constexpr (Parameters.pledged_source_size < 65'792U)
                 {
                     descriptor |= 0x40U;
-                    auto const encoded{Parameters.pledged_source_size - 256U};
-                    header[size + 1] = static_cast<std::uint8_t>(encoded);
-                    header[size + 2] = static_cast<std::uint8_t>(encoded >> 8U);
                 }
                 else if constexpr (Parameters.pledged_source_size <= std::numeric_limits<std::uint32_t>::max())
                 {
                     descriptor |= 0x80U;
-                    detail::write_u32(std::span<std::uint8_t>{header}.subspan(size + 1, 4),
-                        static_cast<std::uint32_t>(Parameters.pledged_source_size));
                 }
                 else
                 {
                     descriptor |= 0xC0U;
-                    auto value{Parameters.pledged_source_size};
-                    for (std::size_t index{}; index < 8; ++index)
-                    {
-                        header[size + 1 + index] = static_cast<std::uint8_t>(value);
-                        value >>= 8U;
-                    }
                 }
             }
 
             header[size++] = descriptor;
+            if constexpr (!single_segment)
+            {
+                header[size++] = static_cast<std::uint8_t>((effective_parameters_.window_log - 10U) << 3U);
+            }
             if constexpr (has_known_size)
             {
-                size += descriptor < 0x40U ? 1U : descriptor < 0x80U ? 2U : descriptor < 0xC0U ? 4U : 8U;
-            }
-            else
-            {
-                header[size++] = static_cast<std::uint8_t>((Parameters.window_log - 10U) << 3U);
+                if constexpr (single_segment && Parameters.pledged_source_size < 256U)
+                {
+                    header[size++] = static_cast<std::uint8_t>(Parameters.pledged_source_size);
+                }
+                else if constexpr (Parameters.pledged_source_size < 65'792U)
+                {
+                    auto const encoded{Parameters.pledged_source_size - 256U};
+                    header[size++] = static_cast<std::uint8_t>(encoded);
+                    header[size++] = static_cast<std::uint8_t>(encoded >> 8U);
+                }
+                else if constexpr (Parameters.pledged_source_size <= std::numeric_limits<std::uint32_t>::max())
+                {
+                    detail::write_u32(std::span<std::uint8_t>{header}.subspan(size, 4),
+                        static_cast<std::uint32_t>(Parameters.pledged_source_size));
+                    size += 4U;
+                }
+                else
+                {
+                    auto value{Parameters.pledged_source_size};
+                    for (std::size_t index{}; index < 8U; ++index)
+                    {
+                        header[size++] = static_cast<std::uint8_t>(value);
+                        value >>= 8U;
+                    }
+                }
             }
             emit(std::span<std::uint8_t const>{header}.first(size));
         }
 
         void emit_block(bool last)
         {
-            auto const bytes{std::span<std::uint8_t const>{block_buffer_}.first(buffered_size_)};
-            auto const is_rle{bytes.size() > 1 && std::ranges::all_of(bytes,
-                [first = bytes.front()](std::uint8_t byte) { return byte == first; })};
-            constexpr auto hash_log{Parameters.hash_log == 0U ? 15U : Parameters.hash_log};
-            std::vector<std::uint8_t> compressed;
-            if (!is_rle)
+            auto block_size{buffered_size_};
+            if constexpr (effective_parameters_.strategy == compression_strategy::fast)
             {
-                auto const selected{detail::find_best_fast_match(bytes, hash_log)};
-                if (selected && selected->length >= 4U)
+                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                {
+                    block_size = fast_split_size(std::span<std::uint8_t const>{block_buffer_});
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::double_fast)
+            {
+                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                {
+                    block_size = chunk_split_size(std::span<std::uint8_t const>{block_buffer_}, 43U, 8U);
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::greedy)
+            {
+                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                {
+                    block_size = chunk_split_size(std::span<std::uint8_t const>{block_buffer_}, 11U, 9U);
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::lazy2 ||
+                effective_parameters_.strategy == compression_strategy::binary_tree_lazy2)
+            {
+                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                {
+                    block_size = chunk_split_size(std::span<std::uint8_t const>{block_buffer_}, 5U, 10U);
+                }
+            }
+            auto const bytes{std::span<std::uint8_t const>{block_buffer_}.first(block_size)};
+            auto const actual_last{last && block_size == buffered_size_};
+            auto const input_is_rle{bytes.size() > 1 && std::ranges::all_of(bytes,
+                [first = bytes.front()](std::uint8_t byte) { return byte == first; })};
+            auto const block_begin{history_.size()};
+            history_.insert(history_.end(), bytes.begin(), bytes.end());
+            std::vector<std::uint8_t> compressed;
+            if constexpr (effective_parameters_.strategy == compression_strategy::fast)
+            {
+                auto const parsed{fast_match_state_.parse(history_, block_begin, bytes.size())};
+                if (!parsed.sequences.empty())
+                {
+                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    if (candidate.size() < bytes.size())
+                    {
+                        compressed = std::move(candidate);
+                    }
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::double_fast)
+            {
+                auto const parsed{double_fast_match_state_.parse(history_, block_begin, bytes.size())};
+                if (!parsed.sequences.empty())
+                {
+                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    if (candidate.size() < bytes.size())
+                    {
+                        compressed = std::move(candidate);
+                    }
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::greedy)
+            {
+                auto const parsed{greedy_match_state_.parse(history_, block_begin, bytes.size())};
+                if (!parsed.sequences.empty())
+                {
+                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    if (candidate.size() < bytes.size())
+                    {
+                        compressed = std::move(candidate);
+                    }
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::lazy2)
+            {
+                auto const parsed{lazy2_match_state_.parse(history_, block_begin, bytes.size())};
+                if (!parsed.sequences.empty())
+                {
+                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    if (candidate.size() < bytes.size())
+                    {
+                        compressed = std::move(candidate);
+                    }
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::binary_tree_lazy2)
+            {
+                auto const parsed{
+                    binary_tree_lazy2_match_state_.parse(history_, block_begin, bytes.size())};
+                if (!parsed.sequences.empty())
+                {
+                    auto candidate{detail::encode_sequences_block(history_, parsed)};
+                    if (candidate.size() < bytes.size())
+                    {
+                        compressed = std::move(candidate);
+                    }
+                }
+            }
+            if (compressed.empty() && !input_is_rle)
+            {
+                auto const selected{detail::find_best_fast_match(bytes, effective_parameters_.hash_log,
+                    effective_parameters_.minimum_match)};
+                if (selected)
                 {
                     auto candidate{detail::encode_single_match_block(bytes, *selected)};
                     if (candidate.size() < bytes.size())
@@ -241,10 +383,19 @@ namespace sph::zstd
                 }
             }
 
+            constexpr bool has_reference_parser =
+                effective_parameters_.strategy == compression_strategy::fast ||
+                effective_parameters_.strategy == compression_strategy::double_fast ||
+                effective_parameters_.strategy == compression_strategy::greedy ||
+                effective_parameters_.strategy == compression_strategy::lazy2 ||
+                effective_parameters_.strategy == compression_strategy::binary_tree_lazy2;
+            auto const is_rle = input_is_rle && (!has_reference_parser ||
+                (block_count_ != 0U && !compressed.empty() && compressed.size() < 25U));
+
             auto const block_type{is_rle ? 1U : compressed.empty() ? 0U : 2U};
-            auto const stored_size{compressed.empty() ? buffered_size_ : compressed.size()};
+            auto const stored_size{is_rle || compressed.empty() ? block_size : compressed.size()};
             auto const block_header{(static_cast<std::uint32_t>(stored_size) << 3U) |
-                (block_type << 1U) | (last ? 1U : 0U)};
+                (block_type << 1U) | (actual_last ? 1U : 0U)};
             std::array<std::uint8_t, 3> encoded_header{
                 static_cast<std::uint8_t>(block_header),
                 static_cast<std::uint8_t>(block_header >> 8U),
@@ -263,7 +414,129 @@ namespace sph::zstd
             {
                 emit(bytes);
             }
-            buffered_size_ = 0;
+            auto const emitted_size{is_rle ? 4U : stored_size + 3U};
+            compression_savings_ += static_cast<std::int64_t>(block_size) -
+                static_cast<std::int64_t>(emitted_size);
+            auto const remaining{buffered_size_ - block_size};
+            std::ranges::move(block_buffer_.begin() + static_cast<std::ptrdiff_t>(block_size),
+                block_buffer_.begin() + static_cast<std::ptrdiff_t>(buffered_size_), block_buffer_.begin());
+            buffered_size_ = remaining;
+            ++block_count_;
+        }
+
+        [[nodiscard]] static auto fast_split_size(std::span<std::uint8_t const> bytes) -> std::size_t
+        {
+            constexpr std::size_t sample_size{512U};
+            constexpr std::size_t half_block{maximum_block_size / 2U};
+            std::array<std::uint32_t, 256> beginning{};
+            std::array<std::uint32_t, 256> middle{};
+            std::array<std::uint32_t, 256> ending{};
+            auto add_sample = [&bytes](auto& histogram, std::size_t start)
+            {
+                for (auto const byte : bytes.subspan(start, sample_size))
+                {
+                    ++histogram[byte];
+                }
+            };
+            auto distance = [](auto const& first, auto const& second)
+            {
+                std::uint64_t result{};
+                for (std::size_t symbol{}; symbol < first.size(); ++symbol)
+                {
+                    auto const difference{static_cast<std::int64_t>(first[symbol]) *
+                        static_cast<std::int64_t>(sample_size) -
+                        static_cast<std::int64_t>(second[symbol]) * static_cast<std::int64_t>(sample_size)};
+                    result += static_cast<std::uint64_t>(difference < 0 ? -difference : difference);
+                }
+                return result;
+            };
+
+            add_sample(beginning, 0U);
+            add_sample(ending, bytes.size() - sample_size);
+            auto const threshold{static_cast<std::uint64_t>(sample_size) * sample_size * 14U / 16U};
+            if (distance(beginning, ending) < threshold)
+            {
+                return bytes.size();
+            }
+            add_sample(middle, half_block - sample_size / 2U);
+            auto const distance_from_beginning{distance(beginning, middle)};
+            auto const distance_from_end{distance(ending, middle)};
+            auto const difference{distance_from_beginning > distance_from_end ?
+                distance_from_beginning - distance_from_end : distance_from_end - distance_from_beginning};
+            if (difference < static_cast<std::uint64_t>(sample_size) * sample_size / 3U)
+            {
+                return half_block;
+            }
+            return distance_from_beginning > distance_from_end ? half_block / 2U : half_block + half_block / 2U;
+        }
+
+        [[nodiscard]] static auto chunk_split_size(
+            std::span<std::uint8_t const> bytes,
+            std::size_t sampling_rate,
+            unsigned hash_log) -> std::size_t
+        {
+            constexpr std::size_t chunk_size{8U * 1024U};
+            struct fingerprint
+            {
+                std::array<std::uint32_t, 1024> events{};
+                std::size_t event_count{};
+            };
+            auto record = [&bytes, sampling_rate, hash_log](fingerprint& result, std::size_t start)
+            {
+                result = {};
+                constexpr auto sample_limit{chunk_size - 2U + 1U};
+                for (std::size_t position{}; position < sample_limit; position += sampling_rate)
+                {
+                    auto const hash{hash_log == 8U ? static_cast<std::uint32_t>(bytes[start + position]) :
+                        (static_cast<std::uint32_t>(bytes[start + position]) |
+                            (static_cast<std::uint32_t>(bytes[start + position + 1U]) << 8U)) *
+                            0x9E3779B9U >> (32U - hash_log)};
+                    ++result.events[hash];
+                }
+                result.event_count = sample_limit / sampling_rate;
+            };
+            auto different = [hash_log](fingerprint const& past, fingerprint const& recent, int penalty)
+            {
+                std::uint64_t deviation{};
+                for (std::size_t hash{}; hash < (std::size_t{1} << hash_log); ++hash)
+                {
+                    auto const difference{static_cast<std::int64_t>(past.events[hash]) *
+                        static_cast<std::int64_t>(recent.event_count) -
+                        static_cast<std::int64_t>(recent.events[hash]) *
+                        static_cast<std::int64_t>(past.event_count)};
+                    deviation += static_cast<std::uint64_t>(difference < 0 ? -difference : difference);
+                }
+                auto const probability_half{static_cast<std::uint64_t>(past.event_count) * recent.event_count};
+                auto const threshold{probability_half * static_cast<std::uint64_t>(14 + penalty) / 16U};
+                return deviation >= threshold;
+            };
+            auto merge = [hash_log](fingerprint& destination, fingerprint const& source)
+            {
+                for (std::size_t hash{}; hash < (std::size_t{1} << hash_log); ++hash)
+                {
+                    destination.events[hash] += source.events[hash];
+                }
+                destination.event_count += source.event_count;
+            };
+
+            fingerprint past;
+            fingerprint recent;
+            record(past, 0U);
+            auto penalty{3};
+            for (auto position{chunk_size}; position <= bytes.size() - chunk_size; position += chunk_size)
+            {
+                record(recent, position);
+                if (different(past, recent, penalty))
+                {
+                    return position;
+                }
+                merge(past, recent);
+                if (penalty > 0)
+                {
+                    --penalty;
+                }
+            }
+            return bytes.size();
         }
 
         Callback callback_;
@@ -274,6 +547,24 @@ namespace sph::zstd
         detail::xxhash64 checksum_{};
         stream_status status_{stream_status::ready};
         bool frame_started_{};
+        std::size_t block_count_{};
+        std::int64_t compression_savings_{};
+        std::vector<std::uint8_t> history_;
+        detail::fast_match_state fast_match_state_{effective_parameters_.window_log,
+            effective_parameters_.hash_log, effective_parameters_.minimum_match,
+            effective_parameters_.target_length};
+        detail::double_fast_match_state double_fast_match_state_{effective_parameters_.window_log,
+            effective_parameters_.hash_log, effective_parameters_.chain_log,
+            effective_parameters_.minimum_match};
+        detail::greedy_match_state greedy_match_state_{effective_parameters_.window_log,
+            effective_parameters_.hash_log, effective_parameters_.chain_log,
+            effective_parameters_.search_log, effective_parameters_.minimum_match};
+        detail::greedy_match_state lazy2_match_state_{effective_parameters_.window_log,
+            effective_parameters_.hash_log, effective_parameters_.chain_log,
+            effective_parameters_.search_log, effective_parameters_.minimum_match, 2U};
+        detail::greedy_match_state binary_tree_lazy2_match_state_{effective_parameters_.window_log,
+            effective_parameters_.hash_log, effective_parameters_.chain_log,
+            effective_parameters_.search_log, effective_parameters_.minimum_match, 2U, true};
     };
 
     template <typename Callback>

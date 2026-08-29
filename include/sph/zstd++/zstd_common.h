@@ -20,7 +20,8 @@ namespace sph::zstd
 
     enum class compression_strategy : std::uint8_t
     {
-        fast = 1,
+        automatic,
+        fast,
         double_fast,
         greedy,
         lazy,
@@ -46,13 +47,13 @@ namespace sph::zstd
     struct compression_parameters
     {
         int compression_level{3};
-        std::uint8_t window_log{17};
+        std::uint8_t window_log{};
         std::uint8_t hash_log{};
         std::uint8_t chain_log{};
         std::uint8_t search_log{};
         std::uint8_t minimum_match{};
         std::uint32_t target_length{};
-        compression_strategy strategy{compression_strategy::fast};
+        compression_strategy strategy{compression_strategy::automatic};
         std::uint32_t target_compressed_block_size{};
         bool long_distance_matching{};
         std::uint8_t long_distance_hash_log{};
