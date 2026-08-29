@@ -960,18 +960,33 @@ namespace sph::zstd::detail
             auto* const hash_table{hash_table_.data()};
             auto* const chain_table{chain_table_.data()};
             auto const current{static_cast<std::uint32_t>(position + index_bias)};
-            while (next_to_update_ < current)
+            auto const insert_until = [&](std::uint32_t end)
             {
-                auto const update_position{static_cast<std::size_t>(next_to_update_) - index_bias};
-                auto const slot{hash(base + update_position)};
-                chain_table[next_to_update_ & ((std::uint32_t{1} << chain_log_) - 1U)] =
-                    hash_table[slot];
-                hash_table[slot] = next_to_update_;
-                ++next_to_update_;
-                if (lazy_skipping)
+                while (next_to_update_ < end)
                 {
-                    break;
+                    auto const update_position{static_cast<std::size_t>(next_to_update_) - index_bias};
+                    auto const slot{hash(base + update_position)};
+                    chain_table[next_to_update_ & ((std::uint32_t{1} << chain_log_) - 1U)] =
+                        hash_table[slot];
+                    hash_table[slot] = next_to_update_;
+                    ++next_to_update_;
                 }
+            };
+            // Reference zstd's row matcher bounds the table work crossed by a long match.
+            // Keeping both ends preserves the useful future candidates without hashing the
+            // usually redundant interior of large matches.
+            if (!lazy_skipping && current - next_to_update_ > skip_threshold)
+            {
+                insert_until(next_to_update_ + maximum_match_start_updates);
+                next_to_update_ = current - maximum_match_end_updates;
+            }
+            if (lazy_skipping)
+            {
+                insert_until(std::min(current, next_to_update_ + 1U));
+            }
+            else
+            {
+                insert_until(current);
             }
             next_to_update_ = current;
 
@@ -1257,6 +1272,9 @@ namespace sph::zstd::detail
         std::vector<std::uint32_t> chain_table_;
         std::uint32_t next_to_update_{index_bias};
         std::array<std::size_t, 3> repeat_offsets_{1U, 4U, 8U};
+        static constexpr std::uint32_t skip_threshold{384U};
+        static constexpr std::uint32_t maximum_match_start_updates{96U};
+        static constexpr std::uint32_t maximum_match_end_updates{32U};
         static constexpr std::uint32_t unsorted_mark{1U};
     };
 
