@@ -153,8 +153,8 @@ xychart-beta
 xychart-beta
     title "Compression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 2499
-    bar [551, 2271, 674, 1812, 208, 2127, 150, 1178, 182, 536]
+    y-axis "MiB/s" 0 --> 2422
+    bar [1238, 2201, 914, 1714, 940, 2094, 558, 1137, 189, 519]
 ```
 
 ```mermaid
@@ -162,7 +162,7 @@ xychart-beta
     title "Compression peak memory"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
     y-axis "MiB" 0 --> 26
-    bar [8, 7, 8, 8, 11, 9, 19, 17, 23, 23]
+    bar [7, 7, 8, 8, 10, 9, 19, 17, 23, 23]
 ```
 
 ```mermaid
@@ -170,7 +170,7 @@ xychart-beta
     title "Compression executable size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
     y-axis "KiB" 0 --> 420
-    bar [95, 381, 96, 381, 95, 381, 96, 381, 97, 381]
+    bar [93, 381, 93, 381, 93, 381, 94, 381, 94, 381]
 ```
 
 ### Decompression
@@ -179,16 +179,16 @@ xychart-beta
 xychart-beta
     title "Decompression throughput"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB/s" 0 --> 15511
-    bar [1053, 3151, 1174, 5643, 1448, 5534, 2907, 14045, 7040, 14100]
+    y-axis "MiB/s" 0 --> 14198
+    bar [1522, 3124, 2515, 5616, 2706, 5461, 10978, 12907, 8269, 12892]
 ```
 
 ```mermaid
 xychart-beta
     title "Decompression peak memory"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
-    y-axis "MiB" 0 --> 12
-    bar [8, 7, 9, 7, 9, 7, 10, 7, 9, 7]
+    y-axis "MiB" 0 --> 10
+    bar [8, 7, 9, 7, 9, 7, 9, 7, 9, 7]
 ```
 
 ```mermaid
@@ -196,7 +196,7 @@ xychart-beta
     title "Decompression executable size"
     x-axis [L1_CPP, L1_REF, L3_CPP, L3_REF, L5_CPP, L5_REF, L9_CPP, L9_REF, L15_CPP, L15_REF]
     y-axis "KiB" 0 --> 125
-    bar [81, 113, 81, 113, 81, 113, 81, 113, 81, 113]
+    bar [77, 113, 77, 113, 77, 113, 77, 113, 77, 113]
 ```
 
 <!-- SPH_ZSTDPP_EVAL_END -->
