@@ -203,7 +203,20 @@ namespace sph::zstd::detail
 
         void reset()
         {
-            std::ranges::fill(hash_table_, 0U);
+            auto const window_size{std::uint64_t{1} << window_log_};
+            auto const next_base{static_cast<std::uint64_t>(frame_index_base_) +
+                frame_extent_ + index_bias + window_size};
+            if (next_base + window_size + index_bias >
+                std::numeric_limits<std::uint32_t>::max())
+            {
+                std::ranges::fill(hash_table_, 0U);
+                frame_index_base_ = 0U;
+            }
+            else
+            {
+                frame_index_base_ = static_cast<std::uint32_t>(next_base);
+            }
+            frame_extent_ = 0U;
             repeat_offsets_ = {1U, 4U, 8U};
         }
 
@@ -221,6 +234,7 @@ namespace sph::zstd::detail
             }
 
             auto const block_end{block_begin + block_size};
+            frame_extent_ = std::max(frame_extent_, static_cast<std::uint32_t>(block_end));
             auto const prefix_start{block_end > (std::size_t{1} << window_log_) ?
                 block_end - (std::size_t{1} << window_log_) : 0U};
             auto const limit{block_end - hash_read_size};
@@ -256,13 +270,14 @@ namespace sph::zstd::detail
 
                 do
                 {
-                    current_index = position + index_bias;
+                    current_index = frame_index_base_ + position + index_bias;
                     hash_table_[hash_zero] = static_cast<std::uint32_t>(current_index);
 
                     if (repeat_one != 0U && equal_four(input, position_two, position_two - repeat_one))
                     {
                         position = position_two;
-                        hash_table_[hash_one] = static_cast<std::uint32_t>(position_one + index_bias);
+                        hash_table_[hash_one] = static_cast<std::uint32_t>(
+                            frame_index_base_ + position_one + index_bias);
                         found = true;
                         repeat_match = true;
                         break;
@@ -270,7 +285,8 @@ namespace sph::zstd::detail
 
                     if (matches(input, position, match_index, prefix_start))
                     {
-                        hash_table_[hash_one] = static_cast<std::uint32_t>(position_one + index_bias);
+                        hash_table_[hash_one] = static_cast<std::uint32_t>(
+                            frame_index_base_ + position_one + index_bias);
                         found = true;
                         break;
                     }
@@ -281,14 +297,15 @@ namespace sph::zstd::detail
                     position = position_one;
                     position_one = position_two;
                     position_two = position_three;
-                    current_index = position + index_bias;
+                    current_index = frame_index_base_ + position + index_bias;
                     hash_table_[hash_zero] = static_cast<std::uint32_t>(current_index);
 
                     if (matches(input, position, match_index, prefix_start))
                     {
                         if (step <= 4U)
                         {
-                            hash_table_[hash_one] = static_cast<std::uint32_t>(position_one + index_bias);
+                            hash_table_[hash_one] = static_cast<std::uint32_t>(
+                                frame_index_base_ + position_one + index_bias);
                         }
                         found = true;
                         break;
@@ -332,7 +349,8 @@ namespace sph::zstd::detail
                 }
                 else
                 {
-                    match_position = static_cast<std::size_t>(match_index) - index_bias;
+                    match_position = static_cast<std::size_t>(
+                        match_index - frame_index_base_ - index_bias);
                     repeat_two = repeat_one;
                     repeat_one = position - match_position;
                     offset = repeat_one;
@@ -354,10 +372,12 @@ namespace sph::zstd::detail
 
                 if (position <= limit)
                 {
-                    hash_table_[hash(input, current_index - index_bias + 2U)] =
+                    hash_table_[hash(input,
+                        current_index - frame_index_base_ - index_bias + 2U)] =
                         static_cast<std::uint32_t>(current_index + 2U);
                     hash_table_[hash(input, position - 2U)] =
-                        static_cast<std::uint32_t>(position - 2U + index_bias);
+                        static_cast<std::uint32_t>(
+                            frame_index_base_ + position - 2U + index_bias);
 
                     if (repeat_two != 0U)
                     {
@@ -367,7 +387,8 @@ namespace sph::zstd::detail
                                 input, position, position - repeat_two, block_end, 4U)};
                             std::swap(repeat_one, repeat_two);
                             hash_table_[hash(input, position)] =
-                                static_cast<std::uint32_t>(position + index_bias);
+                                static_cast<std::uint32_t>(
+                                    frame_index_base_ + position + index_bias);
                             result.sequences.push_back(parsed_sequence{
                                 anchor, 0U, repeat_length, repeat_one, 1U});
                             position += repeat_length;
@@ -414,14 +435,16 @@ namespace sph::zstd::detail
             return equal_four_bytes(input, left, right);
         }
 
-        [[nodiscard]] static auto matches(std::span<std::uint8_t const> input,
-            std::size_t position, std::uint32_t biased_match, std::size_t prefix_start) -> bool
+        [[nodiscard]] auto matches(std::span<std::uint8_t const> input,
+            std::size_t position, std::uint32_t biased_match, std::size_t prefix_start) const -> bool
         {
-            if (biased_match < prefix_start + index_bias)
+            auto const lowest{frame_index_base_ + static_cast<std::uint32_t>(prefix_start) + index_bias};
+            if (biased_match < lowest)
             {
                 return false;
             }
-            return equal_four(input, position, static_cast<std::size_t>(biased_match) - index_bias);
+            return equal_four(input, position, static_cast<std::size_t>(
+                biased_match - frame_index_base_ - index_bias));
         }
 
         unsigned window_log_{};
@@ -429,6 +452,8 @@ namespace sph::zstd::detail
         unsigned minimum_match_{};
         std::size_t target_length_{};
         std::vector<std::uint32_t> hash_table_;
+        std::uint32_t frame_index_base_{};
+        std::uint32_t frame_extent_{};
         std::array<std::size_t, 3> repeat_offsets_{1U, 4U, 8U};
     };
 
@@ -446,8 +471,21 @@ namespace sph::zstd::detail
 
         void reset()
         {
-            std::ranges::fill(long_table_, 0U);
-            std::ranges::fill(short_table_, 0U);
+            auto const window_size{std::uint64_t{1} << window_log_};
+            auto const next_base{static_cast<std::uint64_t>(frame_index_base_) +
+                frame_extent_ + index_bias + window_size};
+            if (next_base + window_size + index_bias >
+                std::numeric_limits<std::uint32_t>::max())
+            {
+                std::ranges::fill(long_table_, 0U);
+                std::ranges::fill(short_table_, 0U);
+                frame_index_base_ = 0U;
+            }
+            else
+            {
+                frame_index_base_ = static_cast<std::uint32_t>(next_base);
+            }
+            frame_extent_ = 0U;
             repeat_offsets_ = {1U, 4U, 8U};
         }
 
@@ -465,9 +503,10 @@ namespace sph::zstd::detail
             }
 
             auto const block_end{block_begin + block_size};
+            frame_extent_ = std::max(frame_extent_, static_cast<std::uint32_t>(block_end));
             auto const prefix_start{block_end > (std::size_t{1} << window_log_) ?
                 block_end - (std::size_t{1} << window_log_) : 0U};
-            auto const lowest_biased{prefix_start + index_bias};
+            auto const lowest_biased{frame_index_base_ + prefix_start + index_bias};
             auto const limit{block_end - hash_read_size};
             auto anchor{block_begin};
             auto position{block_begin + static_cast<std::size_t>(block_begin == prefix_start)};
@@ -503,7 +542,8 @@ namespace sph::zstd::detail
                 {
                     auto const short_hash_zero{short_hash(input, position)};
                     auto const short_index_zero{short_table_[short_hash_zero]};
-                    current_biased = static_cast<std::uint32_t>(position + index_bias);
+                    current_biased = static_cast<std::uint32_t>(
+                        frame_index_base_ + position + index_bias);
                     long_table_[long_hash_zero] = short_table_[short_hash_zero] =
                         current_biased;
 
@@ -579,7 +619,8 @@ namespace sph::zstd::detail
                     repeat_one = offset;
                     if (step < 4U)
                     {
-                        long_table_[long_hash_one] = static_cast<std::uint32_t>(next_position + index_bias);
+                        long_table_[long_hash_one] = static_cast<std::uint32_t>(
+                            frame_index_base_ + next_position + index_bias);
                     }
                 }
                 result.sequences.push_back(parsed_sequence{
@@ -594,9 +635,11 @@ namespace sph::zstd::detail
                         short_table_[short_hash(input, insertion_position)] =
                             current_biased + 2U;
                     long_table_[long_hash(input, position - 2U)] =
-                        static_cast<std::uint32_t>(position - 2U + index_bias);
+                        static_cast<std::uint32_t>(
+                            frame_index_base_ + position - 2U + index_bias);
                     short_table_[short_hash(input, position - 1U)] =
-                        static_cast<std::uint32_t>(position - 1U + index_bias);
+                        static_cast<std::uint32_t>(
+                            frame_index_base_ + position - 1U + index_bias);
 
                     while (position <= limit && repeat_two != 0U &&
                         equal_four(input, position, position - repeat_two))
@@ -606,7 +649,8 @@ namespace sph::zstd::detail
                         std::swap(repeat_one, repeat_two);
                         short_table_[short_hash(input, position)] =
                             long_table_[long_hash(input, position)] =
-                                static_cast<std::uint32_t>(position + index_bias);
+                                static_cast<std::uint32_t>(
+                                    frame_index_base_ + position + index_bias);
                         result.sequences.push_back(parsed_sequence{
                             anchor, 0U, repeat_length, repeat_one, 1U});
                         position += repeat_length;
@@ -662,9 +706,9 @@ namespace sph::zstd::detail
             }
         }
 
-        [[nodiscard]] static constexpr auto unbiased(std::uint32_t position) -> std::size_t
+        [[nodiscard]] constexpr auto unbiased(std::uint32_t position) const -> std::size_t
         {
-            return static_cast<std::size_t>(position) - index_bias;
+            return static_cast<std::size_t>(position - frame_index_base_ - index_bias);
         }
 
         [[nodiscard]] static constexpr auto valid(std::uint32_t position,
@@ -711,6 +755,8 @@ namespace sph::zstd::detail
         unsigned minimum_match_{};
         std::vector<std::uint32_t> long_table_;
         std::vector<std::uint32_t> short_table_;
+        std::uint32_t frame_index_base_{};
+        std::uint32_t frame_extent_{};
         std::array<std::size_t, 3> repeat_offsets_{1U, 4U, 8U};
     };
 
@@ -732,10 +778,21 @@ namespace sph::zstd::detail
 
         void reset()
         {
-            std::ranges::fill(hash_table_, 0U);
-            std::ranges::fill(chain_table_, 0U);
+            auto const window_size{std::uint64_t{1} << window_log_};
+            auto const next_base{static_cast<std::uint64_t>(next_to_update_) + window_size};
+            if (next_base + window_size + index_bias >
+                std::numeric_limits<std::uint32_t>::max())
+            {
+                std::ranges::fill(hash_table_, 0U);
+                std::ranges::fill(chain_table_, 0U);
+                frame_index_base_ = 0U;
+            }
+            else
+            {
+                frame_index_base_ = static_cast<std::uint32_t>(next_base);
+            }
             repeat_offsets_ = {1U, 4U, 8U};
-            next_to_update_ = index_bias;
+            next_to_update_ = frame_index_base_ + index_bias;
         }
 
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
@@ -931,7 +988,7 @@ namespace sph::zstd::detail
         };
 
         static constexpr std::size_t hash_read_size{8U};
-        static constexpr std::size_t index_bias{2U};
+        static constexpr std::uint32_t index_bias{2U};
         static constexpr unsigned search_strength{8U};
         static constexpr std::size_t lazy_skipping_step{8U};
 
@@ -959,12 +1016,13 @@ namespace sph::zstd::detail
             auto const* const base{input.data()};
             auto* const hash_table{hash_table_.data()};
             auto* const chain_table{chain_table_.data()};
-            auto const current{static_cast<std::uint32_t>(position + index_bias)};
+            auto const current{frame_index_base_ + static_cast<std::uint32_t>(position) + index_bias};
             auto const insert_until = [&](std::uint32_t end)
             {
                 while (next_to_update_ < end)
                 {
-                    auto const update_position{static_cast<std::size_t>(next_to_update_) - index_bias};
+                    auto const update_position{static_cast<std::size_t>(
+                        next_to_update_ - frame_index_base_ - index_bias)};
                     auto const slot{hash(base + update_position)};
                     chain_table[next_to_update_ & ((std::uint32_t{1} << chain_log_) - 1U)] =
                         hash_table[slot];
@@ -992,15 +1050,16 @@ namespace sph::zstd::detail
 
             auto match_index{hash_table[hash(base + position)]};
             auto const window_size{std::uint32_t{1} << window_log_};
-            auto const low_limit{current - index_bias > window_size ? current - window_size :
-                static_cast<std::uint32_t>(index_bias)};
+            auto const frame_low{frame_index_base_ + index_bias};
+            auto const low_limit{current - frame_low > window_size ? current - window_size : frame_low};
             auto const chain_size{std::uint32_t{1} << chain_log_};
             auto const minimum_chain{current > chain_size ? current - chain_size : 0U};
             auto attempts{std::uint32_t{1} << search_log_};
             match_result best;
             while (match_index >= low_limit && attempts-- != 0U)
             {
-                auto const match_position{static_cast<std::size_t>(match_index) - index_bias};
+                auto const match_position{static_cast<std::size_t>(
+                    match_index - frame_index_base_ - index_bias)};
                 std::size_t current_length{};
                 if (equal_four_bytes(base + match_position + best.length - 3U,
                     base + position + best.length - 3U))
@@ -1031,7 +1090,8 @@ namespace sph::zstd::detail
             auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
             while (next_to_update_ < current)
             {
-                auto const update_position{static_cast<std::size_t>(next_to_update_) - index_bias};
+                auto const update_position{static_cast<std::size_t>(
+                    next_to_update_ - frame_index_base_ - index_bias)};
                 auto const slot{hash(input, update_position)};
                 auto const match_index{hash_table_[slot]};
                 auto const child_slot{2U * (next_to_update_ & tree_mask)};
@@ -1048,7 +1108,8 @@ namespace sph::zstd::detail
             std::uint32_t tree_low)
         {
             auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
-            auto const current_position{static_cast<std::size_t>(current) - index_bias};
+            auto const current_position{static_cast<std::size_t>(
+                current - frame_index_base_ - index_bias)};
             auto smaller_slot{static_cast<std::size_t>(2U * (current & tree_mask))};
             auto larger_slot{smaller_slot + 1U};
             bool smaller_is_dummy{};
@@ -1057,13 +1118,14 @@ namespace sph::zstd::detail
             std::size_t common_smaller{};
             std::size_t common_larger{};
             auto const window_size{std::uint32_t{1} << window_log_};
-            auto const window_low{current - index_bias > window_size ? current - window_size :
-                static_cast<std::uint32_t>(index_bias)};
+            auto const frame_low{frame_index_base_ + index_bias};
+            auto const window_low{current - frame_low > window_size ? current - window_size : frame_low};
 
             while (attempts-- != 0U && match_index > window_low)
             {
                 auto const next_slot{static_cast<std::size_t>(2U * (match_index & tree_mask))};
-                auto const match_position{static_cast<std::size_t>(match_index) - index_bias};
+                auto const match_position{static_cast<std::size_t>(
+                    match_index - frame_index_base_ - index_bias)};
                 auto const common{std::min(common_smaller, common_larger)};
                 auto const length{count_match(
                     input, current_position, match_position, block_end, common)};
@@ -1103,7 +1165,7 @@ namespace sph::zstd::detail
         [[nodiscard]] auto find_best_binary_tree_match(std::span<std::uint8_t const> input,
             std::size_t position, std::size_t block_end) -> match_result
         {
-            auto const current{static_cast<std::uint32_t>(position + index_bias)};
+            auto const current{frame_index_base_ + static_cast<std::uint32_t>(position) + index_bias};
             if (current < next_to_update_)
             {
                 return match_result{0U, 0U};
@@ -1113,8 +1175,8 @@ namespace sph::zstd::detail
             auto const hash_slot{hash(input, position)};
             auto match_index{hash_table_[hash_slot]};
             auto const window_size{std::uint32_t{1} << window_log_};
-            auto const window_low{current - index_bias > window_size ? current - window_size :
-                static_cast<std::uint32_t>(index_bias)};
+            auto const frame_low{frame_index_base_ + index_bias};
+            auto const window_low{current - frame_low > window_size ? current - window_size : frame_low};
             auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
             auto const tree_low{tree_mask >= current ? 0U : current - tree_mask};
             auto const unsorted_limit{std::max(tree_low, window_low)};
@@ -1164,7 +1226,8 @@ namespace sph::zstd::detail
             while (attempts-- != 0U && match_index > window_low)
             {
                 auto const next_slot{static_cast<std::size_t>(2U * (match_index & tree_mask))};
-                auto const match_position{static_cast<std::size_t>(match_index) - index_bias};
+                auto const match_position{static_cast<std::size_t>(
+                    match_index - frame_index_base_ - index_bias)};
                 auto const common{std::min(common_smaller, common_larger)};
                 auto const length{count_match(input, position, match_position, block_end, common)};
                 if (length > best.length)
@@ -1270,6 +1333,7 @@ namespace sph::zstd::detail
         match_parameter<MinimumMatch> minimum_match_;
         std::vector<std::uint32_t> hash_table_;
         std::vector<std::uint32_t> chain_table_;
+        std::uint32_t frame_index_base_{};
         std::uint32_t next_to_update_{index_bias};
         std::array<std::size_t, 3> repeat_offsets_{1U, 4U, 8U};
         static constexpr std::uint32_t skip_threshold{384U};
