@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -39,6 +40,7 @@ namespace sph::zstd
         requires output_callback<Callback>
     class zstd_decompress
     {
+        static constexpr std::size_t copy_slack{16U};
         static_assert(Parameters.maximum_window_log >= 10 && Parameters.maximum_window_log <= 63,
             "zstd_decompress maximum_window_log must be in [10, 63]");
         static_assert(Parameters.maximum_decoded_block_size > 0 &&
@@ -48,7 +50,7 @@ namespace sph::zstd
     public:
         explicit zstd_decompress(Callback callback) : callback_{std::move(callback)}
         {
-            literals_.reserve(Parameters.maximum_decoded_block_size);
+            literals_.reserve(Parameters.maximum_decoded_block_size + copy_slack);
         }
 
         zstd_decompress(zstd_decompress const&) = delete;
@@ -117,11 +119,22 @@ namespace sph::zstd
         class byte_buffer
         {
         public:
-            void clear() noexcept { size_ = 0U; }
+            void clear() noexcept
+            {
+                offset_ = 0U;
+                size_ = 0U;
+            }
 
             [[nodiscard]] auto size() const noexcept -> std::size_t { return size_; }
-            [[nodiscard]] auto data() noexcept -> std::uint8_t* { return storage_.get(); }
-            [[nodiscard]] auto data() const noexcept -> std::uint8_t const* { return storage_.get(); }
+            [[nodiscard]] auto data() noexcept -> std::uint8_t*
+            {
+                return storage_ == nullptr ? nullptr : storage_.get() + offset_;
+            }
+
+            [[nodiscard]] auto data() const noexcept -> std::uint8_t const*
+            {
+                return storage_ == nullptr ? nullptr : storage_.get() + offset_;
+            }
 
             [[nodiscard]] auto bytes() noexcept -> std::span<std::uint8_t>
             {
@@ -163,20 +176,56 @@ namespace sph::zstd
                 return result;
             }
 
+            void reserve_additional(std::size_t count)
+            {
+                if (count > std::numeric_limits<std::size_t>::max() - size_)
+                {
+                    throw std::length_error{"decoded history is too large"};
+                }
+                reserve(size_ + count);
+            }
+
+            [[nodiscard]] auto append_uninitialized_reserved(std::size_t count) noexcept
+                -> std::span<std::uint8_t>
+            {
+                auto result{std::span<std::uint8_t>{data() + size_, count}};
+                size_ += count;
+                return result;
+            }
+
+            void append_reserved(std::span<std::uint8_t const> source) noexcept
+            {
+                auto const destination{append_uninitialized_reserved(source.size())};
+                if (!source.empty())
+                {
+                    std::memcpy(destination.data(), source.data(), source.size());
+                }
+            }
+
             void erase_prefix(std::size_t count) noexcept
             {
                 if (count != 0U)
                 {
-                    std::memmove(data(), data() + count, size_ - count);
+                    offset_ += count;
                     size_ -= count;
+                    if (size_ == 0U)
+                    {
+                        offset_ = 0U;
+                    }
                 }
             }
 
         private:
             void reserve(std::size_t requested)
             {
+                if (requested <= capacity_ - offset_)
+                {
+                    return;
+                }
                 if (requested <= capacity_)
                 {
+                    std::memmove(storage_.get(), data(), size_);
+                    offset_ = 0U;
                     return;
                 }
                 auto const doubled{capacity_ > std::numeric_limits<std::size_t>::max() / 2U ?
@@ -189,10 +238,12 @@ namespace sph::zstd
                     std::memcpy(storage.get(), data(), size_);
                 }
                 storage_ = std::move(storage);
+                offset_ = 0U;
                 capacity_ = capacity;
             }
 
             std::unique_ptr<std::uint8_t[]> storage_;
+            std::size_t offset_{};
             std::size_t size_{};
             std::size_t capacity_{};
         };
@@ -609,7 +660,8 @@ namespace sph::zstd
                 {
                     literals_.assign(regenerated_size, block[header_size]);
                 }
-                return {literals_, header_size + stored_size};
+                literals_.resize(regenerated_size + copy_slack);
+                return {{literals_.data(), regenerated_size}, header_size + stored_size};
             }
 
             if (compressed_size == 0U || header_size + compressed_size > block.size())
@@ -631,9 +683,11 @@ namespace sph::zstd
                 throw detail::entropy_error{"Zstandard Huffman repeat mode has no previous table"};
             }
 
-            literals_.resize(regenerated_size);
-            detail::decode_huffman_literals(compressed, literals_, four_streams, huffman_table_);
-            return {literals_, header_size + compressed_size};
+            literals_.resize(regenerated_size + copy_slack);
+            auto const regenerated_literals{
+                std::span<std::uint8_t>{literals_.data(), regenerated_size}};
+            detail::decode_huffman_literals(compressed, regenerated_literals, four_streams, huffman_table_);
+            return {regenerated_literals, header_size + compressed_size};
         }
 
         template <std::size_t Count, std::size_t NormCount>
@@ -748,32 +802,59 @@ namespace sph::zstd
             std::memcpy(destination, source, count);
         }
 
+        static void copy_literals(
+            std::uint8_t* destination,
+            std::uint8_t const* source,
+            std::size_t count) noexcept
+        {
+            if (count == 0U)
+            {
+                return;
+            }
+            if (count <= copy_slack)
+            {
+                // Both buffers carry padding so common short literal runs use one
+                // fixed-width copy without a tiny-size dispatch.
+                std::memcpy(destination, source, copy_slack);
+                return;
+            }
+            std::memcpy(destination, source, count);
+        }
+
+        static void copy_match(
+            std::uint8_t* destination,
+            std::uint8_t const* source,
+            std::size_t count,
+            std::size_t offset) noexcept
+        {
+            if (count <= copy_slack && offset >= copy_slack)
+            {
+                std::memcpy(destination, source, copy_slack);
+                return;
+            }
+            copy_nonoverlapping(destination, source, count);
+        }
+
         void append_sequence(
             byte_buffer& output,
-            std::size_t block_begin,
             std::span<std::uint8_t const> literals,
             std::size_t match_offset,
             std::size_t match_length)
         {
-            auto const produced{output.size() - block_begin};
-            if (literals.size() > Parameters.maximum_decoded_block_size - produced ||
-                match_length > Parameters.maximum_decoded_block_size - produced - literals.size())
-            {
-                throw detail::entropy_error{"decoded Zstandard block is too large"};
-            }
             auto const old_size{output.size()};
             auto const match_begin{old_size + literals.size()};
             if (match_offset == 0U || match_offset > match_begin)
             {
                 throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
             }
-            auto const destination{output.append_uninitialized(literals.size() + match_length)};
-            copy_nonoverlapping(destination.data(), literals.data(), literals.size());
+            auto const destination{output.append_uninitialized_reserved(literals.size() + match_length)};
+            copy_literals(destination.data(), literals.data(), literals.size());
             auto* const match_destination{destination.data() + literals.size()};
             auto const source_position{match_begin - match_offset};
             if (match_offset >= match_length)
             {
-                copy_nonoverlapping(match_destination, output.data() + source_position, match_length);
+                copy_match(match_destination, output.data() + source_position,
+                    match_length, match_offset);
                 return;
             }
             std::memcpy(match_destination, output.data() + source_position, match_offset);
@@ -826,84 +907,82 @@ namespace sph::zstd
             }
 
             detail::reverse_bit_reader bits{source.subspan(offset)};
-            auto literal_state{static_cast<std::size_t>(bits.read(literal_length_table_.table_log))};
-            auto offset_state{static_cast<std::size_t>(bits.read(offset_table_.table_log))};
-            auto match_state{static_cast<std::size_t>(bits.read(match_length_table_.table_log))};
+            auto literal_state{static_cast<std::size_t>(bits.read_fast(literal_length_table_.table_log))};
+            auto offset_state{static_cast<std::size_t>(bits.read_fast(offset_table_.table_log))};
+            auto match_state{static_cast<std::size_t>(bits.read_fast(match_length_table_.table_log))};
+            auto const* const literal_entries{literal_length_table_.entries.data()};
+            auto const* const offset_entries{offset_table_.entries.data()};
+            auto const* const match_entries{match_length_table_.entries.data()};
+            auto repeat0{repeat_offsets_[0]};
+            auto repeat1{repeat_offsets_[1]};
+            auto repeat2{repeat_offsets_[2]};
             auto& output{history_};
+            output.reserve_additional(Parameters.maximum_decoded_block_size + copy_slack);
             std::size_t literal_offset{};
             for (std::size_t sequence_index{}; sequence_index < sequence_count; ++sequence_index)
             {
-                if (literal_state >= literal_length_table_.size ||
-                    offset_state >= offset_table_.size ||
-                    match_state >= match_length_table_.size)
-                {
-                    throw detail::entropy_error{"invalid Zstandard FSE sequence state"};
-                }
-                auto const literal_entry{literal_length_table_.entries[literal_state]};
-                auto const offset_entry{offset_table_.entries[offset_state]};
-                auto const match_entry{match_length_table_.entries[match_state]};
+                auto const literal_entry{literal_entries[literal_state]};
+                auto const offset_entry{offset_entries[offset_state]};
+                auto const match_entry{match_entries[match_state]};
 
                 std::size_t match_offset{};
                 if (offset_entry.additional_bits > 1U)
                 {
                     match_offset = static_cast<std::size_t>(offset_entry.base_value) +
-                        bits.read(offset_entry.additional_bits);
-                    repeat_offsets_[2] = repeat_offsets_[1];
-                    repeat_offsets_[1] = repeat_offsets_[0];
-                    repeat_offsets_[0] = match_offset;
+                        bits.read_fast(offset_entry.additional_bits);
+                    repeat2 = repeat1;
+                    repeat1 = repeat0;
+                    repeat0 = match_offset;
                 }
                 else if (offset_entry.additional_bits == 0U)
                 {
                     auto const literal_is_zero{literal_entry.base_value == 0U};
-                    match_offset = repeat_offsets_[literal_is_zero ? 1U : 0U];
-                    repeat_offsets_[1] = repeat_offsets_[literal_is_zero ? 0U : 1U];
-                    repeat_offsets_[0] = match_offset;
+                    match_offset = literal_is_zero ? repeat1 : repeat0;
+                    repeat1 = literal_is_zero ? repeat0 : repeat1;
+                    repeat0 = match_offset;
                 }
                 else
                 {
                     auto const literal_is_zero{literal_entry.base_value == 0U};
                     auto const repeat_code{static_cast<std::size_t>(offset_entry.base_value) +
-                        (literal_is_zero ? 1U : 0U) + bits.read(1U)};
-                    if (repeat_code == 0U || repeat_code > 3U)
-                    {
-                        throw detail::entropy_error{"invalid Zstandard repeat offset code"};
-                    }
-                    match_offset = repeat_code == 3U ? repeat_offsets_[0] - 1U : repeat_offsets_[repeat_code];
-                    if (match_offset == 0U)
-                    {
-                        throw detail::entropy_error{"Zstandard match offset is zero"};
-                    }
+                        (literal_is_zero ? 1U : 0U) + bits.read_fast(1U)};
+                    match_offset = repeat_code == 3U ? repeat0 - 1U :
+                        (repeat_code == 2U ? repeat2 : repeat1);
                     if (repeat_code != 1U)
                     {
-                        repeat_offsets_[2] = repeat_offsets_[1];
+                        repeat2 = repeat1;
                     }
-                    repeat_offsets_[1] = repeat_offsets_[0];
-                    repeat_offsets_[0] = match_offset;
+                    repeat1 = repeat0;
+                    repeat0 = match_offset;
                 }
 
                 auto const match_length{static_cast<std::size_t>(match_entry.base_value) +
-                    bits.read(match_entry.additional_bits)};
+                    bits.read_fast(match_entry.additional_bits)};
                 auto const literal_length{static_cast<std::size_t>(literal_entry.base_value) +
-                    bits.read(literal_entry.additional_bits)};
+                    bits.read_fast(literal_entry.additional_bits)};
+                auto const remaining_output{Parameters.maximum_decoded_block_size -
+                    (output.size() - block_begin)};
                 if (literal_length > literals.size() - literal_offset ||
-                    literal_length > Parameters.maximum_decoded_block_size - (output.size() - block_begin))
+                    literal_length > remaining_output ||
+                    match_length > remaining_output - literal_length)
                 {
                     throw detail::entropy_error{"Zstandard sequence consumes too many literals"};
                 }
                 auto const sequence_literals{literals.subspan(literal_offset, literal_length)};
                 literal_offset += literal_length;
-                append_sequence(output, block_begin, sequence_literals, match_offset, match_length);
+                append_sequence(output, sequence_literals, match_offset, match_length);
 
                 if (sequence_index + 1U != sequence_count)
                 {
                     literal_state = static_cast<std::size_t>(literal_entry.next_state) +
-                        bits.read(literal_entry.state_bits);
+                        bits.read_fast(literal_entry.state_bits);
                     match_state = static_cast<std::size_t>(match_entry.next_state) +
-                        bits.read(match_entry.state_bits);
+                        bits.read_fast(match_entry.state_bits);
                     offset_state = static_cast<std::size_t>(offset_entry.next_state) +
-                        bits.read(offset_entry.state_bits);
+                        bits.read_fast(offset_entry.state_bits);
                 }
             }
+            repeat_offsets_ = {repeat0, repeat1, repeat2};
             if (!bits.at_end())
             {
                 throw detail::entropy_error{"Zstandard sequence bitstream has trailing bits"};
@@ -913,7 +992,7 @@ namespace sph::zstd
             {
                 throw detail::entropy_error{"decoded Zstandard block is too large"};
             }
-            output.append(literals.subspan(literal_offset));
+            output.append_reserved(literals.subspan(literal_offset));
             fse_repeat_allowed_ = true;
             return output.bytes().subspan(block_begin);
         }

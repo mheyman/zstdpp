@@ -809,6 +809,20 @@ namespace sph::zstd::detail
             }
 
             auto const block_end{block_begin + block_size};
+            if constexpr (BinaryTree)
+            {
+                // Match reference zstd's bounded table catch-up at each block boundary.
+                // A long match near the end of the previous block can leave a large gap;
+                // retaining only a small prefix and suffix of that gap preserves useful
+                // candidates without rebuilding the entire skipped range.
+                auto const block_index{frame_index_base_ +
+                    static_cast<std::uint32_t>(block_begin) + index_bias};
+                if (block_index > next_to_update_ + block_update_skip_threshold)
+                {
+                    next_to_update_ = block_index - std::min(block_update_tail,
+                        block_index - next_to_update_ - block_update_skip_threshold);
+                }
+            }
             auto const limit{block_end - hash_read_size};
             auto anchor{block_begin};
             auto position{block_begin + static_cast<std::size_t>(block_begin == 0U)};
@@ -991,6 +1005,8 @@ namespace sph::zstd::detail
         static constexpr std::uint32_t index_bias{2U};
         static constexpr unsigned search_strength{8U};
         static constexpr std::size_t lazy_skipping_step{8U};
+        static constexpr std::uint32_t block_update_skip_threshold{384U};
+        static constexpr std::uint32_t block_update_tail{192U};
 
         [[nodiscard]] static constexpr auto high_bit(std::size_t value) -> unsigned
         {
@@ -1088,16 +1104,19 @@ namespace sph::zstd::detail
         void update_binary_tree(std::span<std::uint8_t const> input, std::uint32_t current)
         {
             auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
+            auto const* const base{input.data()};
+            auto* const hash_table{hash_table_.data()};
+            auto* const chain_table{chain_table_.data()};
             while (next_to_update_ < current)
             {
                 auto const update_position{static_cast<std::size_t>(
                     next_to_update_ - frame_index_base_ - index_bias)};
-                auto const slot{hash(input, update_position)};
-                auto const match_index{hash_table_[slot]};
+                auto const slot{hash(base + update_position)};
+                auto const match_index{hash_table[slot]};
                 auto const child_slot{2U * (next_to_update_ & tree_mask)};
-                hash_table_[slot] = next_to_update_;
-                chain_table_[child_slot] = match_index;
-                chain_table_[child_slot + 1U] = unsorted_mark;
+                hash_table[slot] = next_to_update_;
+                chain_table[child_slot] = match_index;
+                chain_table[child_slot + 1U] = unsorted_mark;
                 ++next_to_update_;
             }
             next_to_update_ = current;
@@ -1108,13 +1127,15 @@ namespace sph::zstd::detail
             std::uint32_t tree_low)
         {
             auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
+            auto const* const base{input.data()};
+            auto* const chain_table{chain_table_.data()};
             auto const current_position{static_cast<std::size_t>(
                 current - frame_index_base_ - index_bias)};
             auto smaller_slot{static_cast<std::size_t>(2U * (current & tree_mask))};
             auto larger_slot{smaller_slot + 1U};
             bool smaller_is_dummy{};
             bool larger_is_dummy{};
-            auto match_index{chain_table_[smaller_slot]};
+            auto match_index{chain_table[smaller_slot]};
             std::size_t common_smaller{};
             std::size_t common_larger{};
             auto const window_size{std::uint32_t{1} << window_log_};
@@ -1127,15 +1148,15 @@ namespace sph::zstd::detail
                 auto const match_position{static_cast<std::size_t>(
                     match_index - frame_index_base_ - index_bias)};
                 auto const common{std::min(common_smaller, common_larger)};
-                auto const length{count_match(
-                    input, current_position, match_position, block_end, common)};
+                auto const length{common + count_matching_bytes(base + current_position + common,
+                    base + match_position + common, base + block_end)};
                 if (current_position + length == block_end)
                 {
                     break;
                 }
-                if (input[match_position + length] < input[current_position + length])
+                if (base[match_position + length] < base[current_position + length])
                 {
-                    if (!smaller_is_dummy) chain_table_[smaller_slot] = match_index;
+                    if (!smaller_is_dummy) chain_table[smaller_slot] = match_index;
                     common_smaller = length;
                     if (match_index <= tree_low)
                     {
@@ -1143,11 +1164,11 @@ namespace sph::zstd::detail
                         break;
                     }
                     smaller_slot = next_slot + 1U;
-                    match_index = chain_table_[next_slot + 1U];
+                    match_index = chain_table[next_slot + 1U];
                 }
                 else
                 {
-                    if (!larger_is_dummy) chain_table_[larger_slot] = match_index;
+                    if (!larger_is_dummy) chain_table[larger_slot] = match_index;
                     common_larger = length;
                     if (match_index <= tree_low)
                     {
@@ -1155,16 +1176,19 @@ namespace sph::zstd::detail
                         break;
                     }
                     larger_slot = next_slot;
-                    match_index = chain_table_[next_slot];
+                    match_index = chain_table[next_slot];
                 }
             }
-            if (!smaller_is_dummy) chain_table_[smaller_slot] = 0U;
-            if (!larger_is_dummy) chain_table_[larger_slot] = 0U;
+            if (!smaller_is_dummy) chain_table[smaller_slot] = 0U;
+            if (!larger_is_dummy) chain_table[larger_slot] = 0U;
         }
 
         [[nodiscard]] auto find_best_binary_tree_match(std::span<std::uint8_t const> input,
             std::size_t position, std::size_t block_end) -> match_result
         {
+            auto const* const base{input.data()};
+            auto* const hash_table{hash_table_.data()};
+            auto* const chain_table{chain_table_.data()};
             auto const current{frame_index_base_ + static_cast<std::uint32_t>(position) + index_bias};
             if (current < next_to_update_)
             {
@@ -1172,8 +1196,8 @@ namespace sph::zstd::detail
             }
             update_binary_tree(input, current);
 
-            auto const hash_slot{hash(input, position)};
-            auto match_index{hash_table_[hash_slot]};
+            auto const hash_slot{hash(base + position)};
+            auto match_index{hash_table[hash_slot]};
             auto const window_size{std::uint32_t{1} << window_log_};
             auto const frame_low{frame_index_base_ + index_bias};
             auto const window_low{current - frame_low > window_size ? current - window_size : frame_low};
@@ -1185,27 +1209,27 @@ namespace sph::zstd::detail
             std::uint32_t previous_candidate{};
 
             while (match_index > unsorted_limit &&
-                chain_table_[2U * (match_index & tree_mask) + 1U] == unsorted_mark &&
+                chain_table[2U * (match_index & tree_mask) + 1U] == unsorted_mark &&
                 candidates > 1U)
             {
                 auto const candidate_slot{2U * (match_index & tree_mask)};
-                chain_table_[candidate_slot + 1U] = previous_candidate;
+                chain_table[candidate_slot + 1U] = previous_candidate;
                 previous_candidate = match_index;
-                match_index = chain_table_[candidate_slot];
+                match_index = chain_table[candidate_slot];
                 --candidates;
             }
             if (match_index > unsorted_limit &&
-                chain_table_[2U * (match_index & tree_mask) + 1U] == unsorted_mark)
+                chain_table[2U * (match_index & tree_mask) + 1U] == unsorted_mark)
             {
                 auto const candidate_slot{2U * (match_index & tree_mask)};
-                chain_table_[candidate_slot] = 0U;
-                chain_table_[candidate_slot + 1U] = 0U;
+                chain_table[candidate_slot] = 0U;
+                chain_table[candidate_slot + 1U] = 0U;
             }
 
             match_index = previous_candidate;
             while (match_index != 0U)
             {
-                auto const next_candidate{chain_table_[2U * (match_index & tree_mask) + 1U]};
+                auto const next_candidate{chain_table[2U * (match_index & tree_mask) + 1U]};
                 insert_binary_tree_candidate(input, match_index, block_end, candidates, unsorted_limit);
                 match_index = next_candidate;
                 ++candidates;
@@ -1220,8 +1244,8 @@ namespace sph::zstd::detail
             auto match_end_index{current + 9U};
             match_result best{0U, 0U};
             std::size_t best_offset_base{999999999U};
-            match_index = hash_table_[hash_slot];
-            hash_table_[hash_slot] = current;
+            match_index = hash_table[hash_slot];
+            hash_table[hash_slot] = current;
 
             while (attempts-- != 0U && match_index > window_low)
             {
@@ -1229,7 +1253,8 @@ namespace sph::zstd::detail
                 auto const match_position{static_cast<std::size_t>(
                     match_index - frame_index_base_ - index_bias)};
                 auto const common{std::min(common_smaller, common_larger)};
-                auto const length{count_match(input, position, match_position, block_end, common)};
+                auto const length{common + count_matching_bytes(base + position + common,
+                    base + match_position + common, base + block_end)};
                 if (length > best.length)
                 {
                     match_end_index = std::max(match_end_index,
@@ -1251,9 +1276,9 @@ namespace sph::zstd::detail
                     }
                 }
 
-                if (input[match_position + length] < input[position + length])
+                if (base[match_position + length] < base[position + length])
                 {
-                    if (!smaller_is_dummy) chain_table_[smaller_slot] = match_index;
+                    if (!smaller_is_dummy) chain_table[smaller_slot] = match_index;
                     common_smaller = length;
                     if (match_index <= tree_low)
                     {
@@ -1261,11 +1286,11 @@ namespace sph::zstd::detail
                         break;
                     }
                     smaller_slot = next_slot + 1U;
-                    match_index = chain_table_[next_slot + 1U];
+                    match_index = chain_table[next_slot + 1U];
                 }
                 else
                 {
-                    if (!larger_is_dummy) chain_table_[larger_slot] = match_index;
+                    if (!larger_is_dummy) chain_table[larger_slot] = match_index;
                     common_larger = length;
                     if (match_index <= tree_low)
                     {
@@ -1273,11 +1298,11 @@ namespace sph::zstd::detail
                         break;
                     }
                     larger_slot = next_slot;
-                    match_index = chain_table_[next_slot];
+                    match_index = chain_table[next_slot];
                 }
             }
-            if (!smaller_is_dummy) chain_table_[smaller_slot] = 0U;
-            if (!larger_is_dummy) chain_table_[larger_slot] = 0U;
+            if (!smaller_is_dummy) chain_table[smaller_slot] = 0U;
+            if (!larger_is_dummy) chain_table[larger_slot] = 0U;
             next_to_update_ = match_end_index - 8U;
             return best;
         }
@@ -1407,6 +1432,15 @@ namespace sph::zstd::detail
         void reset() noexcept
         {
             bytes_.clear();
+            external_output_ = nullptr;
+            bit_container_ = 0U;
+            bit_count_ = 0U;
+        }
+
+        void reset(std::vector<std::uint8_t>& output) noexcept
+        {
+            bytes_.clear();
+            external_output_ = &output;
             bit_container_ = 0U;
             bit_count_ = 0U;
         }
@@ -1423,29 +1457,37 @@ namespace sph::zstd::detail
             bit_count_ += count;
             if (bit_count_ >= 32U)
             {
-                auto const previous_size{bytes_.size()};
-                bytes_.resize(previous_size + sizeof(std::uint32_t));
+                auto& output{external_output_ != nullptr ? *external_output_ : bytes_};
+                auto const previous_size{output.size()};
+                output.resize(previous_size + sizeof(std::uint32_t));
                 auto completed{static_cast<std::uint32_t>(bit_container_)};
                 if constexpr (std::endian::native == std::endian::big)
                 {
                     completed = std::byteswap(completed);
                 }
-                std::memcpy(bytes_.data() + previous_size, &completed, sizeof(completed));
+                std::memcpy(output.data() + previous_size, &completed, sizeof(completed));
                 bit_container_ >>= 32U;
                 bit_count_ -= 32U;
             }
         }
 
-        [[nodiscard]] auto finish() const -> std::vector<std::uint8_t>
+        [[nodiscard]] auto finish() -> std::vector<std::uint8_t>
         {
             std::vector<std::uint8_t> output;
             finish_into(output);
             return output;
         }
 
-        void finish_into(std::vector<std::uint8_t>& output) const
+        void finish_into(std::vector<std::uint8_t>& output)
         {
-            output.assign(bytes_.begin(), bytes_.end());
+            if (external_output_ == nullptr)
+            {
+                output.assign(bytes_.begin(), bytes_.end());
+            }
+            else if (external_output_ != &output)
+            {
+                throw entropy_error{"bit writer finished into a different output buffer"};
+            }
             auto remaining{bit_container_};
             auto const byte_count{(bit_count_ + 7U) / 8U};
             for (unsigned index{}; index < byte_count; ++index)
@@ -1454,6 +1496,7 @@ namespace sph::zstd::detail
                 remaining >>= 8U;
             }
             finish_marker(output);
+            external_output_ = nullptr;
         }
 
     private:
@@ -1471,6 +1514,7 @@ namespace sph::zstd::detail
         }
 
         std::vector<std::uint8_t> bytes_;
+        std::vector<std::uint8_t>* external_output_{};
         std::uint64_t bit_container_{};
         unsigned bit_count_{};
     };
@@ -2062,7 +2106,6 @@ namespace sph::zstd::detail
         std::vector<std::uint8_t> offset_codes;
         std::vector<std::uint8_t> match_codes;
         forward_bit_writer sequence_bits;
-        std::vector<std::uint8_t> bitstream;
         std::vector<std::uint8_t> huffman_body;
         std::vector<std::uint8_t> compressed_weights;
         std::vector<std::uint8_t> huffman_output;
@@ -2199,14 +2242,22 @@ namespace sph::zstd::detail
         literal_codes.clear();
         offset_codes.clear();
         match_codes.clear();
-        literal_codes.reserve(parsed.sequences.size());
-        offset_codes.reserve(parsed.sequences.size());
-        match_codes.reserve(parsed.sequences.size());
+        auto literal_size{parsed.trailing_literal_length};
         for (auto const& sequence : parsed.sequences)
         {
-            literals.insert(literals.end(),
-                input.begin() + static_cast<std::ptrdiff_t>(sequence.literal_position),
-                input.begin() + static_cast<std::ptrdiff_t>(sequence.literal_position + sequence.literal_length));
+            literal_size += sequence.literal_length;
+        }
+        literals.resize(literal_size);
+        literal_codes.resize(parsed.sequences.size());
+        offset_codes.resize(parsed.sequences.size());
+        match_codes.resize(parsed.sequences.size());
+        auto* literal_output{literals.data()};
+        for (std::size_t index{}; index < parsed.sequences.size(); ++index)
+        {
+            auto const& sequence{parsed.sequences[index]};
+            std::memcpy(literal_output, input.data() + sequence.literal_position,
+                sequence.literal_length);
+            literal_output += sequence.literal_length;
             auto const offset_base_value{sequence.repeat_code != 0U ?
                 static_cast<std::uint32_t>(sequence.repeat_code) :
                 static_cast<std::uint32_t>(sequence.offset + 3U)};
@@ -2216,14 +2267,12 @@ namespace sph::zstd::detail
                 output.clear();
                 return;
             }
-            literal_codes.push_back(literal_length_symbol(sequence.literal_length));
-            offset_codes.push_back(static_cast<std::uint8_t>(offset_code));
-            match_codes.push_back(match_length_symbol(sequence.match_length));
+            literal_codes[index] = literal_length_symbol(sequence.literal_length);
+            offset_codes[index] = static_cast<std::uint8_t>(offset_code);
+            match_codes[index] = match_length_symbol(sequence.match_length);
         }
-        literals.insert(literals.end(),
-            input.begin() + static_cast<std::ptrdiff_t>(parsed.trailing_literal_position),
-            input.begin() + static_cast<std::ptrdiff_t>(
-                parsed.trailing_literal_position + parsed.trailing_literal_length));
+        std::memcpy(literal_output, input.data() + parsed.trailing_literal_position,
+            parsed.trailing_literal_length);
 
         auto& raw_literals{workspace.raw_literals};
         raw_literals.clear();
@@ -2272,7 +2321,7 @@ namespace sph::zstd::detail
         match_state.initialize(last_match_code);
 
         auto& bits{workspace.sequence_bits};
-        bits.reset();
+        bits.reset(output);
         bits.append(last.literal_length, literal_length_bits[last_literal_code]);
         bits.append(last.match_length - 3U, match_length_bits[last_match_code]);
         bits.append(last_offset_base, last_offset_code);
@@ -2294,9 +2343,7 @@ namespace sph::zstd::detail
         match_state.flush(bits);
         offset_state.flush(bits);
         literal_state.flush(bits);
-        auto& bitstream{workspace.bitstream};
-        bits.finish_into(bitstream);
-        output.insert(output.end(), bitstream.begin(), bitstream.end());
+        bits.finish_into(output);
     }
 
     [[nodiscard]] inline auto encode_sequences_block(

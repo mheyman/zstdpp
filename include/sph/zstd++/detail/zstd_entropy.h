@@ -72,6 +72,29 @@ namespace sph::zstd::detail
             return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask) << missing;
         }
 
+        [[nodiscard]] auto read_fast(unsigned count) noexcept -> std::uint32_t
+        {
+            if (count == 0U)
+            {
+                return 0U;
+            }
+            if (count > remaining_bits_)
+            {
+                remaining_bits_ = 0U;
+                overflow_ = true;
+                return 0U;
+            }
+            auto const first_bit{remaining_bits_ - count};
+            if (first_bit < window_start_)
+            {
+                reload_window();
+            }
+            remaining_bits_ = first_bit;
+            auto const mask{count == 32U ? std::numeric_limits<std::uint32_t>::max() :
+                (std::uint32_t{1} << count) - 1U};
+            return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask);
+        }
+
         [[nodiscard]] auto peek(unsigned count, bool permit_overread = false) const -> std::uint32_t
         {
             auto copy{*this};
