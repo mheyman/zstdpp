@@ -95,10 +95,18 @@ namespace sph::zstd::detail
             return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask);
         }
 
-        [[nodiscard]] auto peek(unsigned count, bool permit_overread = false) const -> std::uint32_t
+        [[nodiscard]] auto peek(unsigned count, bool permit_overread = false) -> std::uint32_t
         {
-            auto copy{*this};
-            return copy.read(count, permit_overread);
+            auto const saved_remaining{remaining_bits_};
+            auto const saved_window{window_};
+            auto const saved_window_start{window_start_};
+            auto const saved_overflow{overflow_};
+            auto const result{read(count, permit_overread)};
+            remaining_bits_ = saved_remaining;
+            window_ = saved_window;
+            window_start_ = saved_window_start;
+            overflow_ = saved_overflow;
+            return result;
         }
 
         [[nodiscard]] auto remaining() const noexcept -> std::size_t { return remaining_bits_; }

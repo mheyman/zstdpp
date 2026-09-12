@@ -2548,15 +2548,16 @@ namespace sph::zstd::detail
             workspace.reserve(block_size, parsed.sequences.size());
         }
         auto* literal_output{literals.data()};
+        auto const* const literal_storage_end{literals.data() + literals.size()};
+        auto const* const input_end{input.data() + input.size()};
         auto literal_position{parsed.input_begin};
         for (std::size_t index{}; index < parsed.sequences.size(); ++index)
         {
             auto const& sequence{parsed.sequences[index]};
             constexpr std::size_t short_literal_copy_size{16U};
             if (sequence.literal_length <= short_literal_copy_size &&
-                static_cast<std::size_t>(literals.data() + literals.size() - literal_output) >=
-                    short_literal_copy_size &&
-                input.size() - literal_position >= short_literal_copy_size)
+                literal_output + short_literal_copy_size <= literal_storage_end &&
+                input.data() + literal_position + short_literal_copy_size <= input_end)
             {
                 std::memcpy(literal_output, input.data() + literal_position,
                     short_literal_copy_size);
