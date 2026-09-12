@@ -130,7 +130,7 @@ namespace
     auto cpp_fast_sequence_blocks(std::span<std::uint8_t const> input,
         sph::zstd::compression_parameters const& parameters) -> std::vector<sph::zstd::detail::parsed_block>
     {
-        sph::zstd::detail::fast_match_state state{parameters.window_log, parameters.hash_log,
+        sph::zstd::detail::fast_match_state<> state{parameters.window_log, parameters.hash_log,
             parameters.minimum_match, parameters.target_length};
         std::vector<sph::zstd::detail::parsed_block> blocks;
         for (std::size_t begin{}; begin < input.size(); begin += sph::zstd::maximum_block_size)
@@ -144,7 +144,7 @@ namespace
     auto cpp_double_fast_sequence_blocks(std::span<std::uint8_t const> input,
         sph::zstd::compression_parameters const& parameters) -> std::vector<sph::zstd::detail::parsed_block>
     {
-        sph::zstd::detail::double_fast_match_state state{parameters.window_log, parameters.hash_log,
+        sph::zstd::detail::double_fast_match_state<> state{parameters.window_log, parameters.hash_log,
             parameters.chain_log, parameters.minimum_match};
         std::vector<sph::zstd::detail::parsed_block> blocks;
         for (std::size_t begin{}; begin < input.size(); begin += sph::zstd::maximum_block_size)
