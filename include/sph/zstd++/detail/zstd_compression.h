@@ -1713,6 +1713,29 @@ namespace sph::zstd::detail
             }
         }
 
+        // FSE symbols always provide a non-zero count and are already bounded
+        // to the low bits being emitted. Keep this path free of the generic
+        // count and masking checks used by arbitrary fields.
+        void append_unchecked(std::uint32_t value, unsigned count)
+        {
+            bit_container_ |= static_cast<std::uint64_t>(value) << bit_count_;
+            bit_count_ += count;
+            if (bit_count_ >= 32U)
+            {
+                auto& output{external_output_ != nullptr ? *external_output_ : bytes_};
+                auto const previous_size{output.size()};
+                output.resize(previous_size + sizeof(std::uint32_t));
+                auto completed{static_cast<std::uint32_t>(bit_container_)};
+                if constexpr (std::endian::native == std::endian::big)
+                {
+                    completed = std::byteswap(completed);
+                }
+                std::memcpy(output.data() + previous_size, &completed, sizeof(completed));
+                bit_container_ >>= 32U;
+                bit_count_ -= 32U;
+            }
+        }
+
         [[nodiscard]] auto finish() -> std::vector<std::uint8_t>
         {
             std::vector<std::uint8_t> output;
@@ -1901,7 +1924,8 @@ namespace sph::zstd::detail
             }
             auto const transform{table_->transforms[symbol]};
             auto const number_bits{(value_ + transform.delta_number_bits) >> 16U};
-            bits.append(value_, number_bits);
+            auto const emitted{value_ & ((std::uint32_t{1} << number_bits) - 1U)};
+            bits.append_unchecked(emitted, number_bits);
             auto const index{static_cast<std::int64_t>(value_ >> number_bits) + transform.delta_find_state};
             value_ = table_->states[static_cast<std::size_t>(index)];
         }
