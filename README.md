@@ -46,9 +46,10 @@ constexpr auto checked = []
 auto compressor = sph::zstd::make_zstd_compress<checked>(callback);
 ```
 
-Useful stream operations and observations currently include `update(span)`, `update(byte)`,
-`flush()` (compression), `finish()`, `reset()`, `status()`, byte counters, completed frame count,
-and parsed frame information.
+Compression also provides `compress_frame(span)` for a complete frame; it borrows the input for
+the duration of the call and avoids copying it into streaming history. Other useful operations and
+observations include `update(span)`, `update(byte)`, `flush()` (compression), `finish()`, `reset()`,
+`status()`, byte counters, completed frame count, and parsed frame information.
 
 ## Port status
 
@@ -143,20 +144,20 @@ Compression workers receive identical input. Decompression workers both consume 
 
 | Level | C++ size (KiB) | Reference size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 259 | 259 | 1562 | 2248 | 8 | 8 | 94 | 381 |
-| 3 | 274 | 274 | 1219 | 1672 | 8 | 8 | 96 | 381 |
-| 5 | 274 | 274 | 1504 | 2026 | 11 | 10 | 95 | 381 |
-| 9 | 260 | 260 | 1219 | 985 | 20 | 17 | 96 | 381 |
-| 15 | 260 | 260 | 316 | 314 | 24 | 24 | 97 | 381 |
+| 1 | 259 | 259 | 1799 | 2218 | 7 | 8 | 94 | 381 |
+| 3 | 274 | 274 | 1467 | 1761 | 7 | 8 | 95 | 381 |
+| 5 | 274 | 274 | 1709 | 2183 | 10 | 10 | 95 | 381 |
+| 9 | 260 | 260 | 1296 | 1155 | 19 | 17 | 96 | 381 |
+| 15 | 260 | 260 | 462 | 492 | 23 | 23 | 97 | 381 |
 
 ### Decompression
 
 | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 2839 | 3048 | 10 | 8 | 80 | 113 |
-| 3 | 4467 | 5433 | 10 | 8 | 80 | 113 |
-| 5 | 5644 | 5372 | 10 | 8 | 80 | 113 |
-| 9 | 17571 | 14570 | 9 | 8 | 80 | 113 |
-| 15 | 17057 | 14609 | 9 | 8 | 80 | 113 |
+| 1 | 2693 | 3170 | 10 | 8 | 80 | 113 |
+| 3 | 4519 | 5585 | 10 | 8 | 80 | 113 |
+| 5 | 5628 | 5709 | 9 | 8 | 80 | 113 |
+| 9 | 18046 | 14991 | 9 | 8 | 80 | 113 |
+| 15 | 17974 | 14792 | 9 | 8 | 80 | 113 |
 
 <!-- SPH_ZSTDPP_EVAL_END -->
