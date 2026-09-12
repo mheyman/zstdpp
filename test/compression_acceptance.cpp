@@ -62,6 +62,23 @@ namespace
         return encoded;
     }
 
+    template <int Level>
+    auto compress_cpp_frame_after_reset(std::span<std::uint8_t const> input)
+        -> std::vector<std::uint8_t>
+    {
+        std::vector<std::uint8_t> encoded;
+        auto compressor = sph::zstd::make_zstd_compress<parameters<Level>>(
+            [&encoded](std::span<std::uint8_t const> output)
+            {
+                encoded.insert(encoded.end(), output.begin(), output.end());
+            });
+        compressor.compress_frame(input);
+        encoded.clear();
+        compressor.reset();
+        compressor.compress_frame(input);
+        return encoded;
+    }
+
     auto compress_reference(std::span<std::uint8_t const> input, int level) -> std::vector<std::uint8_t>
     {
         std::vector<std::uint8_t> encoded(ZSTD_compressBound(input.size()));
@@ -210,6 +227,7 @@ namespace
         auto const reference_parameters{ZSTD_getCParams(Level, input.size(), 0)};
         auto const cpp{compress_cpp<Level>(input)};
         auto const cpp_after_reset{compress_cpp_after_reset<Level>(input)};
+        auto const cpp_frame_after_reset{compress_cpp_frame_after_reset<Level>(input)};
         auto const reference{compress_reference(input, Level)};
         auto const reference_sequence_blocks_value{reference_sequence_blocks(input, Level)};
         auto const cpp_sequence_blocks_value{[&]
@@ -244,6 +262,7 @@ namespace
         auto const parameters_equal{same_parameters(cpp_parameters, reference_parameters)};
         auto const output_equal{!reference.empty() && cpp == reference};
         auto const reset_output_equal{cpp_after_reset == reference};
+        auto const frame_output_equal{cpp_frame_after_reset == reference};
         auto const common_size{std::min(cpp.size(), reference.size())};
         auto const mismatch{std::mismatch(cpp.begin(), cpp.begin() + static_cast<std::ptrdiff_t>(common_size),
             reference.begin())};
@@ -280,7 +299,10 @@ namespace
                   << "  output: zstd++=" << cpp.size()
                   << " bytes, reference=" << reference.size() << " bytes"
                   << (output_equal ? " [PASS]" : " [FAIL]") << '\n'
-                  << "  output after reset: " << (reset_output_equal ? "[PASS]" : "[FAIL]") << '\n';
+                  << "  streaming output after reset: "
+                  << (reset_output_equal ? "[PASS]" : "[FAIL]") << '\n'
+                  << "  one-shot output after reset: "
+                  << (frame_output_equal ? "[PASS]" : "[FAIL]") << '\n';
         if (!output_equal)
         {
             std::cout << "  first output mismatch: byte " << mismatch_offset;
@@ -303,7 +325,7 @@ namespace
             }
             std::cout << '\n';
         }
-        return parameters_equal && output_equal && reset_output_equal;
+        return parameters_equal && output_equal && reset_output_equal && frame_output_equal;
     }
 }
 

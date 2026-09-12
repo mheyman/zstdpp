@@ -53,10 +53,9 @@ int main(int argc, char** argv)
         {
             output.clear();
             compressor.reset();
-            compressor.update(input);
-            compressor.finish();
+            compressor.compress_frame(input);
         };
-        compress(); // Warm caches and allocate reusable stream storage before timing.
+        compress(); // Warm caches and allocate reusable workspace before timing.
         auto const start{sph::zstd::eval::clock::now()};
         for (std::uint64_t iteration{}; iteration < iterations; ++iteration)
         {

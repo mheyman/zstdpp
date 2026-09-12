@@ -129,6 +129,53 @@ namespace sph::zstd
             }
         }
 
+        /** Compresses a complete frame while borrowing input for the duration of this call. */
+        void compress_frame(std::span<std::uint8_t const> input)
+        {
+            if (status_ != stream_status::ready || frame_started_ || buffered_size_ != 0U ||
+                !history_.empty())
+            {
+                throw zstd_error{error_code::invalid_state,
+                    "compress_frame() requires a new or reset zstd_compress"};
+            }
+
+            begin_frame();
+            if constexpr (Parameters.checksum)
+            {
+                checksum_.update(input);
+            }
+            source_size_ = input.size();
+            if constexpr (Parameters.pledged_source_size != unknown_content_size)
+            {
+                if (source_size_ != Parameters.pledged_source_size)
+                {
+                    status_ = stream_status::failed;
+                    throw zstd_error{error_code::source_size_mismatch,
+                        "input size does not match zstd_compress pledged_source_size"};
+                }
+            }
+
+            std::size_t block_begin{};
+            do
+            {
+                auto const available{input.size() - block_begin};
+                auto const candidate_size{std::min<std::size_t>(Parameters.block_size, available)};
+                auto const block_size{select_block_size(input.subspan(block_begin, candidate_size))};
+                auto const last{block_begin + block_size == input.size()};
+                emit_block(input, block_begin, block_size, last);
+                block_begin += block_size;
+            }
+            while (block_begin != input.size());
+
+            if constexpr (Parameters.checksum)
+            {
+                std::array<std::uint8_t, 4> encoded_checksum{};
+                detail::write_u32(encoded_checksum, static_cast<std::uint32_t>(checksum_.digest()));
+                emit(encoded_checksum);
+            }
+            status_ = stream_status::finished;
+        }
+
         void update(std::uint8_t byte)
         {
             update(std::span<std::uint8_t const>{&byte, 1});
@@ -350,46 +397,64 @@ namespace sph::zstd
             emit(std::span<std::uint8_t const>{header}.first(size));
         }
 
-        void emit_block(bool last)
+        [[nodiscard]] auto select_block_size(std::span<std::uint8_t const> bytes) const -> std::size_t
         {
-            auto block_size{buffered_size_};
+            auto block_size{bytes.size()};
             if constexpr (effective_parameters_.strategy == compression_strategy::fast)
             {
-                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
-                    block_size = fast_split_size(std::span<std::uint8_t const>{history_}.last(buffered_size_));
+                    block_size = fast_split_size(bytes);
                 }
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::double_fast)
             {
-                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
-                    block_size = chunk_split_size(
-                        std::span<std::uint8_t const>{history_}.last(buffered_size_), 43U, 8U);
+                    block_size = chunk_split_size(bytes, 43U, 8U);
                 }
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::greedy)
             {
-                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
-                    block_size = chunk_split_size(
-                        std::span<std::uint8_t const>{history_}.last(buffered_size_), 11U, 9U);
+                    block_size = chunk_split_size(bytes, 11U, 9U);
                 }
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::lazy2 ||
                 effective_parameters_.strategy == compression_strategy::binary_tree_lazy2)
             {
-                if (buffered_size_ == maximum_block_size && compression_savings_ >= 3)
+                if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
-                    block_size = chunk_split_size(
-                        std::span<std::uint8_t const>{history_}.last(buffered_size_), 5U, 10U);
+                    block_size = chunk_split_size(bytes, 5U, 10U);
                 }
             }
+            return block_size;
+        }
+
+        void emit_block(bool last)
+        {
             auto const block_begin{history_.size() - buffered_size_};
-            auto const bytes{std::span<std::uint8_t const>{history_}.subspan(block_begin, block_size)};
+            auto const buffered{std::span<std::uint8_t const>{history_}.last(buffered_size_)};
+            auto const block_size{select_block_size(buffered)};
             auto const actual_last{last && block_size == buffered_size_};
-            auto const input_is_rle{bytes.size() > 1 && std::ranges::all_of(bytes,
-                [first = bytes.front()](std::uint8_t byte) { return byte == first; })};
+            emit_block(history_, block_begin, block_size, actual_last);
+            buffered_size_ -= block_size;
+        }
+
+        void emit_block(std::span<std::uint8_t const> input, std::size_t block_begin,
+            std::size_t block_size, bool last)
+        {
+            auto const bytes{input.subspan(block_begin, block_size)};
+            // Fast parsers defer the full RLE scan until the encoded-size gate can pass.
+            // Deeper parsers retain the eager scan because its sequential pass warms the input cache.
+            constexpr bool lazy_rle_check =
+                effective_parameters_.strategy == compression_strategy::fast ||
+                effective_parameters_.strategy == compression_strategy::double_fast ||
+                effective_parameters_.strategy == compression_strategy::greedy;
+            bool input_is_rle{!lazy_rle_check && bytes.size() > 1U &&
+                std::ranges::all_of(bytes.subspan(1U),
+                    [first = bytes.front()](std::uint8_t byte) { return byte == first; })};
             compressed_.clear();
             auto& compressed{compressed_};
             constexpr bool has_reference_parser =
@@ -400,10 +465,10 @@ namespace sph::zstd
                 effective_parameters_.strategy == compression_strategy::binary_tree_lazy2;
             if constexpr (has_reference_parser)
             {
-                parsed_ = match_state_.parse(history_, block_begin, bytes.size(), std::move(parsed_));
+                parsed_ = match_state_.parse(input, block_begin, bytes.size(), std::move(parsed_));
                 if (!parsed_.sequences.empty())
                 {
-                    detail::encode_sequences_block(history_, parsed_, compression_workspace_, compressed);
+                    detail::encode_sequences_block(input, parsed_, compression_workspace_, compressed);
                     if (compressed.size() >= bytes.size())
                     {
                         compressed.clear();
@@ -426,13 +491,21 @@ namespace sph::zstd
                     }
                 }
             }
+            if constexpr (lazy_rle_check)
+            {
+                if (block_count_ != 0U && !compressed.empty() && compressed.size() < 25U)
+                {
+                    input_is_rle = bytes.size() > 1U && std::ranges::all_of(bytes.subspan(1U),
+                        [first = bytes.front()](std::uint8_t byte) { return byte == first; });
+                }
+            }
             auto const is_rle = input_is_rle && (!has_reference_parser ||
                 (block_count_ != 0U && !compressed.empty() && compressed.size() < 25U));
 
             auto const block_type{is_rle ? 1U : compressed.empty() ? 0U : 2U};
             auto const stored_size{is_rle || compressed.empty() ? block_size : compressed.size()};
             auto const block_header{(static_cast<std::uint32_t>(stored_size) << 3U) |
-                (block_type << 1U) | (actual_last ? 1U : 0U)};
+                (block_type << 1U) | (last ? 1U : 0U)};
             std::array<std::uint8_t, 3> encoded_header{
                 static_cast<std::uint8_t>(block_header),
                 static_cast<std::uint8_t>(block_header >> 8U),
@@ -454,8 +527,6 @@ namespace sph::zstd
             auto const emitted_size{is_rle ? 4U : stored_size + 3U};
             compression_savings_ += static_cast<std::int64_t>(block_size) -
                 static_cast<std::int64_t>(emitted_size);
-            auto const remaining{buffered_size_ - block_size};
-            buffered_size_ = remaining;
             ++block_count_;
         }
 

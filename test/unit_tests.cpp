@@ -98,6 +98,23 @@ namespace
         return encoded;
     }
 
+    template <sph::zstd::compression_parameters Parameters = {}>
+    auto compress_frame(std::span<std::uint8_t const> input) -> std::vector<std::uint8_t>
+    {
+        std::vector<std::uint8_t> encoded;
+        auto compressor = sph::zstd::make_zstd_compress<Parameters>(
+            [&encoded](std::span<std::uint8_t const> output)
+            {
+                encoded.insert(encoded.end(), output.begin(), output.end());
+            });
+        compressor.compress_frame(input);
+        check(compressor.status() == sph::zstd::stream_status::finished,
+            "one-shot compressor reaches finished state");
+        check(compressor.source_size() == input.size(), "one-shot compressor reports source size");
+        check(compressor.encoded_size() == encoded.size(), "one-shot compressor reports encoded size");
+        return encoded;
+    }
+
     auto reference_decompress(std::span<std::uint8_t const> encoded, std::size_t expected_size)
         -> std::vector<std::uint8_t>
     {
@@ -159,6 +176,8 @@ namespace
         // Adapted from the reference zstreamtest round-trip and tiny-chunk cases.
         auto const input{make_input(257)};
         auto const encoded{compress<checked_content>(input)};
+        auto const one_shot_encoded{compress_frame<checked_content>(input)};
+        check(one_shot_encoded == encoded, "one-shot and streaming compression produce identical frames");
         check(ZSTD_getFrameContentSize(encoded.data(), encoded.size()) == input.size(),
             "pledged content size is present in the frame header");
         check(reference_decompress(encoded, input.size()) == input,
@@ -187,6 +206,33 @@ namespace
         auto const encoded{compress<small_blocks>(input)};
         check(encoded.size() < input.size(), "RLE blocks reduce repeated input");
         check(reference_decompress(encoded, input.size()) == input, "reference zstd accepts RLE blocks");
+    }
+
+    void test_one_shot_compression_state()
+    {
+        auto const input{make_input(257U)};
+        std::vector<std::uint8_t> encoded;
+        auto compressor = sph::zstd::make_zstd_compress(
+            [&encoded](std::span<std::uint8_t const> output)
+            {
+                encoded.insert(encoded.end(), output.begin(), output.end());
+            });
+        compressor.update(input.front());
+        check_error([&compressor, &input] { compressor.compress_frame(input); },
+            sph::zstd::error_code::invalid_state,
+            "one-shot compression rejects an active streaming frame");
+        compressor.reset();
+        compressor.compress_frame(input);
+        check_error([&compressor, &input] { compressor.compress_frame(input); },
+            sph::zstd::error_code::invalid_state,
+            "one-shot compression rejects a finished frame until reset");
+
+        auto checked = sph::zstd::make_zstd_compress<checked_content>(
+            [](std::span<std::uint8_t const>) {});
+        auto const short_input{std::span<std::uint8_t const>{input}.first(256U)};
+        check_error([&checked, short_input] { checked.compress_frame(short_input); },
+            sph::zstd::error_code::source_size_mismatch,
+            "one-shot compression validates the pledged source size");
     }
 
     void test_reference_rle_golden_frame()
@@ -420,6 +466,7 @@ int main()
     {
         test_reference_interoperability();
         test_rle_blocks();
+        test_one_shot_compression_state();
         test_reference_rle_golden_frame();
         test_reference_zero_sequence_golden_frames();
         test_reference_entropy_frames();
