@@ -411,14 +411,14 @@ namespace sph::zstd
             {
                 if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
-                    block_size = chunk_split_size(bytes, 43U, 8U);
+                    block_size = chunk_split_size<43U, 8U>(bytes);
                 }
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::greedy)
             {
                 if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
-                    block_size = chunk_split_size(bytes, 11U, 9U);
+                    block_size = chunk_split_size<11U, 9U>(bytes);
                 }
             }
             else if constexpr (effective_parameters_.strategy == compression_strategy::lazy2 ||
@@ -426,7 +426,7 @@ namespace sph::zstd
             {
                 if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
-                    block_size = chunk_split_size(bytes, 5U, 10U);
+                    block_size = chunk_split_size<5U, 10U>(bytes);
                 }
             }
             return block_size;
@@ -576,35 +576,35 @@ namespace sph::zstd
             return distance_from_beginning > distance_from_end ? half_block / 2U : half_block + half_block / 2U;
         }
 
-        [[nodiscard]] static auto chunk_split_size(
-            std::span<std::uint8_t const> bytes,
-            std::size_t sampling_rate,
-            unsigned hash_log) -> std::size_t
+        template <std::size_t SamplingRate, unsigned HashLog>
+        [[nodiscard]] static auto chunk_split_size(std::span<std::uint8_t const> bytes) -> std::size_t
         {
+            static_assert(HashLog >= 8U && HashLog <= 10U);
             constexpr std::size_t chunk_size{8U * 1024U};
             struct fingerprint
             {
                 std::array<std::uint32_t, 1024> events{};
                 std::size_t event_count{};
             };
-            auto record = [&bytes, sampling_rate, hash_log](fingerprint& result, std::size_t start)
+            auto record = [&bytes](fingerprint& result, std::size_t start)
             {
-                result = {};
+                std::ranges::fill(result.events.begin(),
+                    result.events.begin() + (std::size_t{1} << HashLog), 0U);
                 constexpr auto sample_limit{chunk_size - 2U + 1U};
-                for (std::size_t position{}; position < sample_limit; position += sampling_rate)
+                for (std::size_t position{}; position < sample_limit; position += SamplingRate)
                 {
-                    auto const hash{hash_log == 8U ? static_cast<std::uint32_t>(bytes[start + position]) :
+                    auto const hash{HashLog == 8U ? static_cast<std::uint32_t>(bytes[start + position]) :
                         (static_cast<std::uint32_t>(bytes[start + position]) |
                             (static_cast<std::uint32_t>(bytes[start + position + 1U]) << 8U)) *
-                            0x9E3779B9U >> (32U - hash_log)};
+                            0x9E3779B9U >> (32U - HashLog)};
                     ++result.events[hash];
                 }
-                result.event_count = sample_limit / sampling_rate;
+                result.event_count = sample_limit / SamplingRate;
             };
-            auto different = [hash_log](fingerprint const& past, fingerprint const& recent, int penalty)
+            auto different = [](fingerprint const& past, fingerprint const& recent, int penalty)
             {
                 std::uint64_t deviation{};
-                for (std::size_t hash{}; hash < (std::size_t{1} << hash_log); ++hash)
+                for (std::size_t hash{}; hash < (std::size_t{1} << HashLog); ++hash)
                 {
                     auto const difference{static_cast<std::int64_t>(past.events[hash]) *
                         static_cast<std::int64_t>(recent.event_count) -
@@ -616,9 +616,9 @@ namespace sph::zstd
                 auto const threshold{probability_half * static_cast<std::uint64_t>(14 + penalty) / 16U};
                 return deviation >= threshold;
             };
-            auto merge = [hash_log](fingerprint& destination, fingerprint const& source)
+            auto merge = [](fingerprint& destination, fingerprint const& source)
             {
-                for (std::size_t hash{}; hash < (std::size_t{1} << hash_log); ++hash)
+                for (std::size_t hash{}; hash < (std::size_t{1} << HashLog); ++hash)
                 {
                     destination.events[hash] += source.events[hash];
                 }

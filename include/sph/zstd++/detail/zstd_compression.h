@@ -63,12 +63,9 @@ namespace sph::zstd::detail
         symbol_count_workspace& workspace) noexcept -> symbol_counts const&
     {
         constexpr std::size_t parallel_threshold{1500U};
-        for (auto& counts : workspace)
-        {
-            counts.fill(0U);
-        }
         if (input.size() < parallel_threshold)
         {
+            workspace[0].fill(0U);
             for (auto const symbol : input)
             {
                 ++workspace[0][symbol];
@@ -76,6 +73,10 @@ namespace sph::zstd::detail
             return workspace[0];
         }
 
+        for (auto& counts : workspace)
+        {
+            counts.fill(0U);
+        }
         auto position{std::size_t{0}};
         for (; position + 16U <= input.size(); position += 16U)
         {
@@ -176,25 +177,63 @@ namespace sph::zstd::detail
         return load_native_u32(left) == load_native_u32(right);
     }
 
+    template <bool SeparateFirstWord = false>
     [[nodiscard]] inline auto count_matching_bytes(std::uint8_t const* position,
         std::uint8_t const* match_position, std::uint8_t const* end) noexcept -> std::size_t
     {
         auto const* const start{position};
         auto const* const word_limit{end - (sizeof(std::uint64_t) - 1U)};
-        while (position < word_limit)
+        if constexpr (SeparateFirstWord)
         {
-            auto difference{load_native_u64(position) ^ load_native_u64(match_position)};
-            if (difference != 0U)
+            if (position < word_limit)
             {
-                if constexpr (std::endian::native == std::endian::big)
+                auto difference{load_native_u64(position) ^ load_native_u64(match_position)};
+                if (difference != 0U)
                 {
-                    difference = std::byteswap(difference);
+                    if constexpr (std::endian::native == std::endian::big)
+                    {
+                        difference = std::byteswap(difference);
+                    }
+                    return static_cast<std::size_t>(position - start) +
+                        static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
                 }
-                return static_cast<std::size_t>(position - start) +
-                    static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
+                position += sizeof(std::uint64_t);
+                match_position += sizeof(std::uint64_t);
+                while (position < word_limit)
+                {
+                    difference = load_native_u64(position) ^ load_native_u64(match_position);
+                    if (difference == 0U)
+                    {
+                        position += sizeof(std::uint64_t);
+                        match_position += sizeof(std::uint64_t);
+                        continue;
+                    }
+                    if constexpr (std::endian::native == std::endian::big)
+                    {
+                        difference = std::byteswap(difference);
+                    }
+                    return static_cast<std::size_t>(position - start) +
+                        static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
+                }
             }
-            position += sizeof(std::uint64_t);
-            match_position += sizeof(std::uint64_t);
+        }
+        else
+        {
+            while (position < word_limit)
+            {
+                auto difference{load_native_u64(position) ^ load_native_u64(match_position)};
+                if (difference != 0U)
+                {
+                    if constexpr (std::endian::native == std::endian::big)
+                    {
+                        difference = std::byteswap(difference);
+                    }
+                    return static_cast<std::size_t>(position - start) +
+                        static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
+                }
+                position += sizeof(std::uint64_t);
+                match_position += sizeof(std::uint64_t);
+            }
         }
         if (position + sizeof(std::uint32_t) <= end &&
             load_native_u32(position) == load_native_u32(match_position))
@@ -938,7 +977,7 @@ namespace sph::zstd::detail
 
         void reset()
         {
-            auto const window_size{std::uint64_t{1} << window_log_};
+            auto const window_size{std::uint64_t{1} << parameter_value<WindowLog>(window_log_)};
             auto const next_base{static_cast<std::uint64_t>(next_to_update_) + window_size};
             if (next_base + window_size + index_bias >
                 std::numeric_limits<std::uint32_t>::max())
@@ -992,8 +1031,8 @@ namespace sph::zstd::detail
             bool lazy_skipping{};
             std::size_t saved_one{};
             std::size_t saved_two{};
-            auto const window_start_at_position{position > (std::size_t{1} << window_log_) ?
-                position - (std::size_t{1} << window_log_) : 0U};
+            auto const window_size{std::size_t{1} << parameter_value<WindowLog>(window_log_)};
+            auto const window_start_at_position{position > window_size ? position - window_size : 0U};
             auto const maximum_repeat{position - window_start_at_position};
             if (repeat_two > maximum_repeat) saved_two = repeat_two, repeat_two = 0U;
             if (repeat_one > maximum_repeat) saved_one = repeat_one, repeat_one = 0U;
@@ -1156,6 +1195,20 @@ namespace sph::zstd::detail
         }
 
     private:
+        template <unsigned Configured>
+        [[nodiscard]] static constexpr auto parameter_value(
+            match_parameter<Configured> const& runtime) noexcept -> unsigned
+        {
+            if constexpr (Configured != 0U)
+            {
+                return Configured;
+            }
+            else
+            {
+                return runtime;
+            }
+        }
+
         struct match_result
         {
             std::size_t length{3U};
@@ -1201,7 +1254,8 @@ namespace sph::zstd::detail
                     auto const update_position{static_cast<std::size_t>(
                         next_to_update_ - frame_index_base_ - index_bias)};
                     auto const slot{hash(base + update_position)};
-                    chain_table[next_to_update_ & ((std::uint32_t{1} << chain_log_) - 1U)] =
+                    chain_table[next_to_update_ & ((std::uint32_t{1} <<
+                        parameter_value<ChainLog>(chain_log_)) - 1U)] =
                         hash_table[slot];
                     hash_table[slot] = next_to_update_;
                     ++next_to_update_;
@@ -1226,12 +1280,12 @@ namespace sph::zstd::detail
             next_to_update_ = current;
 
             auto match_index{hash_table[hash(base + position)]};
-            auto const window_size{std::uint32_t{1} << window_log_};
+            auto const window_size{std::uint32_t{1} << parameter_value<WindowLog>(window_log_)};
             auto const frame_low{frame_index_base_ + index_bias};
             auto const low_limit{current - frame_low > window_size ? current - window_size : frame_low};
-            auto const chain_size{std::uint32_t{1} << chain_log_};
+            auto const chain_size{std::uint32_t{1} << parameter_value<ChainLog>(chain_log_)};
             auto const minimum_chain{current > chain_size ? current - chain_size : 0U};
-            auto attempts{std::uint32_t{1} << search_log_};
+            auto attempts{std::uint32_t{1} << parameter_value<SearchLog>(search_log_)};
             match_result best;
             while (match_index >= low_limit && attempts-- != 0U)
             {
@@ -1264,21 +1318,24 @@ namespace sph::zstd::detail
 
         void update_binary_tree(std::span<std::uint8_t const> input, std::uint32_t current)
         {
-            auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
+            auto const tree_mask{(std::uint32_t{1} <<
+                (parameter_value<ChainLog>(chain_log_) - 1U)) - 1U};
             auto const* const base{input.data()};
             auto* const hash_table{hash_table_.data()};
             auto* const chain_table{chain_table_.data()};
-            while (next_to_update_ < current)
+            auto update_index{next_to_update_};
+            auto update_position{static_cast<std::size_t>(
+                update_index - frame_index_base_ - index_bias)};
+            while (update_index < current)
             {
-                auto const update_position{static_cast<std::size_t>(
-                    next_to_update_ - frame_index_base_ - index_bias)};
                 auto const slot{hash(base + update_position)};
                 auto const match_index{hash_table[slot]};
-                auto const child_slot{2U * (next_to_update_ & tree_mask)};
-                hash_table[slot] = next_to_update_;
+                auto const child_slot{2U * (update_index & tree_mask)};
+                hash_table[slot] = update_index;
                 chain_table[child_slot] = match_index;
                 chain_table[child_slot + 1U] = unsorted_mark;
-                ++next_to_update_;
+                ++update_index;
+                ++update_position;
             }
             next_to_update_ = current;
         }
@@ -1287,7 +1344,8 @@ namespace sph::zstd::detail
             std::uint32_t current, std::size_t block_end, std::uint32_t attempts,
             std::uint32_t tree_low)
         {
-            auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
+            auto const tree_mask{(std::uint32_t{1} <<
+                (parameter_value<ChainLog>(chain_log_) - 1U)) - 1U};
             auto const* const base{input.data()};
             auto* const chain_table{chain_table_.data()};
             auto const current_position{static_cast<std::size_t>(
@@ -1299,7 +1357,7 @@ namespace sph::zstd::detail
             auto match_index{chain_table[smaller_slot]};
             std::size_t common_smaller{};
             std::size_t common_larger{};
-            auto const window_size{std::uint32_t{1} << window_log_};
+            auto const window_size{std::uint32_t{1} << parameter_value<WindowLog>(window_log_)};
             auto const frame_low{frame_index_base_ + index_bias};
             auto const window_low{current - frame_low > window_size ? current - window_size : frame_low};
 
@@ -1309,7 +1367,7 @@ namespace sph::zstd::detail
                 auto const match_position{static_cast<std::size_t>(
                     match_index - frame_index_base_ - index_bias)};
                 auto const common{std::min(common_smaller, common_larger)};
-                auto const length{common + count_matching_bytes(base + current_position + common,
+                auto const length{common + count_matching_bytes<true>(base + current_position + common,
                     base + match_position + common, base + block_end)};
                 if (current_position + length == block_end)
                 {
@@ -1359,13 +1417,14 @@ namespace sph::zstd::detail
 
             auto const hash_slot{hash(base + position)};
             auto match_index{hash_table[hash_slot]};
-            auto const window_size{std::uint32_t{1} << window_log_};
+            auto const window_size{std::uint32_t{1} << parameter_value<WindowLog>(window_log_)};
             auto const frame_low{frame_index_base_ + index_bias};
             auto const window_low{current - frame_low > window_size ? current - window_size : frame_low};
-            auto const tree_mask{(std::uint32_t{1} << (chain_log_ - 1U)) - 1U};
+            auto const tree_mask{(std::uint32_t{1} <<
+                (parameter_value<ChainLog>(chain_log_) - 1U)) - 1U};
             auto const tree_low{tree_mask >= current ? 0U : current - tree_mask};
             auto const unsorted_limit{std::max(tree_low, window_low)};
-            auto attempts{std::uint32_t{1} << search_log_};
+            auto attempts{std::uint32_t{1} << parameter_value<SearchLog>(search_log_)};
             auto candidates{attempts};
             std::uint32_t previous_candidate{};
 
@@ -1414,7 +1473,7 @@ namespace sph::zstd::detail
                 auto const match_position{static_cast<std::size_t>(
                     match_index - frame_index_base_ - index_bias)};
                 auto const common{std::min(common_smaller, common_larger)};
-                auto const length{common + count_matching_bytes(base + position + common,
+                auto const length{common + count_matching_bytes<true>(base + position + common,
                     base + match_position + common, base + block_end)};
                 if (length > best.length)
                 {
@@ -1481,16 +1540,38 @@ namespace sph::zstd::detail
             {
                 value = std::byteswap(value);
             }
-            if (minimum_match_ == 5U)
+            if constexpr (MinimumMatch == 5U)
             {
-                return static_cast<std::size_t>(((value << 24U) * 889523592379ULL) >> (64U - hash_log_));
+                return static_cast<std::size_t>(((value << 24U) * 889523592379ULL) >>
+                    (64U - parameter_value<HashLog>(hash_log_)));
             }
-            if (minimum_match_ == 6U)
+            else if constexpr (MinimumMatch == 6U)
             {
-                return static_cast<std::size_t>(((value << 16U) * 227718039650203ULL) >> (64U - hash_log_));
+                return static_cast<std::size_t>(((value << 16U) * 227718039650203ULL) >>
+                    (64U - parameter_value<HashLog>(hash_log_)));
             }
-            return static_cast<std::size_t>((static_cast<std::uint32_t>(value) * 2654435761U) >>
-                (32U - hash_log_));
+            else if constexpr (MinimumMatch != 0U)
+            {
+                return static_cast<std::size_t>((static_cast<std::uint32_t>(value) * 2654435761U) >>
+                    (32U - parameter_value<HashLog>(hash_log_)));
+            }
+            else
+            {
+                auto const minimum_match{parameter_value<MinimumMatch>(minimum_match_)};
+                auto const hash_log{parameter_value<HashLog>(hash_log_)};
+                if (minimum_match == 5U)
+                {
+                    return static_cast<std::size_t>(((value << 24U) * 889523592379ULL) >>
+                        (64U - hash_log));
+                }
+                if (minimum_match == 6U)
+                {
+                    return static_cast<std::size_t>(((value << 16U) * 227718039650203ULL) >>
+                        (64U - hash_log));
+                }
+                return static_cast<std::size_t>((static_cast<std::uint32_t>(value) * 2654435761U) >>
+                    (32U - hash_log));
+            }
         }
 
         [[nodiscard]] auto hash(std::span<std::uint8_t const> input,
@@ -2269,11 +2350,11 @@ namespace sph::zstd::detail
     {
         void reserve(std::size_t block_size, std::size_t maximum_sequences)
         {
-            literals.reserve(block_size);
+            literals.resize(block_size);
             raw_literals.reserve(block_size + 3U);
-            literal_codes.reserve(maximum_sequences);
-            offset_codes.reserve(maximum_sequences);
-            match_codes.reserve(maximum_sequences);
+            literal_codes.resize(maximum_sequences);
+            offset_codes.resize(maximum_sequences);
+            match_codes.resize(maximum_sequences);
             huffman_body.reserve(block_size);
             compressed_weights.reserve(512U);
             huffman_output.reserve(block_size);
@@ -2436,26 +2517,31 @@ namespace sph::zstd::detail
         auto& literal_codes{workspace.literal_codes};
         auto& offset_codes{workspace.offset_codes};
         auto& match_codes{workspace.match_codes};
-        literals.clear();
-        literal_codes.clear();
-        offset_codes.clear();
-        match_codes.clear();
-        auto literal_size{parsed.trailing_literal_length};
-        for (auto const& sequence : parsed.sequences)
+        auto const block_end{parsed.trailing_literal_position + parsed.trailing_literal_length};
+        auto const block_size{block_end - parsed.input_begin};
+        if (literals.size() < block_size || literal_codes.size() < parsed.sequences.size())
         {
-            literal_size += sequence.literal_length;
+            workspace.reserve(block_size, parsed.sequences.size());
         }
-        literals.resize(literal_size);
-        literal_codes.resize(parsed.sequences.size());
-        offset_codes.resize(parsed.sequences.size());
-        match_codes.resize(parsed.sequences.size());
         auto* literal_output{literals.data()};
         auto literal_position{parsed.input_begin};
         for (std::size_t index{}; index < parsed.sequences.size(); ++index)
         {
             auto const& sequence{parsed.sequences[index]};
-            std::memcpy(literal_output, input.data() + literal_position,
-                sequence.literal_length);
+            constexpr std::size_t short_literal_copy_size{16U};
+            if (sequence.literal_length <= short_literal_copy_size &&
+                static_cast<std::size_t>(literals.data() + literals.size() - literal_output) >=
+                    short_literal_copy_size &&
+                input.size() - literal_position >= short_literal_copy_size)
+            {
+                std::memcpy(literal_output, input.data() + literal_position,
+                    short_literal_copy_size);
+            }
+            else
+            {
+                std::memcpy(literal_output, input.data() + literal_position,
+                    sequence.literal_length);
+            }
             literal_output += sequence.literal_length;
             literal_position += sequence.literal_length + sequence.match_length;
             auto const offset_base_value{sequence.repeat_code != 0U ?
@@ -2473,10 +2559,19 @@ namespace sph::zstd::detail
         }
         std::memcpy(literal_output, input.data() + parsed.trailing_literal_position,
             parsed.trailing_literal_length);
+        auto const literal_size{static_cast<std::size_t>(literal_output - literals.data()) +
+            parsed.trailing_literal_length};
+        auto const literal_bytes{std::span<std::uint8_t const>{literals}.first(literal_size)};
+        auto const literal_code_bytes{std::span<std::uint8_t const>{literal_codes}.first(
+            parsed.sequences.size())};
+        auto const offset_code_bytes{std::span<std::uint8_t const>{offset_codes}.first(
+            parsed.sequences.size())};
+        auto const match_code_bytes{std::span<std::uint8_t const>{match_codes}.first(
+            parsed.sequences.size())};
 
         auto& huffman_literals{workspace.huffman_output};
-        if (encode_huffman_literals(literals, workspace, huffman_literals) &&
-            huffman_literals.size() < raw_literals_size(literals.size()))
+        if (encode_huffman_literals(literal_bytes, workspace, huffman_literals) &&
+            huffman_literals.size() < raw_literals_size(literal_bytes.size()))
         {
             output.swap(huffman_literals);
         }
@@ -2484,18 +2579,19 @@ namespace sph::zstd::detail
         {
             auto& raw_literals{workspace.raw_literals};
             raw_literals.clear();
-            append_raw_literals_header(raw_literals, literals.size());
-            raw_literals.insert(raw_literals.end(), literals.begin(), literals.end());
+            append_raw_literals_header(raw_literals, literal_bytes.size());
+            raw_literals.insert(raw_literals.end(), literal_bytes.begin(), literal_bytes.end());
             output.swap(raw_literals);
         }
-        auto const literal_table{select_sequence_table(literal_codes,
+        auto const literal_table{select_sequence_table(literal_code_bytes,
             literal_length_default_norm, 6U, 9U, true, workspace.table_descriptions[0],
             workspace.sequence_tables[0], workspace.histogram_workspace)};
-        auto const offset_table{select_sequence_table(offset_codes,
-            offset_default_norm, 5U, 8U, *std::max_element(offset_codes.begin(), offset_codes.end()) <= 28U,
+        auto const offset_table{select_sequence_table(offset_code_bytes,
+            offset_default_norm, 5U, 8U,
+            *std::max_element(offset_code_bytes.begin(), offset_code_bytes.end()) <= 28U,
             workspace.table_descriptions[1], workspace.sequence_tables[1],
             workspace.histogram_workspace)};
-        auto const match_table{select_sequence_table(match_codes,
+        auto const match_table{select_sequence_table(match_code_bytes,
             match_length_default_norm, 6U, 9U, true, workspace.table_descriptions[2],
             workspace.sequence_tables[2], workspace.histogram_workspace)};
 
