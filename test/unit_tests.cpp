@@ -348,6 +348,14 @@ namespace
         cache.fill(20U, 22U, [](std::uint32_t index) { return index + 100U; });
         check(cache[20U] == 120U && cache[22U] == 122U,
             "row hash cache fill includes the inclusive end position");
+        std::array<std::uint8_t, 32> fixed_bytes{};
+        std::iota(fixed_bytes.begin(), fixed_bytes.end(), std::uint8_t{1});
+        cache.reset();
+        cache.fill_fixed<4U>(0U, 7U, fixed_bytes.data(), 16U, 0U);
+        auto const fixed_expected{sph::zstd::detail::row_hash_fixed<4U>(fixed_bytes.data(), 16U, 0U)};
+        check(cache[0U] == fixed_expected &&
+                cache.next_fixed<4U>(0U, fixed_bytes.data(), 16U, 0U) == fixed_expected,
+            "row hash cache compile-time path preserves fill and rollover semantics");
     }
 
     void test_row_hash_salt_state()

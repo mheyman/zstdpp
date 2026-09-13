@@ -391,12 +391,34 @@ namespace sph::zstd::detail
                 values_[index & mask] = static_cast<std::uint32_t>(hasher(index));
         }
 
+        template <unsigned MinimumMatch>
+        void fill_fixed(std::uint32_t begin, std::uint32_t end, std::uint8_t const* base,
+            unsigned hash_bits, std::uint64_t salt) noexcept
+        {
+            if (end < begin)
+                return;
+            auto const count{std::min<std::uint64_t>(size,
+                static_cast<std::uint64_t>(end) - begin + 1U)};
+            for (auto index{begin}; index < begin + count; ++index)
+                values_[index & mask] = row_hash_fixed<MinimumMatch>(base + index, hash_bits, salt);
+        }
+
         template <typename Hasher>
         [[nodiscard]] auto next(std::uint32_t index, Hasher&& hasher) noexcept -> std::uint32_t
         {
             auto const slot{index & mask};
             auto const current{values_[slot]};
             values_[slot] = static_cast<std::uint32_t>(hasher(index + size));
+            return current;
+        }
+
+        template <unsigned MinimumMatch>
+        [[nodiscard]] auto next_fixed(std::uint32_t index, std::uint8_t const* base,
+            unsigned hash_bits, std::uint64_t salt) noexcept -> std::uint32_t
+        {
+            auto const slot{index & mask};
+            auto const current{values_[slot]};
+            values_[slot] = row_hash_fixed<MinimumMatch>(base + index + size, hash_bits, salt);
             return current;
         }
 
