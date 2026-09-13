@@ -270,9 +270,21 @@ namespace sph::zstd::detail
         [[nodiscard]] auto insert(std::uint32_t hash, unsigned row_log,
             std::uint32_t index) noexcept -> std::uint32_t
         {
-            auto const row_entries{std::uint32_t{1} << std::clamp(row_log, 4U, 6U)};
+            switch (std::clamp(row_log, 4U, 6U))
+            {
+            case 4U: return insert_fixed<4U>(hash, index);
+            case 5U: return insert_fixed<5U>(hash, index);
+            default: return insert_fixed<6U>(hash, index);
+            }
+        }
+
+        template <unsigned RowLog>
+        [[nodiscard]] auto insert_fixed(std::uint32_t hash, std::uint32_t index) noexcept -> std::uint32_t
+        {
+            static_assert(RowLog >= 4U && RowLog <= 6U);
+            auto constexpr row_entries{std::uint32_t{1} << RowLog};
             auto const row_mask{row_entries - 1U};
-            auto const row{(hash >> 8U) << std::countr_zero(row_entries)};
+            auto const row{(hash >> 8U) << RowLog};
             auto* const tags{tag_table_.data() + row};
             auto next{(static_cast<std::uint32_t>(*tags) - 1U) & row_mask};
             if (next == 0U)
@@ -287,16 +299,32 @@ namespace sph::zstd::detail
             std::uint32_t low_limit, std::uint32_t attempt_limit,
             std::span<std::uint32_t> candidates) const noexcept -> std::size_t
         {
-            auto const row_log_bounded{std::clamp(row_log, 4U, 6U)};
-            auto const row_entries{std::uint32_t{1} << row_log_bounded};
+            switch (std::clamp(row_log, 4U, 6U))
+            {
+            case 4U: return collect_candidates_fixed<4U>(hash, low_limit, attempt_limit, candidates);
+            case 5U: return collect_candidates_fixed<5U>(hash, low_limit, attempt_limit, candidates);
+            default: return collect_candidates_fixed<6U>(hash, low_limit, attempt_limit, candidates);
+            }
+        }
+
+        template <unsigned RowLog>
+        [[nodiscard]] auto collect_candidates_fixed(std::uint32_t hash,
+            std::uint32_t low_limit, std::uint32_t attempt_limit,
+            std::span<std::uint32_t> candidates) const noexcept -> std::size_t
+        {
+            static_assert(RowLog >= 4U && RowLog <= 6U);
+            auto constexpr row_entries{std::uint32_t{1} << RowLog};
             auto const row_mask{row_entries - 1U};
-            auto const row{(hash >> 8U) << row_log_bounded};
+            auto const row{(hash >> 8U) << RowLog};
             auto const tag{static_cast<std::uint8_t>(hash)};
             auto const head{static_cast<std::uint32_t>(tag_table_[row]) & row_mask};
             auto const limit{std::min<std::uint32_t>(attempt_limit, row_entries)};
             auto const matching_tags{matching_tag_mask(tag_table_.data() + row, tag, row_entries)};
-            auto const row_bits{row_entries == 64U ? std::numeric_limits<std::uint64_t>::max() :
-                (std::uint64_t{1} << row_entries) - 1U};
+            std::uint64_t row_bits{};
+            if constexpr (RowLog == 6U)
+                row_bits = std::numeric_limits<std::uint64_t>::max();
+            else
+                row_bits = (std::uint64_t{1} << row_entries) - 1U;
             auto const rotated_matches{head == 0U ? matching_tags :
                 ((matching_tags >> head) | (matching_tags << (row_entries - head))) & row_bits};
             std::size_t count{};
