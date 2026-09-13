@@ -354,7 +354,7 @@ namespace sph::zstd::detail
             auto const needle{_mm_set1_epi8(static_cast<char>(tag))};
             for (std::uint32_t offset{}; offset < entries; offset += 16U)
             {
-                auto const values{_mm_loadu_si128(reinterpret_cast<__m128i const*>(tags + offset))};
+                auto const values{_mm_load_si128(reinterpret_cast<__m128i const*>(tags + offset))};
                 auto const equal{_mm_cmpeq_epi8(values, needle)};
                 result |= static_cast<std::uint64_t>(
                     static_cast<unsigned>(_mm_movemask_epi8(equal))) << offset;
