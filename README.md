@@ -108,6 +108,10 @@ ctest --preset msvc-acceptance
 Equivalent `clang-acceptance` and `gcc-acceptance` presets are provided. All seven acceptance levels
 are byte-identical.
 
+The published performance matrix uses this parity-safe corpus. An expanded phase-reset corpus is
+also exercised during performance work; it currently exposes a known level-8 difference caused by
+the template implementation not yet having reference zstd's salted row-hash matcher.
+
 ### Presets and reference builds
 
 Compiler-specific presets are provided for MSVC, Clang, and GCC. Reference presets expose and build
@@ -144,24 +148,24 @@ Compression workers receive identical input. Decompression workers both consume 
 
 | Level | C++ size (KiB) | Reference size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 259 | 259 | 2103 | 2193 | 6 | 7 | 106 | 382 |
-| 3 | 274 | 274 | 1563 | 1669 | 7 | 8 | 107 | 382 |
-| 5 | 274 | 274 | 2139 | 2105 | 10 | 9 | 106 | 382 |
-| 7 | 259 | 259 | 3262 | 1731 | 13 | 12 | 109 | 382 |
-| 8 | 260 | 260 | 1642 | 1324 | 13 | 12 | 109 | 382 |
-| 9 | 260 | 260 | 1740 | 1115 | 19 | 17 | 109 | 382 |
-| 15 | 260 | 260 | 619 | 488 | 24 | 23 | 111 | 382 |
+| 1 | 259 | 259 | 2135 | 2379 | 7 | 7 | 106 | 382 |
+| 3 | 274 | 274 | 1604 | 1692 | 7 | 8 | 107 | 382 |
+| 5 | 274 | 274 | 1949 | 2148 | 10 | 9 | 107 | 382 |
+| 7 | 259 | 259 | 2744 | 1428 | 13 | 12 | 109 | 382 |
+| 8 | 260 | 260 | 1741 | 1420 | 13 | 12 | 109 | 382 |
+| 9 | 260 | 260 | 1678 | 1141 | 19 | 17 | 109 | 382 |
+| 15 | 260 | 260 | 495 | 669 | 24 | 23 | 110 | 382 |
 
 ### Decompression
 
 | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 3388 | 3133 | 7 | 7 | 85 | 114 |
-| 3 | 4942 | 5351 | 7 | 7 | 85 | 114 |
-| 5 | 6088 | 5233 | 7 | 7 | 85 | 114 |
-| 7 | 18313 | 13243 | 7 | 7 | 85 | 114 |
-| 8 | 16853 | 11493 | 7 | 7 | 85 | 114 |
-| 9 | 18882 | 13887 | 7 | 7 | 85 | 114 |
-| 15 | 18713 | 14109 | 7 | 7 | 85 | 114 |
+| 1 | 3480 | 3141 | 7 | 7 | 85 | 114 |
+| 3 | 4672 | 4756 | 7 | 7 | 85 | 114 |
+| 5 | 5853 | 5484 | 7 | 7 | 85 | 114 |
+| 7 | 19006 | 12401 | 7 | 7 | 85 | 114 |
+| 8 | 18816 | 10828 | 7 | 7 | 85 | 114 |
+| 9 | 18558 | 13683 | 7 | 7 | 85 | 114 |
+| 15 | 18515 | 12753 | 7 | 7 | 85 | 114 |
 
 <!-- SPH_ZSTDPP_EVAL_END -->

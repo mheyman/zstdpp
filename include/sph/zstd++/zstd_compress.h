@@ -532,10 +532,11 @@ namespace sph::zstd
                         effective_parameters_.minimum_match, &compression_workspace_.fast_latest)};
                     if (selected)
                     {
-                        auto candidate{detail::encode_single_match_block(bytes, *selected)};
-                        if (candidate.size() < bytes.size())
+                        detail::encode_single_match_block(bytes, *selected,
+                            compression_workspace_, compressed);
+                        if (compressed.size() >= bytes.size())
                         {
-                            compressed = std::move(candidate);
+                            compressed.clear();
                         }
                     }
                 }

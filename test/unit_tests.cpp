@@ -248,6 +248,141 @@ namespace
         }
     }
 
+    void test_row_hash_primitives()
+    {
+        std::array<std::uint8_t, 16> bytes{};
+        std::iota(bytes.begin(), bytes.end(), std::uint8_t{1});
+        constexpr std::uint64_t salt{0x123456789ABCDEF0ULL};
+        auto const mixed{sph::zstd::detail::row_hash_bitmix(salt, 8U)};
+        auto expected_mix{salt ^ std::rotr(salt, 49U) ^ std::rotr(salt, 24U)};
+        expected_mix *= 0x9FB21C651E98DF25ULL;
+        expected_mix ^= (expected_mix >> 35U) + 8U;
+        expected_mix *= 0x9FB21C651E98DF25ULL;
+        expected_mix ^= expected_mix >> 28U;
+        check(mixed == expected_mix, "row hash bit mixer matches reference formula");
+        auto value32{std::uint32_t{}};
+        auto value64{std::uint64_t{}};
+        std::memcpy(&value32, bytes.data(), sizeof(value32));
+        std::memcpy(&value64, bytes.data(), sizeof(value64));
+        check(sph::zstd::detail::row_hash4(bytes.data(), 20U, 0xA5A5A5A5U) ==
+                (((value32 * 2654435761U) ^ 0xA5A5A5A5U) >> 12U),
+            "salted row hash 4 matches reference formula");
+        check(sph::zstd::detail::row_hash5(bytes.data(), 20U, salt) ==
+                static_cast<std::uint32_t>((((value64 << 24U) * 889523592379ULL) ^ salt) >> 44U),
+            "salted row hash 5 matches reference formula");
+        check(sph::zstd::detail::row_hash6(bytes.data(), 20U, salt) ==
+                static_cast<std::uint32_t>((((value64 << 16U) * 227718039650203ULL) ^ salt) >> 44U),
+            "salted row hash 6 matches reference formula");
+        check(sph::zstd::detail::row_hash7(bytes.data(), 20U, salt) ==
+                static_cast<std::uint32_t>((((value64 << 8U) * 58295818150454627ULL) ^ salt) >> 44U),
+            "salted row hash 7 matches reference formula");
+        check(sph::zstd::detail::row_hash8(bytes.data(), 20U, salt) ==
+                static_cast<std::uint32_t>(((value64 * 0xCF1BBCDCB7A56463ULL) ^ salt) >> 44U),
+            "salted row hash 8 matches reference formula");
+        check(sph::zstd::detail::row_hash(bytes.data(), 20U, 4U, salt) ==
+                sph::zstd::detail::row_hash4(bytes.data(), 20U, static_cast<std::uint32_t>(salt)),
+            "salted row hash dispatcher selects the minimum-match formula");
+    }
+
+    void test_row_match_table()
+    {
+        sph::zstd::detail::row_match_table table{10U};
+        auto const allocations_after_construction{
+            sph::zstd::detail::cache_aligned_allocation_count};
+        check((reinterpret_cast<std::uintptr_t>(table.hash_table()) & 63U) == 0U,
+            "row table hash storage is cache-line aligned");
+        check((reinterpret_cast<std::uintptr_t>(table.tag_table()) & 63U) == 0U,
+            "row table tag storage is cache-line aligned");
+        auto const hash{static_cast<std::uint32_t>((3U << 8U) | 0xA5U)};
+        check(table.insert(hash, 4U, 11U) == 15U,
+            "row table starts insertion at the final slot");
+        check(table.insert(hash, 4U, 22U) == 14U,
+            "row table insertion cycles backwards");
+        auto const row{3U << 4U};
+        check(table.hash_table()[row + 15U] == 11U && table.hash_table()[row + 14U] == 22U,
+            "row table stores indices in circular slots");
+        check(table.tag_table()[row + 15U] == 0xA5U && table.tag_table()[row + 14U] == 0xA5U,
+            "row table stores the low hash tag");
+        std::array<std::uint32_t, 4> candidates{};
+        auto const count{table.collect_candidates(hash, 4U, 0U, 2U, candidates)};
+        check(count == 2U && candidates[0] == 22U && candidates[1] == 11U,
+            "row table enumerates newest matching candidates first");
+        check(table.collect_candidates(hash, 4U, 12U, 2U, candidates) == 1U && candidates[0] == 22U,
+            "row table applies the low-limit filter");
+        table.reset();
+        check(table.tag_table()[row] == 0U && table.tag_table()[row + 14U] == 0U,
+            "row table reset clears row heads and tags");
+        check(sph::zstd::detail::cache_aligned_allocation_count == allocations_after_construction,
+            "row table operations allocate no additional storage");
+
+        for (auto const row_log : {5U, 6U})
+        {
+            table.reset();
+            static_cast<void>(table.insert(hash, row_log, 31U));
+            static_cast<void>(table.insert(hash, row_log, 32U));
+            static_cast<void>(table.insert(hash, row_log, 33U));
+            auto const wide_count{table.collect_candidates(hash, row_log, 0U, 3U, candidates)};
+            check(wide_count == 3U && candidates[0] == 33U && candidates[1] == 32U && candidates[2] == 31U,
+                "row table preserves newest-first order for wider rows");
+        }
+    }
+
+    void test_row_hash_cache()
+    {
+        sph::zstd::detail::row_hash_cache cache;
+        cache.fill(4U, 12U, [](std::uint32_t index) { return index * 17U + 3U; });
+        check(cache[4U] == 71U && cache[11U] == 190U,
+            "row hash cache fills the initial eight positions");
+        check(cache.next(4U, [](std::uint32_t index) { return index * 17U + 3U; }) == 71U,
+            "row hash cache returns the outgoing entry");
+        check(cache[4U] == 207U,
+            "row hash cache replaces the slot with the entry eight positions ahead");
+        check(cache.next(12U, [](std::uint32_t index) { return index * 17U + 3U; }) == 207U,
+            "row hash cache preserves circular slot order");
+        cache.reset();
+        cache.fill(20U, 22U, [](std::uint32_t index) { return index + 100U; });
+        check(cache[20U] == 120U && cache[22U] == 122U,
+            "row hash cache fill includes the inclusive end position");
+    }
+
+    void test_row_hash_salt_state()
+    {
+        sph::zstd::detail::row_hash_salt_state state;
+        state.observe(0x12345678U);
+        state.observe(0x9ABCDEF0U);
+        check(state.entropy() == 0xACF13568U,
+            "row hash salt state accumulates hash entropy");
+        state.reset(false);
+        check(state.salt() == sph::zstd::detail::advance_row_hash_salt(0U, 0xACF13568U),
+            "row hash salt state advances from cumulative entropy");
+        state.observe(7U);
+        state.reset(true);
+        check(state.salt() == 0U && state.entropy() == 0xACF1356FU,
+            "dictionary row hash reset clears salt but preserves entropy");
+    }
+
+    void test_row_match_state()
+    {
+        sph::zstd::detail::row_match_state state{10U, 4U};
+        state.update(4U, 6U, [](std::uint32_t index) { static_cast<void>(index); return (3U << 8U) | 0xA5U; });
+        std::array<std::uint32_t, 3> candidates{};
+        check(state.next_to_update() == 7U && state.search((3U << 8U) | 0xA5U, 0U, 3U, candidates) == 3U,
+            "row match state composes update and candidate search");
+        check(state.salt() == 0U,
+            "row match search records entropy without changing salt until reset");
+
+        state.reset();
+        std::uint32_t hash_calls{};
+        state.update(0U, 15U, [&hash_calls](std::uint32_t index)
+        {
+            ++hash_calls;
+            static_cast<void>(index);
+            return (2U << 8U) | 0x5AU;
+        });
+        check(state.next_to_update() == 16U && hash_calls == 24U,
+            "row match state rolls the eight-entry cache across longer updates");
+    }
+
     void test_one_shot_compression_state()
     {
         auto const input{make_input(257U)};
@@ -507,6 +642,11 @@ int main()
         test_reference_interoperability();
         test_rle_blocks();
         test_normalized_count_round_trips();
+        test_row_hash_primitives();
+        test_row_match_table();
+        test_row_hash_cache();
+        test_row_hash_salt_state();
+        test_row_match_state();
         test_one_shot_compression_state();
         test_reference_rle_golden_frame();
         test_reference_zero_sequence_golden_frames();

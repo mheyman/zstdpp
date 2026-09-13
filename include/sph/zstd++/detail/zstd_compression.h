@@ -17,6 +17,25 @@
 
 namespace sph::zstd::detail
 {
+    // Reference zstd uses this XXH3-style mixer to salt row-hash tables when a
+    // compression context is reset. Keep it separate from the ordinary hash
+    // functions so the eventual row matcher can share the exact transition.
+    [[nodiscard]] constexpr auto row_hash_bitmix(std::uint64_t value,
+        std::uint64_t length) noexcept -> std::uint64_t
+    {
+        value ^= std::rotr(value, 49U) ^ std::rotr(value, 24U);
+        value *= 0x9FB21C651E98DF25ULL;
+        value ^= (value >> 35U) + length;
+        value *= 0x9FB21C651E98DF25ULL;
+        return value ^ (value >> 28U);
+    }
+
+    [[nodiscard]] constexpr auto advance_row_hash_salt(std::uint64_t salt,
+        std::uint32_t entropy) noexcept -> std::uint64_t
+    {
+        return row_hash_bitmix(salt, 8U) ^ row_hash_bitmix(entropy, 4U);
+    }
+
     inline std::size_t cache_aligned_allocation_count{};
     inline std::size_t cache_aligned_deallocation_count{};
 
@@ -62,6 +81,7 @@ namespace sph::zstd::detail
     };
 
     using match_table = std::vector<std::uint32_t, cache_aligned_allocator<std::uint32_t>>;
+    using row_tag_table = std::vector<std::uint8_t, cache_aligned_allocator<std::uint8_t>>;
     using symbol_counts = std::array<std::uint32_t, 256>;
     using symbol_count_workspace = std::array<symbol_counts, 4>;
 
@@ -147,6 +167,243 @@ namespace sph::zstd::detail
         std::memcpy(&value, input, sizeof(value));
         return value;
     }
+
+    [[nodiscard]] inline auto row_hash4(std::uint8_t const* input, unsigned hash_bits,
+        std::uint32_t salt) noexcept -> std::uint32_t
+    {
+        auto value{load_native_u32(input)};
+        if constexpr (std::endian::native == std::endian::big)
+            value = std::byteswap(value);
+        return ((value * 2654435761U) ^ salt) >> (32U - hash_bits);
+    }
+
+    [[nodiscard]] inline auto row_hash5(std::uint8_t const* input, unsigned hash_bits,
+        std::uint64_t salt) noexcept -> std::uint32_t
+    {
+        auto value{load_native_u64(input)};
+        if constexpr (std::endian::native == std::endian::big)
+            value = std::byteswap(value);
+        return static_cast<std::uint32_t>((((value << 24U) * 889523592379ULL) ^ salt) >>
+            (64U - hash_bits));
+    }
+
+    [[nodiscard]] inline auto row_hash6(std::uint8_t const* input, unsigned hash_bits,
+        std::uint64_t salt) noexcept -> std::uint32_t
+    {
+        auto value{load_native_u64(input)};
+        if constexpr (std::endian::native == std::endian::big)
+            value = std::byteswap(value);
+        return static_cast<std::uint32_t>((((value << 16U) * 227718039650203ULL) ^ salt) >>
+            (64U - hash_bits));
+    }
+
+    [[nodiscard]] inline auto row_hash7(std::uint8_t const* input, unsigned hash_bits,
+        std::uint64_t salt) noexcept -> std::uint32_t
+    {
+        auto value{load_native_u64(input)};
+        if constexpr (std::endian::native == std::endian::big)
+            value = std::byteswap(value);
+        return static_cast<std::uint32_t>((((value << 8U) * 58295818150454627ULL) ^ salt) >>
+            (64U - hash_bits));
+    }
+
+    [[nodiscard]] inline auto row_hash8(std::uint8_t const* input, unsigned hash_bits,
+        std::uint64_t salt) noexcept -> std::uint32_t
+    {
+        auto value{load_native_u64(input)};
+        if constexpr (std::endian::native == std::endian::big)
+            value = std::byteswap(value);
+        return static_cast<std::uint32_t>(((value * 0xCF1BBCDCB7A56463ULL) ^ salt) >>
+            (64U - hash_bits));
+    }
+
+    [[nodiscard]] inline auto row_hash(std::uint8_t const* input, unsigned hash_bits,
+        unsigned minimum_match, std::uint64_t salt) noexcept -> std::uint32_t
+    {
+        switch (minimum_match)
+        {
+        case 4U: return row_hash4(input, hash_bits, static_cast<std::uint32_t>(salt));
+        case 5U: return row_hash5(input, hash_bits, salt);
+        case 6U: return row_hash6(input, hash_bits, salt);
+        case 7U: return row_hash7(input, hash_bits, salt);
+        default: return row_hash8(input, hash_bits, salt);
+        }
+    }
+
+    /** Preallocated storage for reference zstd's row-based match finder. */
+    class row_match_table
+    {
+    public:
+        explicit row_match_table(unsigned hash_log)
+            : hash_table_(std::size_t{1} << std::clamp(hash_log, 10U, 25U)),
+              tag_table_(hash_table_.size())
+        {
+        }
+
+        void reset() noexcept
+        {
+            std::ranges::fill(tag_table_, std::uint8_t{0});
+        }
+
+        [[nodiscard]] auto hash_table() noexcept -> std::uint32_t* { return hash_table_.data(); }
+        [[nodiscard]] auto tag_table() noexcept -> std::uint8_t* { return tag_table_.data(); }
+
+        [[nodiscard]] auto insert(std::uint32_t hash, unsigned row_log,
+            std::uint32_t index) noexcept -> std::uint32_t
+        {
+            auto const row_entries{std::uint32_t{1} << std::clamp(row_log, 4U, 6U)};
+            auto const row_mask{row_entries - 1U};
+            auto const row{(hash >> 8U) << std::countr_zero(row_entries)};
+            auto* const tags{tag_table_.data() + row};
+            auto next{(static_cast<std::uint32_t>(*tags) - 1U) & row_mask};
+            if (next == 0U)
+                next = row_mask;
+            *tags = static_cast<std::uint8_t>(next);
+            tag_table_[row + next] = static_cast<std::uint8_t>(hash);
+            hash_table_[row + next] = index;
+            return next;
+        }
+
+        [[nodiscard]] auto collect_candidates(std::uint32_t hash, unsigned row_log,
+            std::uint32_t low_limit, std::uint32_t attempt_limit,
+            std::span<std::uint32_t> candidates) const noexcept -> std::size_t
+        {
+            auto const row_log_bounded{std::clamp(row_log, 4U, 6U)};
+            auto const row_entries{std::uint32_t{1} << row_log_bounded};
+            auto const row_mask{row_entries - 1U};
+            auto const row{(hash >> 8U) << row_log_bounded};
+            auto const tag{static_cast<std::uint8_t>(hash)};
+            auto const head{static_cast<std::uint32_t>(tag_table_[row]) & row_mask};
+            auto const limit{std::min<std::uint32_t>(attempt_limit, row_entries)};
+            std::size_t count{};
+            for (std::uint32_t offset{}; offset < row_entries && count < limit; ++offset)
+            {
+                auto const slot{(head + offset) & row_mask};
+                if (slot == 0U || tag_table_[row + slot] != tag)
+                    continue;
+                auto const index{hash_table_[row + slot]};
+                if (index < low_limit)
+                    break;
+                if (count < candidates.size())
+                    candidates[count++] = index;
+            }
+            return count;
+        }
+
+    private:
+        match_table hash_table_;
+        row_tag_table tag_table_;
+    };
+
+    /** Eight-entry rolling hash cache used by the reference row matcher. */
+    class row_hash_cache
+    {
+    public:
+        static constexpr std::uint32_t size{8U};
+        static constexpr std::uint32_t mask{size - 1U};
+
+        void reset() noexcept { values_.fill(0U); }
+
+        template <typename Hasher>
+        // `end` is inclusive, matching the reference iLimit contract.
+        void fill(std::uint32_t begin, std::uint32_t end, Hasher&& hasher) noexcept
+        {
+            if (end < begin)
+                return;
+            auto const count{std::min<std::uint64_t>(size,
+                static_cast<std::uint64_t>(end) - begin + 1U)};
+            for (auto index{begin}; index < begin + count; ++index)
+                values_[index & mask] = static_cast<std::uint32_t>(hasher(index));
+        }
+
+        template <typename Hasher>
+        [[nodiscard]] auto next(std::uint32_t index, Hasher&& hasher) noexcept -> std::uint32_t
+        {
+            auto const slot{index & mask};
+            auto const current{values_[slot]};
+            values_[slot] = static_cast<std::uint32_t>(hasher(index + size));
+            return current;
+        }
+
+        [[nodiscard]] auto operator[](std::uint32_t index) const noexcept -> std::uint32_t
+        {
+            return values_[index & mask];
+        }
+
+    private:
+        std::array<std::uint32_t, size> values_{};
+    };
+
+    /** Persistent salt/entropy state for a reusable row-hash match state. */
+    class row_hash_salt_state
+    {
+    public:
+        void observe(std::uint32_t hash) noexcept { entropy_ += hash; }
+
+        void reset(bool dictionary) noexcept
+        {
+            salt_ = dictionary ? 0U : advance_row_hash_salt(salt_, entropy_);
+        }
+
+        [[nodiscard]] auto salt() const noexcept -> std::uint64_t { return salt_; }
+        [[nodiscard]] auto entropy() const noexcept -> std::uint32_t { return entropy_; }
+
+    private:
+        std::uint64_t salt_{};
+        std::uint32_t entropy_{};
+    };
+
+    /** Allocation-free composition of the row table, rolling cache, and salt state. */
+    class row_match_state
+    {
+    public:
+        row_match_state(unsigned hash_log, unsigned row_log)
+            : table_(hash_log), row_log_(std::clamp(row_log, 4U, 6U))
+        {
+        }
+
+        void reset(bool dictionary = false) noexcept
+        {
+            table_.reset();
+            cache_.reset();
+            salt_.reset(dictionary);
+            next_to_update_ = 0U;
+        }
+
+        template <typename Hasher>
+        void update(std::uint32_t begin, std::uint32_t end, Hasher&& hasher) noexcept
+        {
+            if (end < begin)
+                return;
+            cache_.fill(begin, end, hasher);
+            for (auto index{begin}; index <= end; ++index)
+            {
+                auto const hash{cache_.next(index, hasher)};
+                static_cast<void>(table_.insert(hash, row_log_, index));
+                salt_.observe(hash);
+                if (index == std::numeric_limits<std::uint32_t>::max())
+                    break;
+            }
+            next_to_update_ = end + (end != std::numeric_limits<std::uint32_t>::max());
+        }
+
+        [[nodiscard]] auto search(std::uint32_t hash, std::uint32_t low_limit,
+            std::uint32_t attempts, std::span<std::uint32_t> candidates) noexcept -> std::size_t
+        {
+            salt_.observe(hash);
+            return table_.collect_candidates(hash, row_log_, low_limit, attempts, candidates);
+        }
+
+        [[nodiscard]] auto salt() const noexcept -> std::uint64_t { return salt_.salt(); }
+        [[nodiscard]] auto next_to_update() const noexcept -> std::uint32_t { return next_to_update_; }
+
+    private:
+        row_match_table table_;
+        row_hash_cache cache_;
+        row_hash_salt_state salt_;
+        unsigned row_log_{};
+        std::uint32_t next_to_update_{};
+    };
 
     [[nodiscard]] inline auto load_native_u32(std::span<std::uint8_t const> input,
         std::size_t position) noexcept -> std::uint32_t
@@ -759,7 +1016,7 @@ namespace sph::zstd::detail
         unsigned minimum_match_{};
         std::size_t target_length_{};
         match_table hash_table_;
-        std::vector<std::uint8_t> hash_tags_;
+        row_tag_table hash_tags_;
         std::uint32_t frame_index_base_{};
         std::uint32_t frame_extent_{};
         std::array<std::size_t, 3> repeat_offsets_{1U, 4U, 8U};
@@ -802,6 +1059,9 @@ namespace sph::zstd::detail
             repeat_offsets_ = {1U, 4U, 8U};
         }
 
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
             parsed_block result = {}, std::optional<bool> known_rle = std::nullopt) -> parsed_block
@@ -1136,8 +1396,8 @@ namespace sph::zstd::detail
         unsigned minimum_match_{};
         match_table long_table_;
         match_table short_table_;
-        std::vector<std::uint8_t> long_tags_;
-        std::vector<std::uint8_t> short_tags_;
+        row_tag_table long_tags_;
+        row_tag_table short_tags_;
         std::uint32_t frame_index_base_{};
         std::uint32_t frame_extent_{};
         std::array<std::size_t, 3> repeat_offsets_{1U, 4U, 8U};
@@ -1653,6 +1913,9 @@ namespace sph::zstd::detail
             if (!larger_is_dummy) chain_table[larger_slot] = 0U;
         }
 
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#endif
         [[nodiscard]] auto find_best_binary_tree_match(std::span<std::uint8_t const> input,
             std::size_t position, std::size_t block_end) -> match_result
         {
@@ -1875,7 +2138,7 @@ namespace sph::zstd::detail
         unsigned target_length_{};
         match_table hash_table_;
         match_table chain_table_;
-        std::vector<std::uint8_t> chain_tags_;
+        row_tag_table chain_tags_;
         std::uint32_t chain_mask_{};
         std::uint32_t tree_mask_{};
         std::uint32_t frame_index_base_{};
@@ -2684,6 +2947,12 @@ namespace sph::zstd::detail
         }
     }
 
+    struct huffman_code
+    {
+        std::uint16_t value{};
+        std::uint8_t number_bits{};
+    };
+
     struct compression_workspace
     {
         void reserve(std::size_t block_size, std::size_t maximum_sequences)
@@ -2743,6 +3012,11 @@ namespace sph::zstd::detail
         std::size_t huffman_repeat_literal_size{};
         unsigned huffman_repeat_log{};
         bool huffman_repeat_valid{};
+        std::array<huffman_code, 256> huffman_repeat_codes{};
+        std::array<std::uint8_t, 256> huffman_repeat_code_lengths{};
+        std::uint8_t huffman_repeat_codes_maximum_symbol{};
+        unsigned huffman_repeat_codes_log{};
+        bool huffman_repeat_codes_valid{};
         fast_match_scratch fast_latest;
         symbol_count_workspace histogram_workspace;
 
@@ -2753,6 +3027,7 @@ namespace sph::zstd::detail
                 history.valid = false;
             }
             huffman_repeat_valid = false;
+            huffman_repeat_codes_valid = false;
         }
     };
 
@@ -2971,14 +3246,8 @@ namespace sph::zstd::detail
                     return {sequence_table_mode::predefined,
                         &default_fse_compression_table(default_counts)};
                 }
-            }
-            if constexpr (CarefulSelection)
-            {
-                auto const repeat_cost{history.valid ? repeat_fse_cost(
-                    history.table, history.counts, counts, maximum_symbol) : std::nullopt};
                 if (codes.size() >= 1U && history.valid && repeat_cost &&
-                    *repeat_cost <= entropy_cost(counts, maximum_symbol, codes.size()) +
-                        description.size() * 8U)
+                    *repeat_cost <= compressed_cost)
                 {
                     description.clear();
                     return {sequence_table_mode::repeat, &history.table};
@@ -3009,14 +3278,8 @@ namespace sph::zstd::detail
                 return {sequence_table_mode::predefined,
                     &default_fse_compression_table(default_counts)};
             }
-        }
-        if constexpr (CarefulSelection)
-        {
-            auto const repeat_cost{history.valid ? repeat_fse_cost(
-                history.table, history.counts, counts, maximum_symbol) : std::nullopt};
             if (codes.size() >= 1U && history.valid && repeat_cost &&
-                *repeat_cost <= entropy_cost(counts, maximum_symbol, codes.size()) +
-                    description.size() * 8U)
+                *repeat_cost <= compressed_cost)
             {
                 description.clear();
                 return {sequence_table_mode::repeat, &history.table};
@@ -3187,12 +3450,6 @@ namespace sph::zstd::detail
         encode_sequences_block(input, parsed, workspace, output);
         return output;
     }
-
-    struct huffman_code
-    {
-        std::uint16_t value{};
-        std::uint8_t number_bits{};
-    };
 
     struct huffman_tree_node
     {
@@ -3707,26 +3964,47 @@ namespace sph::zstd::detail
         if (repeat_symbols_valid && !repeat_tree)
         {
             std::array<huffman_code, 256> repeat_codes{};
-            std::size_t repeat_table_position{};
-            for (unsigned weight{1}; weight <= workspace.huffman_repeat_log; ++weight)
+            auto const cached_codes{workspace.huffman_repeat_codes_valid &&
+                workspace.huffman_repeat_codes_maximum_symbol == workspace.huffman_repeat_maximum_symbol &&
+                workspace.huffman_repeat_codes_log == workspace.huffman_repeat_log &&
+                std::equal(workspace.huffman_repeat_code_lengths.begin(),
+                    workspace.huffman_repeat_code_lengths.end(), workspace.huffman_repeat_lengths.begin())};
+            std::size_t repeat_table_position{cached_codes ?
+                (std::size_t{1} << workspace.huffman_repeat_log) : 0U};
+            if (cached_codes)
             {
-                auto const code_length{workspace.huffman_repeat_log + 1U - weight};
-                auto const run_length{std::size_t{1} << (weight - 1U)};
                 for (std::size_t symbol{}; symbol <= workspace.huffman_repeat_maximum_symbol; ++symbol)
+                    repeat_codes[symbol] = workspace.huffman_repeat_codes[symbol];
+            }
+            else
+            {
+                for (unsigned weight{1}; weight <= workspace.huffman_repeat_log; ++weight)
                 {
-                    if (workspace.huffman_repeat_lengths[symbol] != code_length)
+                    auto const code_length{workspace.huffman_repeat_log + 1U - weight};
+                    auto const run_length{std::size_t{1} << (weight - 1U)};
+                    for (std::size_t symbol{}; symbol <= workspace.huffman_repeat_maximum_symbol; ++symbol)
                     {
-                        continue;
+                        if (workspace.huffman_repeat_lengths[symbol] != code_length)
+                            continue;
+                        auto const code{huffman_code{
+                            static_cast<std::uint16_t>(repeat_table_position >>
+                                (workspace.huffman_repeat_log - code_length)),
+                            static_cast<std::uint8_t>(code_length)}};
+                        repeat_codes[symbol] = code;
+                        workspace.huffman_repeat_codes[symbol] = code;
+                        workspace.huffman_repeat_code_lengths[symbol] = code.number_bits;
+                        repeat_table_position += run_length;
                     }
-                    repeat_codes[symbol] = huffman_code{
-                        static_cast<std::uint16_t>(repeat_table_position >>
-                            (workspace.huffman_repeat_log - code_length)),
-                        static_cast<std::uint8_t>(code_length)};
-                    repeat_table_position += run_length;
                 }
             }
             if (repeat_table_position == (std::size_t{1} << workspace.huffman_repeat_log))
             {
+                if (!cached_codes)
+                {
+                    workspace.huffman_repeat_codes_maximum_symbol = workspace.huffman_repeat_maximum_symbol;
+                    workspace.huffman_repeat_codes_log = workspace.huffman_repeat_log;
+                    workspace.huffman_repeat_codes_valid = true;
+                }
                 auto& repeat_body{workspace.huffman_repeat_body};
                 repeat_body.clear();
                 if (!four_streams)
@@ -3850,8 +4128,9 @@ namespace sph::zstd::detail
      * This is a complete interoperable entropy path and a stepping stone to
      * multi-sequence normalized FSE tables.
      */
-    [[nodiscard]] inline auto encode_single_match_block(
-        std::span<std::uint8_t const> input, match const& selected) -> std::vector<std::uint8_t>
+    inline void encode_single_match_block(std::span<std::uint8_t const> input,
+        match const& selected, compression_workspace& workspace,
+        std::vector<std::uint8_t>& output)
     {
         if (selected.position + selected.length > input.size() || selected.length < 3U)
         {
@@ -3863,27 +4142,38 @@ namespace sph::zstd::detail
         auto const match_symbol{match_length_symbol(selected.length)};
         auto const selected_offset_symbol{find_offset_symbol(selected.offset)};
 
-        std::vector<std::uint8_t> literals;
-        literals.reserve(literal_size);
-        literals.insert(literals.end(), input.begin(), input.begin() + static_cast<std::ptrdiff_t>(selected.position));
-        literals.insert(literals.end(), input.begin() + static_cast<std::ptrdiff_t>(selected.position + selected.length),
-            input.end());
-
-        std::vector<std::uint8_t> raw_literals;
-        raw_literals.reserve(literals.size() + 3U);
-        append_raw_literals_header(raw_literals, literals.size());
-        raw_literals.insert(raw_literals.end(), literals.begin(), literals.end());
-        auto huffman_literals{encode_huffman_literals(literals)};
-
-        std::vector<std::uint8_t> output;
-        output.reserve(input.size());
-        if (huffman_literals && huffman_literals->size() < raw_literals.size())
+        auto& literals{workspace.literals};
+        auto& raw_literals{workspace.raw_literals};
+        auto& huffman_output{workspace.huffman_output};
+        literals.clear();
+        raw_literals.clear();
+        huffman_output.clear();
+        output.clear();
+        if (literals.capacity() < literal_size || raw_literals.capacity() < literal_size + 3U ||
+            output.capacity() < input.size())
         {
-            output.insert(output.end(), huffman_literals->begin(), huffman_literals->end());
+            workspace.reserve(input.size(), 1U);
+        }
+        literals.resize(literal_size);
+        auto* literal_output{literals.data()};
+        std::memcpy(literal_output, input.data(), selected.position);
+        std::memcpy(literal_output + selected.position,
+            input.data() + selected.position + selected.length, trailing_size);
+
+        append_raw_literals_header(raw_literals, literals.size());
+        auto const header_size{raw_literals.size()};
+        raw_literals.resize(header_size + literals.size());
+        std::memcpy(raw_literals.data() + header_size, literals.data(), literals.size());
+        if (encode_huffman_literals(literals, workspace, huffman_output) &&
+            huffman_output.size() < raw_literals.size())
+        {
+            output.resize(huffman_output.size());
+            std::memcpy(output.data(), huffman_output.data(), huffman_output.size());
         }
         else
         {
-            output.insert(output.end(), raw_literals.begin(), raw_literals.end());
+            output.resize(raw_literals.size());
+            std::memcpy(output.data(), raw_literals.data(), raw_literals.size());
         }
 
         output.push_back(1U); // one sequence
@@ -3892,15 +4182,24 @@ namespace sph::zstd::detail
         output.push_back(selected_offset_symbol);
         output.push_back(match_symbol);
 
-        forward_bit_writer bits;
-        bits.append(static_cast<std::uint32_t>(selected.position - literal_length_base[literal_symbol]),
+        workspace.sequence_bits.reset(output);
+        workspace.sequence_bits.append(static_cast<std::uint32_t>(selected.position - literal_length_base[literal_symbol]),
             literal_length_bits[literal_symbol]);
-        bits.append(static_cast<std::uint32_t>(selected.length - match_length_base[match_symbol]),
+        workspace.sequence_bits.append(static_cast<std::uint32_t>(selected.length - match_length_base[match_symbol]),
             match_length_bits[match_symbol]);
-        bits.append(static_cast<std::uint32_t>(selected.offset - offset_base[selected_offset_symbol]),
+        workspace.sequence_bits.append(static_cast<std::uint32_t>(selected.offset - offset_base[selected_offset_symbol]),
             offset_bits[selected_offset_symbol]);
-        auto const bitstream{bits.finish()};
-        output.insert(output.end(), bitstream.begin(), bitstream.end());
+        workspace.sequence_bits.finish_into(output);
+    }
+
+    [[nodiscard]] inline auto encode_single_match_block(
+        std::span<std::uint8_t const> input, match const& selected) -> std::vector<std::uint8_t>
+    {
+        compression_workspace workspace;
+        workspace.reserve(input.size(), 1U);
+        std::vector<std::uint8_t> output;
+        output.reserve(input.size());
+        encode_single_match_block(input, selected, workspace, output);
         return output;
     }
 }
