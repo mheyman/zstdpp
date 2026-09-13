@@ -220,6 +220,22 @@ namespace sph::zstd::detail
             (64U - hash_bits));
     }
 
+    template <unsigned MinimumMatch>
+    [[nodiscard]] inline auto row_hash_fixed(std::uint8_t const* input, unsigned hash_bits,
+        std::uint64_t salt) noexcept -> std::uint32_t
+    {
+        if constexpr (MinimumMatch == 4U)
+            return row_hash4(input, hash_bits, static_cast<std::uint32_t>(salt));
+        else if constexpr (MinimumMatch == 5U)
+            return row_hash5(input, hash_bits, salt);
+        else if constexpr (MinimumMatch == 6U)
+            return row_hash6(input, hash_bits, salt);
+        else if constexpr (MinimumMatch == 7U)
+            return row_hash7(input, hash_bits, salt);
+        else
+            return row_hash8(input, hash_bits, salt);
+    }
+
     [[nodiscard]] inline auto row_hash(std::uint8_t const* input, unsigned hash_bits,
         unsigned minimum_match, std::uint64_t salt) noexcept -> std::uint32_t
     {

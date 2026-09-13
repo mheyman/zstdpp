@@ -282,6 +282,11 @@ namespace
         check(sph::zstd::detail::row_hash(bytes.data(), 20U, 4U, salt) ==
                 sph::zstd::detail::row_hash4(bytes.data(), 20U, static_cast<std::uint32_t>(salt)),
             "salted row hash dispatcher selects the minimum-match formula");
+        check(sph::zstd::detail::row_hash_fixed<4U>(bytes.data(), 20U, salt) ==
+                sph::zstd::detail::row_hash4(bytes.data(), 20U, static_cast<std::uint32_t>(salt)) &&
+                sph::zstd::detail::row_hash_fixed<8U>(bytes.data(), 20U, salt) ==
+                sph::zstd::detail::row_hash8(bytes.data(), 20U, salt),
+            "compile-time salted row hash dispatch selects specialized formulas");
     }
 
     void test_row_match_table()
