@@ -73,7 +73,7 @@ This list orders the remaining work by measurement value. Each item must preserv
 - [x] Replace byte-at-a-time RLE detection with a bounded, four-word unrolled scan.
 - [ ] Implement/reference-match row-hash selection for lazy and lazy2 levels on large blocks.
 - [x] Row-hash subtask: add reusable row/tag storage with zero post-warmup allocations.
-- [x] Row-hash subtask: port row update and candidate enumeration with reference ordering.
+- [ ] Row-hash subtask: port row update and candidate enumeration with reference ordering (reusable SIMD table primitive is complete; production parser integration remains open).
 - [ ] Row-hash subtask: validate exact frames and benchmark against the chain matcher by corpus.
 - [x] Re-run the corpus matrix after restoring correct tag validity semantics in fast/double-fast matchers.
 - [x] Profile repeated-text binary-tree traversal against reference's `ZSTD_bt_findBestMatch` and identify the extra candidate visits or state updates before changing frame-producing behavior.
