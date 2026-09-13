@@ -76,6 +76,63 @@ namespace sph::zstd
             update(std::span<std::uint8_t const>{&byte, 1});
         }
 
+        /** Decode one complete frame directly from a caller-owned input span. */
+        void decompress_frame(std::span<std::uint8_t const> input)
+        {
+            require_writable();
+            if (input.empty())
+            {
+                throw zstd_error{error_code::truncated_input, "empty Zstandard frame"};
+            }
+            status_ = stream_status::active;
+            encoded_size_ += input.size();
+            borrowed_input_ = input;
+            cursor_ = 0U;
+            parse();
+            finish();
+            borrowed_input_ = {};
+            cursor_ = 0U;
+        }
+
+        /** Decodes one complete frame directly into caller-provided output storage. */
+        void decompress_frame(std::span<std::uint8_t const> input,
+            std::span<std::uint8_t> output)
+        {
+            require_writable();
+            if (input.empty())
+            {
+                throw zstd_error{error_code::truncated_input, "empty Zstandard frame"};
+            }
+            status_ = stream_status::active;
+            encoded_size_ += input.size();
+            borrowed_input_ = input;
+            direct_output_ = true;
+            history_.set_external(output);
+            cursor_ = 0U;
+            try
+            {
+                parse();
+                finish();
+                if (decoded_size_ != output.size())
+                {
+                    throw zstd_error{error_code::invalid_frame,
+                        "output buffer size does not match decoded Zstandard frame"};
+                }
+            }
+            catch (...)
+            {
+                history_.clear_external();
+                direct_output_ = false;
+                borrowed_input_ = {};
+                cursor_ = 0U;
+                throw;
+            }
+            history_.clear_external();
+            direct_output_ = false;
+            borrowed_input_ = {};
+            cursor_ = 0U;
+        }
+
         void finish()
         {
             if (status_ == stream_status::finished)
@@ -85,7 +142,7 @@ namespace sph::zstd
             require_writable();
             parse();
             compact_input();
-            if (state_ != parse_state::frame_header || !pending_.empty() || frame_count_ == 0)
+            if (state_ != parse_state::frame_header || available() != 0U || frame_count_ == 0)
             {
                 fail(error_code::truncated_input, "incomplete Zstandard frame at end of input");
             }
@@ -95,12 +152,14 @@ namespace sph::zstd
         void reset()
         {
             pending_.clear();
+            borrowed_input_ = {};
             cursor_ = 0;
             state_ = parse_state::frame_header;
             status_ = stream_status::ready;
             frame_count_ = 0;
             encoded_size_ = 0;
             decoded_size_ = 0;
+            direct_output_ = false;
             frame_decoded_size_ = 0;
             last_block_ = false;
             checksum_.reset();
@@ -125,15 +184,34 @@ namespace sph::zstd
                 size_ = 0U;
             }
 
+            void set_external(std::span<std::uint8_t> storage) noexcept
+            {
+                storage_.reset();
+                external_data_ = storage.data();
+                capacity_ = storage.size();
+                offset_ = 0U;
+                size_ = 0U;
+            }
+
+            void clear_external() noexcept
+            {
+                external_data_ = nullptr;
+                capacity_ = 0U;
+                offset_ = 0U;
+                size_ = 0U;
+            }
+
             [[nodiscard]] auto size() const noexcept -> std::size_t { return size_; }
             [[nodiscard]] auto data() noexcept -> std::uint8_t*
             {
-                return storage_ == nullptr ? nullptr : storage_.get() + offset_;
+                return external_data_ != nullptr ? external_data_ + offset_ :
+                    (storage_ == nullptr ? nullptr : storage_.get() + offset_);
             }
 
             [[nodiscard]] auto data() const noexcept -> std::uint8_t const*
             {
-                return storage_ == nullptr ? nullptr : storage_.get() + offset_;
+                return external_data_ != nullptr ? external_data_ + offset_ :
+                    (storage_ == nullptr ? nullptr : storage_.get() + offset_);
             }
 
             [[nodiscard]] auto bytes() noexcept -> std::span<std::uint8_t>
@@ -215,9 +293,17 @@ namespace sph::zstd
                 }
             }
 
-        private:
+            private:
             void reserve(std::size_t requested)
             {
+                if (external_data_ != nullptr)
+                {
+                    if (requested > capacity_ - offset_)
+                    {
+                        throw std::length_error{"decoded output buffer is too small"};
+                    }
+                    return;
+                }
                 if (requested <= capacity_ - offset_)
                 {
                     return;
@@ -243,6 +329,7 @@ namespace sph::zstd
             }
 
             std::unique_ptr<std::uint8_t[]> storage_;
+            std::uint8_t* external_data_{};
             std::size_t offset_{};
             std::size_t size_{};
             std::size_t capacity_{};
@@ -282,17 +369,25 @@ namespace sph::zstd
             throw zstd_error{code, message};
         }
 
-        [[nodiscard]] auto available() const noexcept -> std::size_t { return pending_.size() - cursor_; }
+        [[nodiscard]] auto available() const noexcept -> std::size_t
+        {
+            return (borrowed_input_.empty() ? pending_.size() : borrowed_input_.size()) - cursor_;
+        }
 
         [[nodiscard]] auto input() const noexcept -> std::span<std::uint8_t const>
         {
-            return std::span<std::uint8_t const>{pending_}.subspan(cursor_);
+            return (borrowed_input_.empty() ? std::span<std::uint8_t const>{pending_} : borrowed_input_)
+                .subspan(cursor_);
         }
 
         void consume(std::size_t count) noexcept { cursor_ += count; }
 
         void compact_input()
         {
+            if (!borrowed_input_.empty())
+            {
+                return;
+            }
             if (cursor_ == pending_.size())
             {
                 pending_.clear();
@@ -540,6 +635,7 @@ namespace sph::zstd
         {
             std::span<std::uint8_t const> bytes;
             std::size_t sequence_offset{};
+            bool padded{};
         };
 
         void decode_compressed_block(std::span<std::uint8_t const> block)
@@ -547,7 +643,8 @@ namespace sph::zstd
             try
             {
                 auto literals{decode_literals(block)};
-                auto const decoded{decode_sequences(block.subspan(literals.sequence_offset), literals.bytes)};
+                auto const decoded{decode_sequences(block.subspan(literals.sequence_offset), literals.bytes,
+                    literals.padded)};
                 deliver(decoded);
                 trim_history();
             }
@@ -650,18 +747,17 @@ namespace sph::zstd
                 {
                     throw detail::entropy_error{"Zstandard literals section exceeds compressed block size"};
                 }
-                literals_.clear();
                 if (literals_type == 0U)
                 {
                     auto const stored{block.subspan(header_size, regenerated_size)};
-                    literals_.assign(stored.begin(), stored.end());
+                    auto const padded{header_size <= block.size() - regenerated_size &&
+                        block.size() - (header_size + regenerated_size) >= copy_slack};
+                    return {stored, header_size + stored_size, padded};
                 }
-                else
-                {
-                    literals_.assign(regenerated_size, block[header_size]);
-                }
+                literals_.clear();
                 literals_.resize(regenerated_size + copy_slack);
-                return {{literals_.data(), regenerated_size}, header_size + stored_size};
+                std::memset(literals_.data(), block[header_size], regenerated_size);
+                return {{literals_.data(), regenerated_size}, header_size + stored_size, true};
             }
 
             if (compressed_size == 0U || header_size + compressed_size > block.size())
@@ -687,7 +783,7 @@ namespace sph::zstd
             auto const regenerated_literals{
                 std::span<std::uint8_t>{literals_.data(), regenerated_size}};
             detail::decode_huffman_literals(compressed, regenerated_literals, four_streams, huffman_table_);
-            return {regenerated_literals, header_size + compressed_size};
+            return {regenerated_literals, header_size + compressed_size, true};
         }
 
         template <std::size_t Count, std::size_t NormCount>
@@ -780,28 +876,10 @@ namespace sph::zstd
             std::uint8_t const* source,
             std::size_t count) noexcept
         {
-            if (count == 0U)
-            {
-                return;
-            }
-            if (count == 1U)
-            {
-                *destination = *source;
-                return;
-            }
-            if (count >= 8U && count <= 16U)
-            {
-                std::uint64_t first{};
-                std::uint64_t last{};
-                std::memcpy(&first, source, sizeof(first));
-                std::memcpy(&last, source + count - sizeof(last), sizeof(last));
-                std::memcpy(destination, &first, sizeof(first));
-                std::memcpy(destination + count - sizeof(last), &last, sizeof(last));
-                return;
-            }
             std::memcpy(destination, source, count);
         }
 
+        template <bool Padded>
         static void copy_literals(
             std::uint8_t* destination,
             std::uint8_t const* source,
@@ -811,12 +889,20 @@ namespace sph::zstd
             {
                 return;
             }
-            if (count <= copy_slack)
+            if (count <= 7U)
             {
-                // Both buffers carry padding so common short literal runs use one
-                // fixed-width copy without a tiny-size dispatch.
-                std::memcpy(destination, source, copy_slack);
+                std::memcpy(destination, source, count);
                 return;
+            }
+            if constexpr (Padded)
+            {
+                if (count <= copy_slack)
+                {
+                    // Both buffers carry padding so common short literal runs use one
+                    // fixed-width copy without a tiny-size dispatch.
+                    std::memcpy(destination, source, copy_slack);
+                    return;
+                }
             }
             std::memcpy(destination, source, count);
         }
@@ -835,29 +921,42 @@ namespace sph::zstd
             copy_nonoverlapping(destination, source, count);
         }
 
+        template <bool Padded, bool Trusted>
         void append_sequence(
             byte_buffer& output,
-            std::span<std::uint8_t const> literals,
+            std::uint8_t const* literals,
+            std::size_t literal_length,
             std::size_t match_offset,
             std::size_t match_length)
         {
             auto const old_size{output.size()};
-            auto const match_begin{old_size + literals.size()};
-            if (match_offset == 0U || match_offset > match_begin)
+            auto const match_begin{old_size + literal_length};
+            if constexpr (!Trusted)
             {
-                throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
+                if (match_offset == 0U || match_offset > match_begin)
+                {
+                    throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
+                }
             }
-            auto const destination{output.append_uninitialized_reserved(literals.size() + match_length)};
-            copy_literals(destination.data(), literals.data(), literals.size());
-            auto* const match_destination{destination.data() + literals.size()};
+            auto const destination{output.append_uninitialized_reserved(literal_length + match_length)};
+            copy_literals<Padded>(destination.data(), literals, literal_length);
+            auto* const match_destination{destination.data() + literal_length};
+            // The reserved span starts at the old end, so recover the history base
+            // without a second external/storage pointer dispatch.
+            auto const* const output_data{destination.data() - old_size};
             auto const source_position{match_begin - match_offset};
+            if (match_offset == 1U)
+            {
+                std::memset(match_destination, output_data[source_position], match_length);
+                return;
+            }
             if (match_offset >= match_length)
             {
-                copy_match(match_destination, output.data() + source_position,
+                copy_match(match_destination, output_data + source_position,
                     match_length, match_offset);
                 return;
             }
-            std::memcpy(match_destination, output.data() + source_position, match_offset);
+            std::memcpy(match_destination, output_data + source_position, match_offset);
             auto written{match_offset};
             while (written < match_length)
             {
@@ -867,7 +966,8 @@ namespace sph::zstd
             }
         }
 
-        [[nodiscard]] auto decode_sequences(
+        template <bool LiteralsPadded>
+        [[nodiscard]] auto decode_sequences_impl(
             std::span<std::uint8_t const> source,
             std::span<std::uint8_t const> literals) -> std::span<std::uint8_t const>
         {
@@ -907,9 +1007,15 @@ namespace sph::zstd
             }
 
             detail::reverse_bit_reader bits{source.subspan(offset)};
-            auto literal_state{static_cast<std::size_t>(bits.read_fast(literal_length_table_.table_log))};
-            auto offset_state{static_cast<std::size_t>(bits.read_fast(offset_table_.table_log))};
-            auto match_state{static_cast<std::size_t>(bits.read_fast(match_length_table_.table_log))};
+            auto const literal_table_log{literal_length_table_.table_log};
+            auto const offset_table_log{offset_table_.table_log};
+            auto const match_table_log{match_length_table_.table_log};
+            auto literal_state{literal_table_log == 0U ? std::size_t{0} :
+                static_cast<std::size_t>(bits.read_fast(literal_table_log))};
+            auto offset_state{offset_table_log == 0U ? std::size_t{0} :
+                static_cast<std::size_t>(bits.read_fast(offset_table_log))};
+            auto match_state{match_table_log == 0U ? std::size_t{0} :
+                static_cast<std::size_t>(bits.read_fast(match_table_log))};
             auto const* const literal_entries{literal_length_table_.entries.data()};
             auto const* const offset_entries{offset_table_.entries.data()};
             auto const* const match_entries{match_length_table_.entries.data()};
@@ -917,8 +1023,27 @@ namespace sph::zstd
             auto repeat1{repeat_offsets_[1]};
             auto repeat2{repeat_offsets_[2]};
             auto& output{history_};
-            output.reserve_additional(Parameters.maximum_decoded_block_size + copy_slack);
+            // Direct-output callers provide the complete destination up front, so its
+            // capacity is already known and a per-block reserve check is redundant.
+            if (!direct_output_)
+            {
+                output.reserve_additional(Parameters.maximum_decoded_block_size + copy_slack);
+            }
+#ifdef SPH_ZSTDPP_TRUSTED_EVAL
+            constexpr bool trusted_input = true;
+#else
+            constexpr bool trusted_input = false;
+#endif
+            auto const read_sequence_bits = [&bits](unsigned count) noexcept -> std::uint32_t
+            {
+                if constexpr (trusted_input)
+                {
+                    return bits.read_fast_trusted(count);
+                }
+                return bits.read_fast(count);
+            };
             std::size_t literal_offset{};
+            auto const* const literal_data{literals.data()};
             for (std::size_t sequence_index{}; sequence_index < sequence_count; ++sequence_index)
             {
                 auto const literal_entry{literal_entries[literal_state]};
@@ -929,7 +1054,7 @@ namespace sph::zstd
                 if (offset_entry.additional_bits > 1U)
                 {
                     match_offset = static_cast<std::size_t>(offset_entry.base_value) +
-                        bits.read_fast(offset_entry.additional_bits);
+                        read_sequence_bits(offset_entry.additional_bits);
                     repeat2 = repeat1;
                     repeat1 = repeat0;
                     repeat0 = match_offset;
@@ -945,7 +1070,7 @@ namespace sph::zstd
                 {
                     auto const literal_is_zero{literal_entry.base_value == 0U};
                     auto const repeat_code{static_cast<std::size_t>(offset_entry.base_value) +
-                        (literal_is_zero ? 1U : 0U) + bits.read_fast(1U)};
+                        (literal_is_zero ? 1U : 0U) + read_sequence_bits(1U)};
                     match_offset = repeat_code == 3U ? repeat0 - 1U :
                         (repeat_code == 2U ? repeat2 : repeat1);
                     if (repeat_code != 1U)
@@ -956,30 +1081,40 @@ namespace sph::zstd
                     repeat0 = match_offset;
                 }
 
-                auto const match_length{static_cast<std::size_t>(match_entry.base_value) +
-                    bits.read_fast(match_entry.additional_bits)};
-                auto const literal_length{static_cast<std::size_t>(literal_entry.base_value) +
-                    bits.read_fast(literal_entry.additional_bits)};
-                auto const remaining_output{Parameters.maximum_decoded_block_size -
-                    (output.size() - block_begin)};
-                if (literal_length > literals.size() - literal_offset ||
-                    literal_length > remaining_output ||
-                    match_length > remaining_output - literal_length)
+                auto match_length{static_cast<std::size_t>(match_entry.base_value)};
+                if (match_entry.additional_bits != 0U)
                 {
-                    throw detail::entropy_error{"Zstandard sequence consumes too many literals"};
+                    match_length += read_sequence_bits(match_entry.additional_bits);
                 }
-                auto const sequence_literals{literals.subspan(literal_offset, literal_length)};
+                auto literal_length{static_cast<std::size_t>(literal_entry.base_value)};
+                if (literal_entry.additional_bits != 0U)
+                {
+                    literal_length += read_sequence_bits(literal_entry.additional_bits);
+                }
+                if constexpr (!trusted_input)
+                {
+                    auto const remaining_output{Parameters.maximum_decoded_block_size -
+                        (output.size() - block_begin)};
+                    if (literal_length > literals.size() - literal_offset ||
+                        literal_length > remaining_output ||
+                        match_length > remaining_output - literal_length)
+                    {
+                        throw detail::entropy_error{"Zstandard sequence consumes too many literals"};
+                    }
+                }
+                auto const* const sequence_literal_data{literal_data + literal_offset};
                 literal_offset += literal_length;
-                append_sequence(output, sequence_literals, match_offset, match_length);
+                append_sequence<LiteralsPadded, trusted_input>(output, sequence_literal_data,
+                    literal_length, match_offset, match_length);
 
-                if (sequence_index + 1U != sequence_count)
+                if (sequence_index + 1U != sequence_count) [[likely]]
                 {
                     literal_state = static_cast<std::size_t>(literal_entry.next_state) +
-                        bits.read_fast(literal_entry.state_bits);
+                        (literal_entry.state_bits == 0U ? 0U : read_sequence_bits(literal_entry.state_bits));
                     match_state = static_cast<std::size_t>(match_entry.next_state) +
-                        bits.read_fast(match_entry.state_bits);
+                        (match_entry.state_bits == 0U ? 0U : read_sequence_bits(match_entry.state_bits));
                     offset_state = static_cast<std::size_t>(offset_entry.next_state) +
-                        bits.read_fast(offset_entry.state_bits);
+                        (offset_entry.state_bits == 0U ? 0U : read_sequence_bits(offset_entry.state_bits));
                 }
             }
             repeat_offsets_ = {repeat0, repeat1, repeat2};
@@ -995,6 +1130,18 @@ namespace sph::zstd
             output.append_reserved(literals.subspan(literal_offset));
             fse_repeat_allowed_ = true;
             return output.bytes().subspan(block_begin);
+        }
+
+        [[nodiscard]] auto decode_sequences(
+            std::span<std::uint8_t const> source,
+            std::span<std::uint8_t const> literals,
+            bool literals_padded) -> std::span<std::uint8_t const>
+        {
+            if (literals_padded)
+            {
+                return decode_sequences_impl<true>(source, literals);
+            }
+            return decode_sequences_impl<false>(source, literals);
         }
 
         auto parse_frame_checksum() -> bool
@@ -1048,6 +1195,10 @@ namespace sph::zstd
 
         void trim_history()
         {
+            if (direct_output_)
+            {
+                return;
+            }
             auto const limit{history_limit()};
             auto const excess{history_.size() > limit ? history_.size() - limit : 0U};
             if (excess != 0U)
@@ -1060,7 +1211,10 @@ namespace sph::zstd
         {
             if (!output.empty())
             {
-                std::invoke(callback_, output);
+                if (!direct_output_)
+                {
+                    std::invoke(callback_, output);
+                }
                 if constexpr (!Parameters.ignore_checksum)
                 {
                     if (information_.checksum)
@@ -1108,9 +1262,11 @@ namespace sph::zstd
         std::uint64_t frame_decoded_size_{};
         std::uint64_t encoded_size_{};
         std::uint64_t decoded_size_{};
+        bool direct_output_{};
         std::size_t frame_count_{};
         stream_status status_{stream_status::ready};
         bool fse_repeat_allowed_{};
+        std::span<std::uint8_t const> borrowed_input_{};
     };
 
     template <typename Callback>

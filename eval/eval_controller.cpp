@@ -36,7 +36,7 @@
 
 namespace
 {
-    constexpr std::array levels{1, 3, 5, 9, 15};
+    constexpr std::array levels{1, 3, 5, 7, 8, 9, 15};
     constexpr std::string_view report_begin{"<!-- SPH_ZSTDPP_EVAL_BEGIN -->"};
     constexpr std::string_view report_end{"<!-- SPH_ZSTDPP_EVAL_END -->"};
 

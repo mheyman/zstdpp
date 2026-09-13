@@ -13,6 +13,12 @@
 #error "SPH_EVAL_LEVEL must be defined"
 #endif
 
+#ifdef SPH_ZSTDPP_TRACE_BT
+extern "C" unsigned long long sph_zstdpp_bt_unsorted_visits;
+extern "C" unsigned long long sph_zstdpp_bt_main_visits;
+extern "C" unsigned long long sph_zstdpp_bt_match_extensions;
+#endif
+
 int main(int argc, char** argv)
 {
     try
@@ -47,6 +53,11 @@ int main(int argc, char** argv)
         }
         auto const end{sph::zstd::eval::clock::now()};
         ZSTD_freeCCtx(context);
+#ifdef SPH_ZSTDPP_TRACE_BT
+        std::cerr << "binary-tree visits unsorted=" << sph_zstdpp_bt_unsorted_visits
+                  << " main=" << sph_zstdpp_bt_main_visits
+                  << " extensions=" << sph_zstdpp_bt_match_extensions << '\n';
+#endif
         sph::zstd::eval::write_binary(argv[2],
             std::span<std::uint8_t const>{output}.first(output_size));
         sph::zstd::eval::write_result(argv[4], {

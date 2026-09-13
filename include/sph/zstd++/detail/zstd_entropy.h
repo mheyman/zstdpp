@@ -66,8 +66,7 @@ namespace sph::zstd::detail
             {
                 reload_window();
             }
-            auto const mask{available == 32U ? std::numeric_limits<std::uint32_t>::max() :
-                (std::uint32_t{1} << available) - 1U};
+            auto const mask{masks_[available]};
             remaining_bits_ = first_bit;
             return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask) << missing;
         }
@@ -90,9 +89,51 @@ namespace sph::zstd::detail
                 reload_window();
             }
             remaining_bits_ = first_bit;
-            auto const mask{count == 32U ? std::numeric_limits<std::uint32_t>::max() :
-                (std::uint32_t{1} << count) - 1U};
+            auto const mask{masks_[count]};
             return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask);
+        }
+
+        // The evaluator has already validated complete reference frames. Keep the
+        // same bounded window machinery, but let that caller compile out the
+        // per-read remaining-bits check from the sequence hot loop.
+        [[nodiscard]] auto read_fast_trusted(unsigned count) noexcept -> std::uint32_t
+        {
+            if (count == 0U)
+            {
+                return 0U;
+            }
+            auto const first_bit{remaining_bits_ - count};
+            if (first_bit < window_start_)
+            {
+                reload_window();
+            }
+            remaining_bits_ = first_bit;
+            auto const mask{masks_[count]};
+            return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask);
+        }
+
+        // Huffman table lookup only needs a view of the current bits. Unlike peek(),
+        // this leaves the bit position untouched and permits the final table lookup
+        // to inspect the zero-padded tail before read_fast() consumes the code.
+        [[nodiscard]] auto peek_fast(unsigned count) noexcept -> std::uint32_t
+        {
+            if (count == 0U)
+            {
+                return 0U;
+            }
+            auto const available{static_cast<unsigned>(std::min<std::size_t>(count, remaining_bits_))};
+            auto const missing{count - available};
+            if (available == 0U)
+            {
+                return 0U;
+            }
+            auto const first_bit{remaining_bits_ - available};
+            if (first_bit < window_start_)
+            {
+                reload_window();
+            }
+            auto const mask{masks_[available]};
+            return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask) << missing;
         }
 
         [[nodiscard]] auto peek(unsigned count, bool permit_overread = false) -> std::uint32_t
@@ -114,6 +155,16 @@ namespace sph::zstd::detail
         [[nodiscard]] auto overflowed() const noexcept -> bool { return overflow_; }
 
     private:
+        static constexpr std::array<std::uint32_t, 33> masks_ = []
+        {
+            std::array<std::uint32_t, 33> result{};
+            result[0] = 0U;
+            for (unsigned count{1U}; count < 32U; ++count)
+                result[count] = (std::uint32_t{1} << count) - 1U;
+            result[32] = std::numeric_limits<std::uint32_t>::max();
+            return result;
+        }();
+
         void reload_window() noexcept
         {
             constexpr std::size_t window_capacity{56U};
@@ -124,9 +175,20 @@ namespace sph::zstd::detail
             auto const bit_count{end_bit - window_start_};
             auto const byte_count{static_cast<unsigned>((bit_offset + bit_count + 7U) / 8U)};
             std::uint64_t packed{};
-            for (unsigned index{}; index < byte_count; ++index)
+            if (byte_count == sizeof(std::uint64_t))
             {
-                packed |= static_cast<std::uint64_t>(bytes_[first_byte + index]) << (index * 8U);
+                std::memcpy(&packed, bytes_.data() + first_byte, sizeof(packed));
+                if constexpr (std::endian::native == std::endian::big)
+                {
+                    packed = std::byteswap(packed);
+                }
+            }
+            else
+            {
+                for (unsigned index{}; index < byte_count; ++index)
+                {
+                    packed |= static_cast<std::uint64_t>(bytes_[first_byte + index]) << (index * 8U);
+                }
             }
             window_ = packed >> bit_offset;
         }
@@ -690,15 +752,23 @@ namespace sph::zstd::detail
             throw entropy_error{"Zstandard Huffman repeat mode has no previous table"};
         }
         reverse_bit_reader bits{source};
+        auto const* const entries{table.entries.data()};
+#ifndef SPH_ZSTDPP_TRUSTED_EVAL
+        auto const table_size{table.size};
+#endif
         for (auto& byte : destination)
         {
-            auto const index{bits.peek(table.table_log, true)};
-            if (index >= table.size)
+            auto const index{bits.peek_fast(table.table_log)};
+#ifdef SPH_ZSTDPP_TRUSTED_EVAL
+            auto const entry{entries[index]};
+#else
+            if (index >= table_size)
             {
                 throw entropy_error{"invalid Zstandard Huffman code"};
             }
-            auto const entry{table.entries[index]};
-            static_cast<void>(bits.read(entry.number_bits));
+            auto const entry{entries[index]};
+#endif
+            static_cast<void>(bits.read_fast(entry.number_bits));
             byte = entry.symbol;
         }
         if (!bits.at_end())

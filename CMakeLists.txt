@@ -6,6 +6,8 @@ option(SPH_ZSTDPP_BUILD_TESTS "Build sph-zstd++ tests" ${PROJECT_IS_TOP_LEVEL})
 option(SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS "Build reference-parity acceptance tests" OFF)
 option(SPH_ZSTDPP_BUILD_REFERENCE "Make the downloaded reference zstd target available" OFF)
 option(SPH_ZSTDPP_BUILD_EVAL "Build implementation-comparison executables" OFF)
+option(SPH_ZSTDPP_TRACE_BT "Enable diagnostic binary-tree traversal counters" OFF)
+option(SPH_ZSTDPP_TRACE_PHASES "Enable diagnostic compression phase timings" OFF)
 
 include(GNUInstallDirs)
 

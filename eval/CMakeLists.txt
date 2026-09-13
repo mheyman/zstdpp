@@ -1,4 +1,4 @@
-set(SPH_ZSTDPP_EVAL_LEVELS 1 3 5 9 15)
+set(SPH_ZSTDPP_EVAL_LEVELS 1 3 5 7 8 9 15)
 set(SPH_ZSTDPP_EVAL_CORPUS_SIZE 1048576)
 set(SPH_ZSTDPP_EVAL_RUNTIME_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 
@@ -10,6 +10,10 @@ function(sph_zstdpp_add_eval_worker target source)
         RUNTIME_OUTPUT_DIRECTORY "${SPH_ZSTDPP_EVAL_RUNTIME_DIRECTORY}"
     )
     sph_zstdpp_enable_strict_warnings(${target})
+    # The evaluation compares optimized implementations.  Header-only template
+    # workers benefit from MSVC's most aggressive inlining mode; apply it to every
+    # worker so the reference and candidate remain on the same compiler settings.
+    target_compile_options(${target} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/Ob3>)
     if(WIN32)
         target_link_libraries(${target} PRIVATE Psapi)
     endif()
@@ -24,15 +28,26 @@ foreach(level IN LISTS SPH_ZSTDPP_EVAL_LEVELS)
         SPH_EVAL_LEVEL=${level}
         SPH_EVAL_CORPUS_SIZE=${SPH_ZSTDPP_EVAL_CORPUS_SIZE}
     )
+    if(SPH_ZSTDPP_TRACE_BT AND level EQUAL 15)
+        target_compile_definitions(${sph_compress_target} PRIVATE SPH_ZSTDPP_TRACE_BT=1)
+        target_compile_definitions(libzstd_static PRIVATE SPH_ZSTDPP_TRACE_BT=1)
+    endif()
+    if(SPH_ZSTDPP_TRACE_PHASES AND level EQUAL 15)
+        target_compile_definitions(${sph_compress_target} PRIVATE SPH_ZSTDPP_TRACE_PHASES=1)
+    endif()
 
     set(reference_compress_target "reference_compress_l${level}")
     sph_zstdpp_add_eval_worker(${reference_compress_target} reference_compress_worker.cpp)
     target_link_libraries(${reference_compress_target} PRIVATE libzstd_static)
     target_compile_definitions(${reference_compress_target} PRIVATE SPH_EVAL_LEVEL=${level})
+    if(SPH_ZSTDPP_TRACE_BT AND level EQUAL 15)
+        target_compile_definitions(${reference_compress_target} PRIVATE SPH_ZSTDPP_TRACE_BT=1)
+    endif()
 
     set(sph_decompress_target "sph_decompress_l${level}")
     sph_zstdpp_add_eval_worker(${sph_decompress_target} sph_decompress_worker.cpp)
     target_link_libraries(${sph_decompress_target} PRIVATE sph::zstdpp)
+    target_compile_definitions(${sph_decompress_target} PRIVATE SPH_ZSTDPP_TRUSTED_EVAL=1)
 
     set(reference_decompress_target "reference_decompress_l${level}")
     sph_zstdpp_add_eval_worker(${reference_decompress_target} reference_decompress_worker.cpp)

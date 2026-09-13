@@ -14,6 +14,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <numeric>
 #include <ranges>
 #include <span>
 #include <string_view>
@@ -198,6 +199,21 @@ namespace
         check(decompressor.frame_count() == 1, "decompressor counts completed frames");
         check(decompressor.last_frame().checksum, "decompressor exposes frame checksum flag");
         check(decompressor.last_frame().content_size == input.size(), "decompressor exposes content size");
+
+        std::vector<std::uint8_t> direct_decoded;
+        auto direct_decompressor = sph::zstd::zstd_decompress{
+            [&direct_decoded](std::span<std::uint8_t const> output)
+            {
+                direct_decoded.insert(direct_decoded.end(), output.begin(), output.end());
+            }};
+        direct_decompressor.decompress_frame(encoded);
+        check(direct_decoded == input, "zero-copy one-shot decompression round-trips");
+
+        std::vector<std::uint8_t> direct_buffer(input.size());
+        auto buffer_decompressor = sph::zstd::zstd_decompress{
+            [](std::span<std::uint8_t const>) {}};
+        buffer_decompressor.decompress_frame(encoded, direct_buffer);
+        check(direct_buffer == input, "caller-buffer one-shot decompression round-trips");
     }
 
     void test_rle_blocks()
@@ -206,6 +222,30 @@ namespace
         auto const encoded{compress<small_blocks>(input)};
         check(encoded.size() < input.size(), "RLE blocks reduce repeated input");
         check(reference_decompress(encoded, input.size()) == input, "reference zstd accepts RLE blocks");
+    }
+
+    void test_normalized_count_round_trips()
+    {
+        for (unsigned maximum_symbol : {1U, 2U, 7U, 31U, 127U, 255U})
+        {
+            std::array<unsigned, 256> counts{};
+            counts[0] = 1U;
+            counts[maximum_symbol] = maximum_symbol == 0U ? 1U : 37U;
+            if (maximum_symbol > 3U)
+            {
+                counts[3] = 11U;
+            }
+            auto const total{std::accumulate(counts.begin(), counts.begin() + maximum_symbol + 1U, 0U)};
+            auto const normalized{sph::zstd::detail::normalize_counts(
+                std::span<unsigned const>{counts}.first(maximum_symbol + 1U), total,
+                maximum_symbol, 8U, false)};
+            auto const encoded{sph::zstd::detail::write_normalized_counts(normalized)};
+            auto const decoded{sph::zstd::detail::read_normalized_counts(encoded, maximum_symbol)};
+            check(decoded.table_log == normalized.table_log, "normalized count table log round-trips");
+            check(decoded.maximum_symbol == normalized.maximum_symbol, "normalized count maximum symbol round-trips");
+            check(std::equal(decoded.values.begin(), decoded.values.begin() + decoded.maximum_symbol + 1U,
+                normalized.values.begin()), "normalized count values round-trip");
+        }
     }
 
     void test_one_shot_compression_state()
@@ -466,6 +506,7 @@ int main()
     {
         test_reference_interoperability();
         test_rle_blocks();
+        test_normalized_count_round_trips();
         test_one_shot_compression_state();
         test_reference_rle_golden_frame();
         test_reference_zero_sequence_golden_frames();

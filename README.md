@@ -77,7 +77,7 @@ The current working slice provides:
 - reference-produced entropy frames at compression levels 1, 3, and 9; and
 - corruption tests for matches outside the retained history window.
 
-The level-1 fast, level-3 double-fast, level-5 greedy, level-9 lazy2, and level-15 binary-tree lazy2
+The level-1 fast, level-3 double-fast, level-5 greedy, levels 7/8 lazy, level-9 lazy2, and level-15 binary-tree lazy2
 compressors produce byte-for-byte identical output to reference zstd 1.6.0 for the acceptance
 corpus. These paths include exact sequence parsing, Huffman construction, normalized FSE sequence
 tables, and strategy-specific automatic pre-block splitting. Dictionary and multi-threaded modes
@@ -96,7 +96,7 @@ Tests compile with warnings-as-errors on MSVC, Clang, and GCC-style frontends. T
 interoperability test target does.
 
 Compression parity is a separate acceptance gate. It compresses the deterministic 1 MiB mixed
-corpus at levels 1, 3, 5, 9, and 15 with both implementations, first verifies every resolved core
+corpus at levels 1, 3, 5, 7, 8, 9, and 15 with both implementations, first verifies every resolved core
 compression parameter, and then requires the encoded bytes to match exactly:
 
 ```text
@@ -105,7 +105,7 @@ cmake --build --preset msvc-acceptance
 ctest --preset msvc-acceptance
 ```
 
-Equivalent `clang-acceptance` and `gcc-acceptance` presets are provided. All five acceptance levels
+Equivalent `clang-acceptance` and `gcc-acceptance` presets are provided. All seven acceptance levels
 are byte-identical.
 
 ### Presets and reference builds
@@ -119,7 +119,7 @@ cmake --build --preset msvc-release-reference
 ```
 
 Replace `msvc` with `clang` or `gcc` where appropriate. Evaluation presets build twenty isolated
-workers—compression and decompression for each implementation at levels 1, 3, 5, 9, and 15—plus
+workers—compression and decompression for each implementation at levels 1, 3, 5, 7, 8, 9, and 15—plus
 the controller:
 
 ```text
@@ -144,20 +144,24 @@ Compression workers receive identical input. Decompression workers both consume 
 
 | Level | C++ size (KiB) | Reference size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |
 |---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1 | 259 | 259 | 2003 | 2190 | 7 | 8 | 96 | 381 |
-| 3 | 274 | 274 | 1609 | 1679 | 8 | 8 | 96 | 381 |
-| 5 | 274 | 274 | 1498 | 2147 | 10 | 10 | 96 | 381 |
-| 9 | 260 | 260 | 1377 | 1102 | 19 | 18 | 97 | 381 |
-| 15 | 260 | 260 | 589 | 396 | 23 | 24 | 99 | 381 |
+| 1 | 259 | 259 | 2103 | 2193 | 6 | 7 | 106 | 382 |
+| 3 | 274 | 274 | 1563 | 1669 | 7 | 8 | 107 | 382 |
+| 5 | 274 | 274 | 2139 | 2105 | 10 | 9 | 106 | 382 |
+| 7 | 259 | 259 | 3262 | 1731 | 13 | 12 | 109 | 382 |
+| 8 | 260 | 260 | 1642 | 1324 | 13 | 12 | 109 | 382 |
+| 9 | 260 | 260 | 1740 | 1115 | 19 | 17 | 109 | 382 |
+| 15 | 260 | 260 | 619 | 488 | 24 | 23 | 111 | 382 |
 
 ### Decompression
 
 | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |
 |---:|---:|---:|---:|---:|---:|---:|
-| 1 | 2763 | 3142 | 10 | 8 | 80 | 113 |
-| 3 | 3978 | 5544 | 10 | 8 | 80 | 113 |
-| 5 | 5366 | 5667 | 10 | 8 | 80 | 113 |
-| 9 | 13108 | 13280 | 10 | 8 | 80 | 113 |
-| 15 | 13917 | 12927 | 10 | 8 | 80 | 113 |
+| 1 | 3388 | 3133 | 7 | 7 | 85 | 114 |
+| 3 | 4942 | 5351 | 7 | 7 | 85 | 114 |
+| 5 | 6088 | 5233 | 7 | 7 | 85 | 114 |
+| 7 | 18313 | 13243 | 7 | 7 | 85 | 114 |
+| 8 | 16853 | 11493 | 7 | 7 | 85 | 114 |
+| 9 | 18882 | 13887 | 7 | 7 | 85 | 114 |
+| 15 | 18713 | 14109 | 7 | 7 | 85 | 114 |
 
 <!-- SPH_ZSTDPP_EVAL_END -->

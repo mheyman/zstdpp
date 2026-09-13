@@ -19,6 +19,12 @@
 
 #define kLazySkippingStep 8
 
+#ifdef SPH_ZSTDPP_TRACE_BT
+unsigned long long sph_zstdpp_bt_unsorted_visits;
+unsigned long long sph_zstdpp_bt_main_visits;
+unsigned long long sph_zstdpp_bt_match_extensions;
+#endif
+
 
 /*-*************************************
 *  Binary Tree search
@@ -104,8 +110,14 @@ void ZSTD_insertDUBT1(const ZSTD_MatchState_t* ms,
     assert(ip < iend);   /* condition for ZSTD_count */
 
     for (; nbCompares && (matchIndex > windowLow); --nbCompares) {
+#ifdef SPH_ZSTDPP_TRACE_BT
+        ++sph_zstdpp_bt_unsorted_visits;
+#endif
         U32* const nextPtr = bt + 2*(matchIndex & btMask);
         size_t matchLength = MIN(commonLengthSmaller, commonLengthLarger);   /* guaranteed minimum nb of common bytes */
+#ifdef SPH_ZSTDPP_TRACE_BT
+        ++sph_zstdpp_bt_match_extensions;
+#endif
         assert(matchIndex < curr);
         /* note : all candidates are now supposed sorted,
          * but it's still possible to have nextPtr[1] == ZSTD_DUBT_UNSORTED_MARK
@@ -322,8 +334,14 @@ size_t ZSTD_DUBT_findBestMatch(ZSTD_MatchState_t* ms,
         hashTable[h] = curr;   /* Update Hash Table */
 
         for (; nbCompares && (matchIndex > windowLow); --nbCompares) {
+#ifdef SPH_ZSTDPP_TRACE_BT
+            ++sph_zstdpp_bt_main_visits;
+#endif
             U32* const nextPtr = bt + 2*(matchIndex & btMask);
             size_t matchLength = MIN(commonLengthSmaller, commonLengthLarger);   /* guaranteed minimum nb of common bytes */
+#ifdef SPH_ZSTDPP_TRACE_BT
+            ++sph_zstdpp_bt_match_extensions;
+#endif
             const BYTE* match;
 
             if ((dictMode != ZSTD_extDict) || (matchIndex+matchLength >= dictLimit)) {

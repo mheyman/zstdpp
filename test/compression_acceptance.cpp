@@ -337,6 +337,8 @@ int main()
         check_level<1>(input),
         check_level<3>(input),
         check_level<5>(input),
+        check_level<7>(input),
+        check_level<8>(input),
         check_level<9>(input),
         check_level<15>(input)
     }};

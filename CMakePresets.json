@@ -119,6 +119,14 @@
       }
     },
     {
+      "name": "clang-asan",
+      "displayName": "Clang ASan/UBSan acceptance tests",
+      "inherits": "clang-acceptance",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer"
+      }
+    },
+    {
       "name": "clang-release-reference",
       "displayName": "Clang Release reference zstd",
       "inherits": "clang-base",
@@ -193,6 +201,7 @@
     },
     { "name": "clang-debug", "configurePreset": "clang-debug" },
     { "name": "clang-acceptance", "configurePreset": "clang-acceptance" },
+    { "name": "clang-asan", "configurePreset": "clang-asan" },
     {
       "name": "clang-release-reference",
       "configurePreset": "clang-release-reference",
@@ -245,6 +254,11 @@
     {
       "name": "clang-acceptance",
       "configurePreset": "clang-acceptance",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "clang-asan",
+      "configurePreset": "clang-asan",
       "output": { "outputOnFailure": true }
     },
     {
