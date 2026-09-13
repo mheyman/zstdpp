@@ -1059,9 +1059,6 @@ namespace sph::zstd::detail
             repeat_offsets_ = {1U, 4U, 8U};
         }
 
-#if defined(_MSC_VER)
-        __declspec(noinline)
-#endif
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
             parsed_block result = {}, std::optional<bool> known_rle = std::nullopt) -> parsed_block
@@ -1913,9 +1910,6 @@ namespace sph::zstd::detail
             if (!larger_is_dummy) chain_table[larger_slot] = 0U;
         }
 
-#if defined(_MSC_VER)
-        __declspec(noinline)
-#endif
         [[nodiscard]] auto find_best_binary_tree_match(std::span<std::uint8_t const> input,
             std::size_t position, std::size_t block_end) -> match_result
         {
