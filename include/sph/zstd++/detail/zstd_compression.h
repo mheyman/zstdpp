@@ -12,6 +12,9 @@
 #include <span>
 #include <vector>
 
+#if defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86)
+#include <emmintrin.h>
+#endif
 
 #include <sph/zstd++/detail/zstd_entropy.h>
 
@@ -275,11 +278,19 @@ namespace sph::zstd::detail
             auto const tag{static_cast<std::uint8_t>(hash)};
             auto const head{static_cast<std::uint32_t>(tag_table_[row]) & row_mask};
             auto const limit{std::min<std::uint32_t>(attempt_limit, row_entries)};
+            auto const matching_tags{matching_tag_mask(tag_table_.data() + row, tag, row_entries)};
+            auto const row_bits{row_entries == 64U ? std::numeric_limits<std::uint64_t>::max() :
+                (std::uint64_t{1} << row_entries) - 1U};
+            auto const rotated_matches{head == 0U ? matching_tags :
+                ((matching_tags >> head) | (matching_tags << (row_entries - head))) & row_bits};
             std::size_t count{};
-            for (std::uint32_t offset{}; offset < row_entries && count < limit; ++offset)
+            auto matches{rotated_matches};
+            while (matches != 0U && count < limit)
             {
+                auto const offset{static_cast<std::uint32_t>(std::countr_zero(matches))};
+                matches &= matches - 1U;
                 auto const slot{(head + offset) & row_mask};
-                if (slot == 0U || tag_table_[row + slot] != tag)
+                if (slot == 0U)
                     continue;
                 auto const index{hash_table_[row + slot]};
                 if (index < low_limit)
@@ -291,6 +302,26 @@ namespace sph::zstd::detail
         }
 
     private:
+        [[nodiscard]] static auto matching_tag_mask(std::uint8_t const* tags,
+            std::uint8_t tag, std::uint32_t entries) noexcept -> std::uint64_t
+        {
+            std::uint64_t result{};
+#if defined(__SSE2__) || defined(_M_X64) || defined(_M_IX86)
+            auto const needle{_mm_set1_epi8(static_cast<char>(tag))};
+            for (std::uint32_t offset{}; offset < entries; offset += 16U)
+            {
+                auto const values{_mm_loadu_si128(reinterpret_cast<__m128i const*>(tags + offset))};
+                auto const equal{_mm_cmpeq_epi8(values, needle)};
+                result |= static_cast<std::uint64_t>(
+                    static_cast<unsigned>(_mm_movemask_epi8(equal))) << offset;
+            }
+#else
+            for (std::uint32_t offset{}; offset < entries; ++offset)
+                if (tags[offset] == tag) result |= std::uint64_t{1} << offset;
+#endif
+            return result;
+        }
+
         match_table hash_table_;
         row_tag_table tag_table_;
     };
@@ -1712,8 +1743,8 @@ namespace sph::zstd::detail
 
         struct match_result
         {
-            std::size_t length{3U};
-            std::size_t offset{};
+            std::uint32_t length{3U};
+            std::uint32_t offset{};
         };
 
         static constexpr std::size_t hash_read_size{8U};
@@ -1803,8 +1834,8 @@ namespace sph::zstd::detail
                 }
                 if (current_length > best.length)
                 {
-                    best.length = current_length;
-                    best.offset = static_cast<std::size_t>(current - match_index);
+                    best.length = static_cast<std::uint32_t>(current_length);
+                    best.offset = current - match_index;
                     if (target_length_ > 3U && best.length >= target_length_)
                     {
                         break;
@@ -2001,7 +2032,7 @@ namespace sph::zstd::detail
                         static_cast<std::int64_t>(high_bit(best_offset_base))};
                     if (length_gain > offset_cost)
                     {
-                        best.length = length;
+                        best.length = static_cast<std::uint32_t>(length);
                         best.offset = current - match_index;
                         best_offset_base = candidate_offset_base;
                     }
