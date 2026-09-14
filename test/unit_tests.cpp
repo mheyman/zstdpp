@@ -394,6 +394,20 @@ namespace
         });
         check(state.next_to_update() == 16U && hash_calls == 24U,
             "row match state rolls the eight-entry cache across longer updates");
+        std::array<std::uint8_t, 16> fixed_bytes{};
+        std::iota(fixed_bytes.begin(), fixed_bytes.end(), std::uint8_t{1});
+        state.reset();
+        state.update_fixed<4U, 4U>(0U, 7U, fixed_bytes.data(), 12U);
+        check(state.search_fixed<4U>(sph::zstd::detail::row_hash_fixed<4U>(
+                    fixed_bytes.data(), 12U, state.salt()), 0U, 4U, candidates) != 0U,
+            "fixed row match state combines specialized cache and candidate search");
+        std::array<std::uint8_t, 32> repeated_bytes{};
+        repeated_bytes.fill(0x5AU);
+        state.reset();
+        auto const fused_count{state.find_fixed<4U, 4U>(8U, 0U, 4U,
+            repeated_bytes.data(), 12U, candidates)};
+        check(fused_count != 0U && candidates[0] < 8U && state.next_to_update() == 9U,
+            "fixed row fused search inserts current position after candidate collection");
     }
 
     void test_one_shot_compression_state()

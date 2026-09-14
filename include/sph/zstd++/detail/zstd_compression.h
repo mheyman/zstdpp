@@ -484,11 +484,63 @@ namespace sph::zstd::detail
             next_to_update_ = end + (end != std::numeric_limits<std::uint32_t>::max());
         }
 
+        template <unsigned MinimumMatch, unsigned RowLog>
+        void update_fixed(std::uint32_t begin, std::uint32_t end, std::uint8_t const* base,
+            unsigned hash_bits) noexcept
+        {
+            static_assert(RowLog >= 4U && RowLog <= 6U);
+            if (end < begin)
+                return;
+            cache_.fill_fixed<MinimumMatch>(begin, end, base, hash_bits, salt_.salt());
+            for (auto index{begin}; index <= end; ++index)
+            {
+                auto const hash{cache_.next_fixed<MinimumMatch>(index, base, hash_bits, salt_.salt())};
+                static_cast<void>(table_.insert_fixed<RowLog>(hash, index));
+                salt_.observe(hash);
+                if (index == std::numeric_limits<std::uint32_t>::max())
+                    break;
+            }
+            next_to_update_ = end + (end != std::numeric_limits<std::uint32_t>::max());
+        }
+
         [[nodiscard]] auto search(std::uint32_t hash, std::uint32_t low_limit,
             std::uint32_t attempts, std::span<std::uint32_t> candidates) noexcept -> std::size_t
         {
             salt_.observe(hash);
             return table_.collect_candidates(hash, row_log_, low_limit, attempts, candidates);
+        }
+
+        template <unsigned RowLog>
+        [[nodiscard]] auto search_fixed(std::uint32_t hash, std::uint32_t low_limit,
+            std::uint32_t attempts, std::span<std::uint32_t> candidates) noexcept -> std::size_t
+        {
+            static_assert(RowLog >= 4U && RowLog <= 6U);
+            salt_.observe(hash);
+            return table_.collect_candidates_fixed<RowLog>(hash, low_limit, attempts, candidates);
+        }
+
+        // Reference row matching updates positions strictly before the current
+        // input, searches the current hash, and inserts the current position only
+        // after candidate collection. Keep that ordering in one reusable seam so
+        // the production parser cannot accidentally double-insert the current byte.
+        template <unsigned MinimumMatch, unsigned RowLog>
+        [[nodiscard]] auto find_fixed(std::uint32_t current, std::uint32_t low_limit,
+            std::uint32_t attempts, std::uint8_t const* base, unsigned hash_bits,
+            std::span<std::uint32_t> candidates) noexcept -> std::size_t
+        {
+            static_assert(RowLog >= 4U && RowLog <= 6U);
+            if (current < next_to_update_)
+                return 0U;
+            if (next_to_update_ < current)
+                update_fixed<MinimumMatch, RowLog>(next_to_update_, current - 1U,
+                    base, hash_bits);
+            auto const hash{row_hash_fixed<MinimumMatch>(base + current, hash_bits, salt_.salt())};
+            salt_.observe(hash);
+            auto const count{table_.collect_candidates_fixed<RowLog>(
+                hash, low_limit, attempts, candidates)};
+            static_cast<void>(table_.insert_fixed<RowLog>(hash, current));
+            next_to_update_ = current + (current != std::numeric_limits<std::uint32_t>::max());
+            return count;
         }
 
         [[nodiscard]] auto salt() const noexcept -> std::uint64_t { return salt_.salt(); }
@@ -1818,7 +1870,7 @@ namespace sph::zstd::detail
         static constexpr unsigned search_strength{8U};
         static constexpr std::size_t lazy_skipping_step{8U};
         static constexpr std::uint32_t block_update_skip_threshold{384U};
-        static constexpr std::uint32_t block_update_tail{192U};
+        static constexpr std::uint32_t block_update_tail{32U};
 
         [[nodiscard]] static constexpr auto high_bit(std::size_t value) -> unsigned
         {
