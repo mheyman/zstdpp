@@ -697,6 +697,27 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Matched GCC 13 link-time optimization control (2026-10-18)
+
+A separate Release build enabled interprocedural optimization for both the
+header-only C++ worker and every reference C object. Six position-balanced,
+CPU-2 trials per corpus processed 5 GiB per worker. The LTO and non-LTO
+workers emitted identical reference frames and passed their post-warmup
+allocation guards. The table reports the LTO binaries; whole-worker code size
+and peak RSS use the same definitions as the regular evaluation.
+
+| Level-1 workload with LTO | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 MiB varied text | 3238.47 | 3693.09 | 87.69% | 5.11 | 5.89 | 86.76% | 118.58 | 541.25 | 21.91% |
+| 1 MiB mixed | 2256.25 | 2164.17 | 104.25% | 5.49 | 6.13 | 89.56% | 118.58 | 541.25 | 21.91% |
+
+The matched non-LTO varied-text medians were 3232.98 / 3381.80 MiB/s
+(C++ / reference). LTO barely changed C++ (+0.17%, three of six paired
+wins) but improved reference by 9.20%, widening the gap. Mixed C++ changed
+from 2259.90 to 2256.25 MiB/s. Thus LTO is not an architectural remedy for
+this deficit; the existing evaluation configuration is unchanged. Raw data:
+`out/aligned-strategy-control/ipo-l1-*`.
+
 ### Separated level-1 literal gather (2026-10-18, rejected)
 
 The GCC 13 grouped level-1 encoder was tested with literal copies in a first
