@@ -697,6 +697,25 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Matched GCC 13 native-CPU control (2026-10-18)
+
+The separate host-specific Release build used `-O3 -march=native -DNDEBUG`
+for both C++ and reference C code; it does not replace the generic evaluation.
+Six balanced CPU-2 trials per corpus processed 5 GiB per worker. Native and
+generic workers emitted identical frames and reported no post-warmup allocations.
+
+| Level-1 native workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 MiB varied text | 3207.81 | 3599.50 | 89.12% | 5.10 | 5.92 | 86.15% | 134.71 | 639.85 | 21.05% |
+| 1 MiB mixed | 2358.60 | 2145.72 | 109.92% | 5.50 | 6.01 | 91.51% | 134.71 | 639.85 | 21.05% |
+
+On varied text, the matched generic medians were 3117.26 / 3246.31 MiB/s
+(C++ / reference). Native targeting improved C++ by 2.90% (six paired wins),
+but reference by 10.88%, widening the relative gap. On mixed input, C++ rose
+from 2199.99 to 2358.60 MiB/s; reference rose from 2068.23 to 2145.72.
+Native flags are not a general solution to the text deficit and are not used
+for the generic report. Raw data: `out/aligned-strategy-control/native-l1-*`.
+
 ### Matched GCC 13 link-time optimization control (2026-10-18)
 
 A separate Release build enabled interprocedural optimization for both the
