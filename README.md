@@ -697,6 +697,30 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Grouped sequence extra-bit pairing (2026-10-18, rejected)
+
+An isolated GCC 13 level-1 candidate combined the literal-length and
+match-length extra fields into one bit-writer call, leaving FSE transitions
+and offset encoding unchanged. All-level byte parity and reciprocal decoding
+passed. Six balanced CPU-2 trials per corpus processed 8 GiB per worker;
+candidate, baseline and reference frames matched, with no post-warmup worker
+allocations. The current-source baseline binary was saved before the edit;
+both C++ workers were stripped of debug symbols for matched timing.
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Extra-bit pair, 256 KiB varied | 3602.26 | 4071.90 | 88.47% | 4.37 | 4.38 | 99.64% | 122.34 | 628.16 | 19.48% |
+| Extra-bit pair, 256 KiB scaled mixed | 2367.03 | 2505.79 | 94.46% | 4.49 | 4.47 | 100.39% | 122.34 | 628.16 | 19.48% |
+
+Compared with the same-source C++ baseline, varied text changed from
+3594.41 to 3602.26 MiB/s (+0.22%, overlapping ranges), while genuine
+scaled-mixed data fell from 2430.38 to 2367.03 MiB/s (-2.61%, one of six
+paired wins). Mixed instructions rose from 56.427 to 58.625 billion.
+The candidate is rejected and production is unchanged. An earlier easy-to-
+compress mixed fixture ran too briefly for reliable throughput inference;
+the scaled-mixed result above is the decision control. Artifacts:
+`out/aligned-strategy-control/extra-pair-262144-*`.
+
 ### Packed level-1 fast-parser entries (2026-10-18)
 
 For GCC 13 x86-64's compile-time minMatch-7 path, the fast parser now stores each
