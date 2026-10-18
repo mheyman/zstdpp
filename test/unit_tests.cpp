@@ -897,7 +897,8 @@ namespace
         using namespace sph::zstd::detail;
         symbol_count_workspace workspace;
         for (std::size_t alphabet : {1U, 29U, 36U, 53U, 256U})
-            for (std::size_t length : {0U, 1U, 2U, 127U, 128U, 129U, 255U, 256U, 1499U, 1500U, 2048U})
+            for (std::size_t length : {0U, 1U, 2U, 127U, 128U, 129U, 255U, 256U,
+                1499U, 1500U, 2048U, 8191U, 8192U, 8193U})
         {
             std::vector<std::uint8_t> codes(length);
             symbol_counts expected{};
@@ -912,6 +913,9 @@ namespace
             for (auto& stripe : workspace) stripe.fill(0xbeefU);
             check(count_symbols<128U>(codes, workspace) == expected,
                 "early striped sequence histogram matches scalar oracle");
+            for (auto& stripe : workspace) stripe.fill(0xcafeU);
+            check(count_symbols<8192U>(codes, workspace) == expected,
+                "fast literal histogram changes paths without changing counts");
         }
     }
 

@@ -5808,7 +5808,10 @@ namespace sph::zstd::detail
         {
             return false;
         }
-        auto const& frequencies{count_symbols(literals, workspace.histogram_workspace)};
+        // Small fast-strategy literal blocks may be cheaper with one histogram
+        // than with four histograms and their reduction pass.
+        auto const& frequencies{count_symbols<RankCanonical ? 8192U : 1500U>(
+            literals, workspace.histogram_workspace)};
         std::uint8_t maximum_symbol{};
         std::size_t distinct_symbols{};
         std::uint32_t largest_frequency{};

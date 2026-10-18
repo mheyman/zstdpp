@@ -697,6 +697,37 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Single-histogram fast literals below 8 KiB (2026-10-18)
+
+The GCC 13 grouped fast encoder now uses one literal histogram below 8 KiB,
+instead of clearing and reducing four histograms above the old 1,500-byte
+threshold. Other entropy paths retain their previous histogram policy. A
+phase trace on 256-KiB varied text found about 5.4 KiB of literals per frame,
+placing the hot literal blocks in the newly single-histogram range. The
+expanded unit test checks poisoned-workspace reuse across both sides of the
+8-KiB boundary; all ten GCC tests, including all-level byte parity and
+reciprocal decoding, pass.
+
+Six balanced 8-GiB screens followed by six reversed-order 16-GiB confirmations
+per worker used CPU 2 and optimized GCC 13 binaries. Every candidate and
+baseline frame matched reference, and the workers detected no post-warmup
+allocations. The table reports the longer confirmation medians, peak RSS, and
+complete no-debug-symbol worker sizes.
+
+| Level-1 workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 KiB varied text | 3541.83 | 3988.44 | 88.80% | 4.36 | 4.38 | 99.54% | 122.50 | 628.16 | 19.50% |
+| 256 KiB scaled mixed | 2392.64 | 2460.45 | 97.24% | 4.46 | 4.48 | 99.55% | 122.50 | 628.16 | 19.50% |
+
+Against the same-source C++ baseline, varied text improved from 3488.02 to
+3541.83 MiB/s (+1.54%, five of six paired wins), while scaled mixed changed
+from 2389.83 to 2392.64 MiB/s (+0.12%, three of six wins). Varied cycles fell
+from 20.915 to 20.613 billion despite 1.11% more instructions. Six balanced
+4-GiB trials on both 64-KiB corpora were effectively neutral (-0.33% varied,
+-0.12% mixed; three paired wins each, identical instruction counts). This
+retained improvement narrows but does not close the varied-text gap. Raw data:
+`out/aligned-strategy-control/literal-hist-*`.
+
 ### Matched GCC 13 native-CPU control (2026-10-18)
 
 The separate host-specific Release build used `-O3 -march=native -DNDEBUG`
