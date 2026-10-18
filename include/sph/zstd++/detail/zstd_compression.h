@@ -1393,6 +1393,7 @@ namespace sph::zstd::detail
         unsigned ShortHashLog = 0U, unsigned MinimumMatch = 0U>
     class double_fast_match_state
     {
+        friend struct index_epoch_test_access;
     public:
         double_fast_match_state(unsigned window_log, unsigned long_hash_log,
             unsigned short_hash_log, unsigned minimum_match)
@@ -1457,6 +1458,8 @@ namespace sph::zstd::detail
             {
                 return result;
             }
+
+            ensure_index_headroom(block_begin + block_size);
 
             if (block_size >= 1024U &&
                 (known_rle.has_value() ? *known_rle : is_rle(input.subspan(block_begin, block_size))))
@@ -1668,6 +1671,20 @@ namespace sph::zstd::detail
         static constexpr std::size_t hash_read_size{8U};
         static constexpr std::size_t index_bias{2U};
         static constexpr std::size_t search_step{256U};
+
+        void ensure_index_headroom(std::size_t block_end)
+        {
+            constexpr auto maximum{std::numeric_limits<std::uint32_t>::max()};
+            if (block_end > maximum - index_bias)
+                throw entropy_error{"double-fast frame exceeds the 32-bit index range"};
+            if (static_cast<std::uint64_t>(frame_index_base_) + block_end + index_bias <= maximum)
+                return;
+            auto const first_current{frame_index_base_ + static_cast<std::uint32_t>(index_bias)};
+            for (auto* table : {&long_table_, &short_table_})
+                for (auto& index : *table)
+                    index = index >= first_current ? index - frame_index_base_ : 0U;
+            frame_index_base_ = 0U;
+        }
 
         [[nodiscard]] static auto read_word(std::uint8_t const* input) -> std::uint64_t
         {
@@ -1997,6 +2014,7 @@ namespace sph::zstd::detail
         bool CacheAdjacentInsertion = false>
     class greedy_match_state
     {
+        friend struct index_epoch_test_access;
     public:
         greedy_match_state(unsigned window_log, unsigned hash_log, unsigned chain_log,
             unsigned search_log, unsigned minimum_match, unsigned /*target_length*/ = 0U)
@@ -2039,8 +2057,9 @@ namespace sph::zstd::detail
             return parameter_value<MinimumMatch>(minimum_match_) == 3U ? 3U : 4U;
         }
 
-        void begin_optimal_block(std::size_t block_begin = 0U) noexcept
+        void begin_optimal_block(std::size_t block_begin = 0U, std::size_t block_end = 0U)
         {
+            ensure_index_headroom(std::max(block_begin, block_end));
             // Exact lengths are reusable only under an unchanged block end.
             if constexpr (CacheAdjacentInsertion) comparison_cache_.rows = {};
             // ZSTD_buildSeqStore bounds catch-up before every strategy. The
@@ -2066,6 +2085,8 @@ namespace sph::zstd::detail
             {
                 return result;
             }
+
+            ensure_index_headroom(block_begin + block_size);
 
             if constexpr (RowMatch)
                 if (block_size < hash_read_size + row_hash_cache::size) return result;
@@ -2371,6 +2392,53 @@ namespace sph::zstd::detail
         }
 
     private:
+        void ensure_index_headroom(std::size_t block_end)
+        {
+            constexpr auto maximum{std::numeric_limits<std::uint32_t>::max()};
+            // Tree insertion can retain a position plus nine bytes of lookahead.
+            constexpr auto guard{index_bias + 9U};
+            if (block_end > maximum - guard)
+                throw entropy_error{"match parser frame exceeds the 32-bit index range"};
+            if constexpr (RowMatch)
+            {
+                if (static_cast<std::uint64_t>(row_state_.frame_base) + block_end + 1U <= maximum)
+                    return;
+                auto const old_base{row_state_.frame_base};
+                auto* positions{row_state_.table.hash_table()};
+                for (std::size_t slot{}; slot < row_state_.table_size; ++slot)
+                    positions[slot] = positions[slot] > old_base ? positions[slot] - old_base : 0U;
+                row_state_.frame_base = 0U;
+            }
+            else
+            {
+                if (static_cast<std::uint64_t>(frame_index_base_) + block_end + guard <= maximum)
+                    return;
+                auto const old_base{frame_index_base_};
+                auto const first_current{old_base + index_bias};
+                auto const rebase = [=](std::uint32_t index) {
+                    return index >= first_current ? index - old_base : 0U;
+                };
+                for (auto& index : hash_table_) index = rebase(index);
+                for (auto& index : hash3_table_) index = rebase(index);
+                for (auto& index : chain_table_)
+                {
+                    if constexpr (BinaryTree)
+                        if (index == unsorted_mark) continue;
+                    index = rebase(index);
+                }
+                // Links are addressed by absolute index modulo the ring size.
+                // Moving the origin therefore also moves slots, not just values.
+                auto const shift{BinaryTree ? (2U * (old_base & tree_mask_)) : (old_base & chain_mask_)};
+                std::rotate(chain_table_.begin(), chain_table_.begin() + shift, chain_table_.end());
+                if constexpr (!BinaryTree)
+                    std::rotate(chain_tags_.begin(), chain_tags_.begin() + shift, chain_tags_.end());
+                next_to_update_ = std::max(index_bias, rebase(next_to_update_));
+                next_to_update3_ = std::max(index_bias, rebase(next_to_update3_));
+                frame_index_base_ = 0U;
+                if constexpr (CacheAdjacentInsertion) comparison_cache_.rows = {};
+            }
+        }
+
         template <unsigned Configured>
         [[nodiscard]] static constexpr auto parameter_value(
             match_parameter<Configured> const& runtime) noexcept -> unsigned
@@ -4372,7 +4440,10 @@ namespace sph::zstd::detail
         auto const parse_end{block_end - 8U};
         auto& optimal{workspace.optimal};
         auto const minimum_match{matcher.optimal_minimum_match()};
-        matcher.begin_optimal_block(block_begin);
+        if constexpr (requires { matcher.begin_optimal_block(block_begin, block_end); })
+            matcher.begin_optimal_block(block_begin, block_end);
+        else
+            matcher.begin_optimal_block(block_begin);
         initialize_optimal_prices(optimal, input.subspan(block_begin, block_size), accurate);
         auto anchor{block_begin};
         auto position{block_begin};
