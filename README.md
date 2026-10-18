@@ -697,6 +697,29 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Trusted grouped-FSE transitions (2026-10-18, rejected)
+
+The grouped level-1 sequence writer was tested with the per-symbol RLE check
+removed after table selection. Its general-purpose encoder retained the check;
+an address-sanitized oracle matched 286,000 checked and trusted transitions,
+and unit plus all-level reciprocal acceptance tests passed. Generated code
+confirmed the checks left the inner sequence loop. Six balanced, CPU-pinned
+8 GiB trials per worker and corpus produced byte-identical reference frames
+with no post-warmup allocations.
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Trusted FSE, 256 KiB varied | 3585.67 | 4041.57 | 88.72% | 4.35 | 4.37 | 99.54% | 122.34 | 628.16 | 19.48% |
+| Trusted FSE, 256 KiB scaled mixed | 2366.62 | 2441.17 | 96.95% | 4.50 | 4.51 | 99.78% | 122.34 | 628.16 | 19.48% |
+
+Against the saved same-source baseline, throughput fell from 3595.71 to
+3585.67 MiB/s on varied text and from 2381.75 to 2366.62 MiB/s on scaled
+mixed data, with only two of six paired wins on either corpus. Varied-text
+instructions fell from 38.760 to 38.444 billion, but cycles rose from 10.229
+to 10.282 billion; mixed instructions and cycles both rose. The candidate is
+rejected and production code is unchanged. Artifacts:
+`out/aligned-strategy-control/trusted-fse-262144-*`.
+
 ### Grouped sequence extra-bit pairing (2026-10-18, rejected)
 
 An isolated GCC 13 level-1 candidate combined the literal-length and
