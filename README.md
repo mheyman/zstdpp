@@ -1033,9 +1033,26 @@ exception: 68.79 versus 78.72 MiB/s (87.38% of reference), with two of six
 paired wins and wide overlapping trial ranges. The previous checkpoint had
 level 17 ahead, but it predates the index-epoch fixes and used different
 worker binaries; these reports alone do not identify the cause. Compression
-level 17 needs a controlled confirmation before attributing the change to
-code rather than run variability. The table also covers only the mixed corpus:
+level 17 received the controlled confirmations below before attributing the
+change to code rather than run variability. The table covers only the mixed corpus:
 the known small-input and varied-text gaps remain optimization targets.
+
+Two six-pair level-17 confirmations used the current optimized workers,
+4,000 frames per measurement, alternating CPU-2 order (reversed for the second
+series), exact frame comparisons, allocation guards and hardware counters.
+The standalone matrix row remains unchanged; these are separate measurements.
+
+| Level 17 compression | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| First confirmation | 92.84 | 92.93 | 99.90% | 21.83 | 21.87 | 99.85% | 144.44 | 628.16 | 22.99% |
+| Reversed-order repeat | 95.25 | 90.70 | 105.03% | 21.83 | 21.87 | 99.85% | 144.44 | 628.16 | 22.99% |
+
+C++ won five of six paired trials in each series. Median paired ratios were
+105.17% and 105.22%. Retired instructions were stable at 310.81 billion for
+C++ and 365.10 billion for reference in every 4,000-frame run, while early
+cycle totals and throughput varied widely. The matrix's level-17 deficit did
+not repeat consistently, but these noisy results do not prove an across-run
+speed advantage. Artifacts: `out/aligned-strategy-control/post-packed-l17-{confirm,repeat}-*`.
 
 ### Repeated all-level evaluation (2026-10-18, historical checkpoint)
 
