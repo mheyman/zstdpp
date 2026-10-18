@@ -697,6 +697,39 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Packed level-1 fast-parser entries (2026-10-18)
+
+For GCC 13 x86-64's compile-time minMatch-7 path, the fast parser now stores each
+32-bit history index and its byte tag in one cache-aligned 64-bit table entry.
+This removes the separate tag-table address stream. On an index-epoch rebase,
+only the low 32-bit index is adjusted; the tag is preserved. Other compiler and
+minimum-match paths retain their previous table layout.
+
+Six position-balanced 8 GiB screens and six reversed-order 16 GiB confirmation
+trials per implementation used optimized GCC 13 workers pinned to CPU 2.
+All three encoders produced identical frames in every trial, and the worker's
+post-warmup allocation guard passed. The table below gives the longer-run
+medians; code size is the complete worker binary.
+
+| Level 1 workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Packed, 1 MiB varied | 3153.30 | 3312.59 | 95.19% | 5.11 | 5.86 | 87.14% | 126.71 | 628.16 | 20.17% |
+| Packed, 1 MiB mixed | 2217.39 | 2089.48 | 106.12% | 5.49 | 6.12 | 89.67% | 126.71 | 628.16 | 20.17% |
+| Packed, 4 MiB varied | 3325.12 | 3232.76 | 102.86% | 8.24 | 11.87 | 69.44% | 126.71 | 628.16 | 20.17% |
+| Packed, 4 MiB mixed | 2095.77 | 2023.42 | 103.58% | 9.23 | 12.12 | 76.16% | 126.71 | 628.16 | 20.17% |
+
+Against the matched pre-change C++ binary, the longer-run median changes are
++1.97%, +1.63%, +2.91% and -2.03%, respectively. The 4 MiB mixed range is
+wide: the packed worker wins four of six paired trials despite the negative
+median, so that workload is inconclusive. The shorter screens were positive
+on all four workloads (+2.96%, +3.96%, +4.31%, +1.17%). This change improves
+the confirmed varied-text deficit but does not yet put 1 MiB varied ahead of
+reference. The active GCC 13 x86-64 production path was checked against the
+measured overlay. ASan/UBSan rollover/parser/streaming
+tests, strict units, MSVC's unchanged path, and all 10 optimized GCC CTests
+(including reciprocal acceptance at levels 1–22) pass. The broader 22-level
+matrix below predates this change and is not a fresh measurement of it.
+
 ### Cached fast-parser epoch limit (2026-10-18, rejected)
 
 An isolated GCC 13 x86-64 prototype stores the largest safe block end when a

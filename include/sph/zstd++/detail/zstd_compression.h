@@ -980,13 +980,22 @@ namespace sph::zstd::detail
 #else
         static constexpr bool use_tags{true};
 #endif
+        // GCC 13 x86-64's minMatch-7 loop benefits from fetching the index and its
+        // byte tag in one aligned table entry instead of two address streams.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__x86_64__)
+        static constexpr bool packed_entries{MinimumMatch == 7U};
+#else
+        static constexpr bool packed_entries{false};
+#endif
+        using index_table = std::conditional_t<packed_entries,
+            std::vector<std::uint64_t, cache_aligned_allocator<std::uint64_t>>, match_table>;
     public:
         fast_match_state(unsigned window_log, unsigned hash_log, unsigned minimum_match,
             std::size_t target_length)
             : window_log_{window_log}, hash_log_{hash_log}, minimum_match_{minimum_match},
               target_length_{target_length},
               hash_table_(std::size_t{1} << match_parameter<HashLog>::resolve(hash_log)),
-              hash_tags_(use_tags ? hash_table_.size() : 0U)
+              hash_tags_(use_tags && !packed_entries ? hash_table_.size() : 0U)
         {
         }
 
@@ -1079,6 +1088,24 @@ namespace sph::zstd::detail
             auto const limit{block_end - hash_read_size};
             auto* const hash_table{hash_table_.data()};
             auto* const hash_tags{hash_tags_.data()};
+            auto const read_index{[&](std::size_t slot) {
+                return static_cast<std::uint32_t>(hash_table[slot]);
+            }};
+            auto const read_tag{[&](std::size_t slot) -> std::uint8_t {
+                if constexpr (packed_entries)
+                    return static_cast<std::uint8_t>(hash_table[slot] >> 32U);
+                else
+                    return hash_tags[slot];
+            }};
+            auto const insert_entry{[&](std::size_t slot, std::uint32_t index, std::size_t source) {
+                if constexpr (packed_entries)
+                    hash_table[slot] = static_cast<std::uint64_t>(index) |
+                        (static_cast<std::uint64_t>(input[source]) << 32U);
+                else {
+                    hash_table[slot] = index;
+                    if constexpr (use_tags) hash_tags[slot] = input[source];
+                }
+            }};
             auto anchor{block_begin};
             auto position{block_begin + static_cast<std::size_t>(block_begin == prefix_start)};
             auto repeat_one{repeat_offsets_[0]};
@@ -1105,7 +1132,7 @@ namespace sph::zstd::detail
 
                 auto hash_zero{hash(input, position)};
                 auto hash_one{hash(input, position_one)};
-                auto match_index{hash_table[hash_zero]};
+                auto match_index{read_index(hash_zero)};
                 std::size_t current_index{};
                 bool found{};
                 bool repeat_match{};
@@ -1113,16 +1140,14 @@ namespace sph::zstd::detail
                 do
                 {
                     current_index = frame_index_base_ + position + index_bias;
-                    auto const previous_tag{use_tags ? hash_tags[hash_zero] : std::uint8_t{}};
-                    hash_table[hash_zero] = static_cast<std::uint32_t>(current_index);
-                    if constexpr (use_tags) hash_tags[hash_zero] = input[position];
+                    auto const previous_tag{use_tags ? read_tag(hash_zero) : std::uint8_t{}};
+                    insert_entry(hash_zero, static_cast<std::uint32_t>(current_index), position);
 
                     if (repeat_one != 0U && equal_four(input, position_two, position_two - repeat_one))
                     {
                         position = position_two;
-                        hash_table[hash_one] = static_cast<std::uint32_t>(
-                            frame_index_base_ + position_one + index_bias);
-                        if constexpr (use_tags) hash_tags[hash_one] = input[position_one];
+                        insert_entry(hash_one, static_cast<std::uint32_t>(
+                            frame_index_base_ + position_one + index_bias), position_one);
                         found = true;
                         repeat_match = true;
                         break;
@@ -1131,38 +1156,35 @@ namespace sph::zstd::detail
                     if ((!use_tags || previous_tag == input[position]) &&
                         matches(input, position, match_index, prefix_index))
                     {
-                        hash_table[hash_one] = static_cast<std::uint32_t>(
-                            frame_index_base_ + position_one + index_bias);
-                        if constexpr (use_tags) hash_tags[hash_one] = input[position_one];
+                        insert_entry(hash_one, static_cast<std::uint32_t>(
+                            frame_index_base_ + position_one + index_bias), position_one);
                         found = true;
                         break;
                     }
 
-                    match_index = hash_table[hash_one];
+                    match_index = read_index(hash_one);
                     hash_zero = hash_one;
                     hash_one = hash(input, position_two);
                     position = position_one;
                     position_one = position_two;
                     position_two = position_three;
                     current_index = frame_index_base_ + position + index_bias;
-                    auto const previous_tag_one{use_tags ? hash_tags[hash_zero] : std::uint8_t{}};
-                    hash_table[hash_zero] = static_cast<std::uint32_t>(current_index);
-                    if constexpr (use_tags) hash_tags[hash_zero] = input[position];
+                    auto const previous_tag_one{use_tags ? read_tag(hash_zero) : std::uint8_t{}};
+                    insert_entry(hash_zero, static_cast<std::uint32_t>(current_index), position);
 
                     if ((!use_tags || previous_tag_one == input[position]) &&
                         matches(input, position, match_index, prefix_index))
                     {
                         if (step <= 4U)
                         {
-                            hash_table[hash_one] = static_cast<std::uint32_t>(
-                                frame_index_base_ + position_one + index_bias);
-                            if constexpr (use_tags) hash_tags[hash_one] = input[position_one];
+                            insert_entry(hash_one, static_cast<std::uint32_t>(
+                                frame_index_base_ + position_one + index_bias), position_one);
                         }
                         found = true;
                         break;
                     }
 
-                    match_index = hash_table[hash_one];
+                    match_index = read_index(hash_one);
                     hash_zero = hash_one;
                     hash_one = hash(input, position_two);
                     position = position_one;
@@ -1226,12 +1248,10 @@ namespace sph::zstd::detail
                 {
                     auto const catchup_position{current_index - frame_index_base_ - index_bias + 2U};
                     auto const catchup_hash{hash(input, catchup_position)};
-                    hash_table[catchup_hash] = static_cast<std::uint32_t>(current_index + 2U);
-                    if constexpr (use_tags) hash_tags[catchup_hash] = input[catchup_position];
+                    insert_entry(catchup_hash, static_cast<std::uint32_t>(current_index + 2U), catchup_position);
                     auto const trailing_hash{hash(input, position - 2U)};
-                    hash_table[trailing_hash] = static_cast<std::uint32_t>(
-                        frame_index_base_ + position - 2U + index_bias);
-                    if constexpr (use_tags) hash_tags[trailing_hash] = input[position - 2U];
+                    insert_entry(trailing_hash, static_cast<std::uint32_t>(
+                        frame_index_base_ + position - 2U + index_bias), position - 2U);
 
                     if (repeat_two != 0U)
                     {
@@ -1241,9 +1261,8 @@ namespace sph::zstd::detail
                                 input, position, position - repeat_two, block_end, 4U)};
                             std::swap(repeat_one, repeat_two);
                             auto const repeat_hash{hash(input, position)};
-                            hash_table[repeat_hash] = static_cast<std::uint32_t>(
-                                frame_index_base_ + position + index_bias);
-                            if constexpr (use_tags) hash_tags[repeat_hash] = input[position];
+                            insert_entry(repeat_hash, static_cast<std::uint32_t>(
+                                frame_index_base_ + position + index_bias), position);
                             result.sequences.push_back(sequence_type{
                                 0U, repeat_length, repeat_one, 1U});
                             position += repeat_length;
@@ -1280,8 +1299,19 @@ namespace sph::zstd::detail
             // Rebase before an index can wrap within that frame. Current-frame
             // entries retain their positions; stale epochs become empty slots.
             auto const first_current{frame_index_base_ + static_cast<std::uint32_t>(index_bias)};
-            for (auto& index : hash_table_)
-                index = index >= first_current ? index - frame_index_base_ : 0U;
+            for (auto& entry : hash_table_)
+            {
+                if constexpr (packed_entries)
+                {
+                    // The tag is not part of the index epoch; subtracting the
+                    // base from the full 64-bit entry would corrupt it.
+                    auto const index{static_cast<std::uint32_t>(entry)};
+                    auto const rebased{index >= first_current ? index - frame_index_base_ : 0U};
+                    entry = (entry & 0xFFFFFFFF00000000ULL) | rebased;
+                }
+                else
+                    entry = entry >= first_current ? entry - frame_index_base_ : 0U;
+            }
             frame_index_base_ = 0U;
         }
 
@@ -1381,7 +1411,7 @@ namespace sph::zstd::detail
         unsigned hash_log_{};
         unsigned minimum_match_{};
         std::size_t target_length_{};
-        match_table hash_table_;
+        index_table hash_table_;
         row_tag_table hash_tags_;
         std::uint32_t frame_index_base_{};
         std::uint32_t frame_extent_{};
