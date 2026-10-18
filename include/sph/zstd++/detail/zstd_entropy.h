@@ -267,7 +267,7 @@ namespace sph::zstd::detail
 
         forward_lsb_reader bits{source, 4};
         normalized_counts result{};
-        result.table_log = static_cast<unsigned>(source[0] & 0x0FU) + 5U;
+        result.table_log = (source[0] & 0x0FU) + 5U;
         if (result.table_log > 12U)
         {
             throw entropy_error{"Zstandard FSE table log is too large"};
@@ -292,7 +292,7 @@ namespace sph::zstd::detail
                         throw entropy_error{"too many zero counts in Zstandard FSE table"};
                     }
                 }
-                symbol += static_cast<unsigned>(bits.read(2));
+                symbol += bits.read(2);
                 if (symbol > maximum_symbol)
                 {
                     throw entropy_error{"too many zero counts in Zstandard FSE table"};
@@ -332,7 +332,7 @@ namespace sph::zstd::detail
                 {
                     break;
                 }
-                number_bits = static_cast<int>(std::bit_width(static_cast<unsigned>(remaining)));
+                number_bits = std::bit_width(static_cast<unsigned>(remaining));
                 threshold = 1 << (number_bits - 1);
             }
         }

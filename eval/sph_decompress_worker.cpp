@@ -14,7 +14,6 @@
 
 namespace
 {
-    std::atomic<bool> track_allocations{true};
     std::atomic<std::size_t> allocation_count{};
 }
 
@@ -22,8 +21,7 @@ void* operator new(std::size_t size)
 {
     if (auto* memory = std::malloc(size == 0U ? 1U : size))
     {
-        if (track_allocations.load(std::memory_order_relaxed))
-            allocation_count.fetch_add(1U, std::memory_order_relaxed);
+        allocation_count.fetch_add(1U, std::memory_order_relaxed);
         return memory;
     }
     throw std::bad_alloc{};
@@ -59,7 +57,6 @@ int main(int argc, char** argv)
         {
             throw std::runtime_error{"sph decompression output mismatch"};
         }
-        track_allocations.store(false, std::memory_order_relaxed);
         auto const ordinary_allocations_after_warmup{allocation_count.load(std::memory_order_relaxed)};
         auto const start{sph::zstd::eval::clock::now()};
         for (std::uint64_t iteration{}; iteration < iterations; ++iteration)

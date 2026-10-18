@@ -202,6 +202,10 @@ namespace sph::zstd
             }
 
             [[nodiscard]] auto size() const noexcept -> std::size_t { return size_; }
+            [[nodiscard]] auto remaining_capacity() const noexcept -> std::size_t
+            {
+                return capacity_ - offset_ - size_;
+            }
             [[nodiscard]] auto data() noexcept -> std::uint8_t*
             {
                 return external_data_ != nullptr ? external_data_ + offset_ :
@@ -891,7 +895,27 @@ namespace sph::zstd
             }
             if (count <= 7U)
             {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                // GCC 13 leaves the variable-size tiny copy on the hot path.
+                // Fixed widths avoid that cost without reading beyond count.
+                // Newer compilers already optimize the generic copy well.
+                if (count >= 4U)
+                {
+                    std::memcpy(destination, source, 4U);
+                    std::memcpy(destination + count - 4U, source + count - 4U, 4U);
+                }
+                else if (count >= 2U)
+                {
+                    std::memcpy(destination, source, 2U);
+                    destination[count - 1U] = source[count - 1U];
+                }
+                else
+                {
+                    *destination = *source;
+                }
+#else
                 std::memcpy(destination, source, count);
+#endif
                 return;
             }
             if constexpr (Padded)
@@ -939,7 +963,16 @@ namespace sph::zstd
                 }
             }
             auto const destination{output.append_uninitialized_reserved(literal_length + match_length)};
-            copy_literals<Padded>(destination.data(), literals, literal_length);
+            auto const can_overcopy{output.remaining_capacity() >= copy_slack};
+            if constexpr (Padded)
+            {
+                if (can_overcopy)
+                    copy_literals<true>(destination.data(), literals, literal_length);
+                else
+                    copy_literals<false>(destination.data(), literals, literal_length);
+            }
+            else
+                copy_literals<false>(destination.data(), literals, literal_length);
             auto* const match_destination{destination.data() + literal_length};
             // The reserved span starts at the old end, so recover the history base
             // without a second external/storage pointer dispatch.
@@ -952,8 +985,11 @@ namespace sph::zstd
             }
             if (match_offset >= match_length)
             {
-                copy_match(match_destination, output_data + source_position,
-                    match_length, match_offset);
+                if (can_overcopy)
+                    copy_match(match_destination, output_data + source_position,
+                        match_length, match_offset);
+                else
+                    copy_nonoverlapping(match_destination, output_data + source_position, match_length);
                 return;
             }
             std::memcpy(match_destination, output_data + source_position, match_offset);
@@ -1029,6 +1065,10 @@ namespace sph::zstd
             {
                 output.reserve_additional(Parameters.maximum_decoded_block_size + copy_slack);
             }
+            // A caller-owned destination need not hold a full maximum-size block.
+            // Bound logical writes before using the unchecked reserved append path.
+            auto const block_output_limit{std::min(Parameters.maximum_decoded_block_size,
+                output.remaining_capacity())};
 #ifdef SPH_ZSTDPP_TRUSTED_EVAL
             constexpr bool trusted_input = true;
 #else
@@ -1093,7 +1133,7 @@ namespace sph::zstd
                 }
                 if constexpr (!trusted_input)
                 {
-                    auto const remaining_output{Parameters.maximum_decoded_block_size -
+                    auto const remaining_output{block_output_limit -
                         (output.size() - block_begin)};
                     if (literal_length > literals.size() - literal_offset ||
                         literal_length > remaining_output ||
@@ -1123,7 +1163,7 @@ namespace sph::zstd
                 throw detail::entropy_error{"Zstandard sequence bitstream has trailing bits"};
             }
             if (literals.size() - literal_offset >
-                Parameters.maximum_decoded_block_size - (output.size() - block_begin))
+                block_output_limit - (output.size() - block_begin))
             {
                 throw detail::entropy_error{"decoded Zstandard block is too large"};
             }

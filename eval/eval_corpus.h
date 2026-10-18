@@ -9,6 +9,56 @@
 
 namespace sph::zstd::eval
 {
+    // Exercises optimal-strategy pre-splitting and mutations at block boundaries.
+    [[nodiscard]] inline auto make_optimal_presplit_corpus(unsigned seed = 3U) -> std::vector<std::uint8_t>
+    {
+        constexpr std::size_t block{128U * 1024U};
+        std::vector<std::uint8_t> input(8U * block);
+        std::uint32_t random{seed};
+        for (std::size_t i{}; i < input.size(); ++i)
+        {
+            random = random * 1664525U + 1013904223U;
+            input[i] = static_cast<std::uint8_t>((i % (seed * 3U)) ^ (i / 8191U));
+            if (i % (149U + seed) == 0U)
+                input[i] ^= static_cast<std::uint8_t>(random >> 16U);
+        }
+        for (auto boundary{block}; boundary < input.size(); boundary += block)
+            for (std::size_t delta{}; delta <= 17U; ++delta)
+            {
+                input[boundary - delta] ^= static_cast<std::uint8_t>(seed + delta);
+                input[boundary + delta] ^= static_cast<std::uint8_t>(255U - seed - delta);
+            }
+        return input;
+    }
+
+    // Alternating diverse/text blocks exercise direct-to-tagged parser history.
+    [[nodiscard]] inline auto make_tag_transition_corpus(unsigned seed = 1U)
+        -> std::vector<std::uint8_t>
+    {
+        constexpr std::size_t block{128U * 1024U};
+        std::vector<std::uint8_t> input(8U * block);
+        std::uint32_t random{seed};
+        auto next = [&]
+        {
+            random ^= random << 13U;
+            random ^= random >> 17U;
+            random ^= random << 5U;
+            return random;
+        };
+        for (auto& byte : input) byte = static_cast<std::uint8_t>(next());
+        for (std::size_t begin{}; begin < input.size(); begin += 2U * block)
+        {
+            for (std::size_t record{}; record < 128U; ++record)
+                for (std::size_t j{}; j < 64U; ++j)
+                    input[begin + record * 1024U + 7U + j] =
+                        static_cast<std::uint8_t>('A' + next() % 26U);
+            for (std::size_t j{}; j < block; ++j)
+                input[begin + block + j] =
+                    input[begin + ((j / 64U) % 128U) * 1024U + 7U + (j % 64U)];
+        }
+        return input;
+    }
+
     /** The deterministic mixed corpus shared by benchmarks and parity tests. */
     [[nodiscard]] inline auto make_mixed_corpus(std::size_t size) -> std::vector<std::uint8_t>
     {

@@ -1,4 +1,15 @@
-set(SPH_ZSTDPP_EVAL_LEVELS 1 3 5 7 8 9 15)
+set(SPH_ZSTDPP_EVAL_LEVELS "1;3;5;7;8;9;15" CACHE STRING
+    "Positive compression levels to build and benchmark (1 through 22)")
+if("${SPH_ZSTDPP_EVAL_LEVELS}" STREQUAL "")
+    message(FATAL_ERROR "SPH_ZSTDPP_EVAL_LEVELS must not be empty")
+endif()
+foreach(level IN LISTS SPH_ZSTDPP_EVAL_LEVELS)
+    if(NOT level MATCHES "^[1-9][0-9]*$" OR level GREATER 22)
+        message(FATAL_ERROR "Invalid evaluation level '${level}': expected 1 through 22")
+    endif()
+endforeach()
+list(REMOVE_DUPLICATES SPH_ZSTDPP_EVAL_LEVELS)
+list(JOIN SPH_ZSTDPP_EVAL_LEVELS "," SPH_ZSTDPP_EVAL_LEVELS_CPP)
 set(SPH_ZSTDPP_EVAL_CORPUS_SIZE 1048576)
 set(SPH_ZSTDPP_EVAL_RUNTIME_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 
@@ -28,9 +39,13 @@ foreach(level IN LISTS SPH_ZSTDPP_EVAL_LEVELS)
         SPH_EVAL_LEVEL=${level}
         SPH_EVAL_CORPUS_SIZE=${SPH_ZSTDPP_EVAL_CORPUS_SIZE}
     )
-    if(SPH_ZSTDPP_TRACE_BT AND level EQUAL 15)
+    if(SPH_ZSTDPP_TRACE_BT AND (level EQUAL 15 OR level EQUAL 16))
         target_compile_definitions(${sph_compress_target} PRIVATE SPH_ZSTDPP_TRACE_BT=1)
         target_compile_definitions(libzstd_static PRIVATE SPH_ZSTDPP_TRACE_BT=1)
+    endif()
+    if(SPH_ZSTDPP_TRACE_OPTIMAL AND level GREATER_EQUAL 16)
+        target_compile_definitions(${sph_compress_target} PRIVATE SPH_ZSTDPP_TRACE_OPTIMAL=1)
+        target_compile_definitions(libzstd_static PRIVATE SPH_ZSTDPP_TRACE_OPTIMAL=1)
     endif()
     if(SPH_ZSTDPP_TRACE_PHASES AND level EQUAL 15)
         target_compile_definitions(${sph_compress_target} PRIVATE SPH_ZSTDPP_TRACE_PHASES=1)
@@ -40,14 +55,16 @@ foreach(level IN LISTS SPH_ZSTDPP_EVAL_LEVELS)
     sph_zstdpp_add_eval_worker(${reference_compress_target} reference_compress_worker.cpp)
     target_link_libraries(${reference_compress_target} PRIVATE libzstd_static)
     target_compile_definitions(${reference_compress_target} PRIVATE SPH_EVAL_LEVEL=${level})
-    if(SPH_ZSTDPP_TRACE_BT AND level EQUAL 15)
+    if(SPH_ZSTDPP_TRACE_BT AND (level EQUAL 15 OR level EQUAL 16))
         target_compile_definitions(${reference_compress_target} PRIVATE SPH_ZSTDPP_TRACE_BT=1)
+    endif()
+    if(SPH_ZSTDPP_TRACE_OPTIMAL AND level GREATER_EQUAL 16)
+        target_compile_definitions(${reference_compress_target} PRIVATE SPH_ZSTDPP_TRACE_OPTIMAL=1)
     endif()
 
     set(sph_decompress_target "sph_decompress_l${level}")
     sph_zstdpp_add_eval_worker(${sph_decompress_target} sph_decompress_worker.cpp)
     target_link_libraries(${sph_decompress_target} PRIVATE sph::zstdpp)
-    target_compile_definitions(${sph_decompress_target} PRIVATE SPH_ZSTDPP_TRUSTED_EVAL=1)
 
     set(reference_decompress_target "reference_decompress_l${level}")
     sph_zstdpp_add_eval_worker(${reference_decompress_target} reference_decompress_worker.cpp)
@@ -70,6 +87,7 @@ target_compile_definitions(zstdpp_eval PRIVATE
     SPH_EVAL_COMPILER="${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}"
     SPH_EVAL_BUILD_TYPE="${CMAKE_BUILD_TYPE}"
     SPH_EVAL_CORPUS_SIZE=${SPH_ZSTDPP_EVAL_CORPUS_SIZE}
+    SPH_EVAL_LEVELS=${SPH_ZSTDPP_EVAL_LEVELS_CPP}
 )
 set_target_properties(zstdpp_eval PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${SPH_ZSTDPP_EVAL_RUNTIME_DIRECTORY}"

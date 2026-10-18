@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <atomic>
 #include <cstdlib>
+#include <cstdio>
 #include <iostream>
 #include <new>
 #include <span>
@@ -22,16 +23,17 @@
 
 namespace
 {
-    std::atomic<bool> track_allocations{true};
     std::atomic<std::size_t> allocation_count{};
+    std::atomic<bool> report_allocations{};
 }
 
 void* operator new(std::size_t size)
 {
     if (auto* memory = std::malloc(size == 0U ? 1U : size))
     {
-        if (track_allocations.load(std::memory_order_relaxed))
-            allocation_count.fetch_add(1U, std::memory_order_relaxed);
+        allocation_count.fetch_add(1U, std::memory_order_relaxed);
+        if (report_allocations.load(std::memory_order_relaxed))
+            std::fprintf(stderr, "post-warmup allocation size=%zu\n", size);
         return memory;
     }
     throw std::bad_alloc{};
@@ -84,19 +86,26 @@ int main(int argc, char** argv)
         compress(); // Warm caches and allocate reusable workspace before timing.
         auto const allocations_after_warmup{sph::zstd::detail::cache_aligned_allocation_count};
         auto const deallocations_after_warmup{sph::zstd::detail::cache_aligned_deallocation_count};
-        track_allocations.store(false, std::memory_order_relaxed);
         auto const ordinary_allocations_after_warmup{allocation_count.load(std::memory_order_relaxed)};
+        report_allocations.store(true, std::memory_order_relaxed);
         auto const start{sph::zstd::eval::clock::now()};
         for (std::uint64_t iteration{}; iteration < iterations; ++iteration)
         {
             compress();
         }
         auto const end{sph::zstd::eval::clock::now()};
+        report_allocations.store(false, std::memory_order_relaxed);
         if (sph::zstd::detail::cache_aligned_allocation_count != allocations_after_warmup ||
             sph::zstd::detail::cache_aligned_deallocation_count != deallocations_after_warmup ||
             allocation_count.load(std::memory_order_relaxed) != ordinary_allocations_after_warmup)
         {
-            throw std::runtime_error{"cache-aligned allocation changed after warmup"};
+            std::cerr << "allocation delta ordinary="
+                      << (allocation_count.load(std::memory_order_relaxed) - ordinary_allocations_after_warmup)
+                      << " aligned=" << (sph::zstd::detail::cache_aligned_allocation_count - allocations_after_warmup)
+                      << " aligned-free="
+                      << (sph::zstd::detail::cache_aligned_deallocation_count - deallocations_after_warmup)
+                      << '\n';
+            throw std::runtime_error{"ordinary or cache-aligned allocation changed after warmup"};
         }
 #ifdef SPH_ZSTDPP_TRACE_BT
         std::cerr << "binary-tree visits unsorted=" << sph::zstd::detail::binary_tree_trace.unsorted_visits
@@ -107,6 +116,12 @@ int main(int argc, char** argv)
         std::cerr << "compression phases parse_ns=" << sph::zstd::compression_trace.parse_ns
                   << " encode_ns=" << sph::zstd::compression_trace.encode_ns
                   << " emit_ns=" << sph::zstd::compression_trace.emit_ns << '\n';
+        auto const& entropy{sph::zstd::detail::entropy_trace};
+        std::cerr << "entropy phases gather_ns=" << entropy.gather_ns
+                  << " literals_ns=" << entropy.literals_ns
+                  << " tables_ns=" << entropy.tables_ns << " bits_ns=" << entropy.bits_ns
+                  << " blocks=" << entropy.blocks << " sequences=" << entropy.sequences
+                  << " literal_bytes=" << entropy.literal_bytes << '\n';
 #endif
         sph::zstd::eval::write_binary(argv[2], output);
         sph::zstd::eval::write_result(argv[4], {

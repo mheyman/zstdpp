@@ -27,6 +27,9 @@
 #include "zstd_lazy.h"
 #include "zstd_opt.h"
 #include "zstd_ldm.h"
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+#include <stdio.h>
+#endif
 #include "zstd_compress_superblock.h"
 #include  "../common/bits.h"      /* ZSTD_highbit32, ZSTD_rotateRight_U64 */
 
@@ -4241,6 +4244,10 @@ ZSTD_deriveBlockSplitsHelper(seqStoreSplits* splits, size_t startIdx, size_t end
     estimatedOriginalSize = ZSTD_buildEntropyStatisticsAndEstimateSubBlockSize(fullSeqStoreChunk, zc);
     estimatedFirstHalfSize = ZSTD_buildEntropyStatisticsAndEstimateSubBlockSize(firstHalfSeqStore, zc);
     estimatedSecondHalfSize = ZSTD_buildEntropyStatisticsAndEstimateSubBlockSize(secondHalfSeqStore, zc);
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+    fprintf(stderr, "T %zu %zu %zu %zu %zu\n", startIdx, endIdx,
+        estimatedOriginalSize, estimatedFirstHalfSize, estimatedSecondHalfSize);
+#endif
     DEBUGLOG(5, "Estimated original block size: %zu -- First half split: %zu -- Second half split: %zu",
              estimatedOriginalSize, estimatedFirstHalfSize, estimatedSecondHalfSize);
     if (ZSTD_isError(estimatedOriginalSize) || ZSTD_isError(estimatedFirstHalfSize) || ZSTD_isError(estimatedSecondHalfSize)) {
@@ -4272,6 +4279,11 @@ static size_t ZSTD_deriveBlockSplits(ZSTD_CCtx* zc, U32 partitions[], U32 nbSeq)
     }
     ZSTD_deriveBlockSplitsHelper(&splits, 0, nbSeq, zc, &zc->seqStore);
     splits.splitLocations[splits.idx] = nbSeq;
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+    { size_t i; fprintf(stderr, "P %u", nbSeq);
+      for (i = 0; i <= splits.idx; ++i) fprintf(stderr, " %u", splits.splitLocations[i]);
+      fprintf(stderr, "\n"); }
+#endif
     DEBUGLOG(5, "ZSTD_deriveBlockSplits: final nb partitions: %zu", splits.idx+1);
     return splits.idx;
 }

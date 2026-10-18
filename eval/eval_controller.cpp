@@ -1,5 +1,6 @@
 #include "eval_common.h"
 #include "eval_corpus.h"
+#include "eval_statistics.h"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
@@ -33,16 +35,21 @@
 #ifndef SPH_EVAL_CORPUS_SIZE
 #error "SPH_EVAL_CORPUS_SIZE must be defined"
 #endif
+#ifndef SPH_EVAL_LEVELS
+#error "SPH_EVAL_LEVELS must be defined"
+#endif
 
 namespace
 {
-    constexpr std::array levels{1, 3, 5, 7, 8, 9, 15};
+    constexpr std::array levels{SPH_EVAL_LEVELS};
     constexpr std::string_view report_begin{"<!-- SPH_ZSTDPP_EVAL_BEGIN -->"};
     constexpr std::string_view report_end{"<!-- SPH_ZSTDPP_EVAL_END -->"};
 
     struct level_results
     {
         int level{};
+        std::uint64_t trial{};
+        bool cpp_first{};
         sph::zstd::eval::worker_result sph_compress;
         sph::zstd::eval::worker_result reference_compress;
         sph::zstd::eval::worker_result sph_decompress;
@@ -56,6 +63,7 @@ namespace
     struct options
     {
         std::uint64_t iterations{20};
+        std::uint64_t trials{6};
         std::filesystem::path output_directory{std::filesystem::path{SPH_EVAL_BINARY_DIR} / "eval" / "results"};
         std::filesystem::path readme{std::filesystem::path{SPH_EVAL_SOURCE_DIR} / "README.md"};
     };
@@ -70,6 +78,13 @@ namespace
             {
                 result.iterations = sph::zstd::eval::parse_iterations(argv[++index]);
             }
+            else if (argument == "--trials" && index + 1 < argc)
+            {
+                auto const text{std::string_view{argv[++index]}};
+                if (text.empty() || text.find_first_not_of("0123456789") != std::string_view::npos)
+                    throw std::invalid_argument{"trials must be a positive integer"};
+                result.trials = sph::zstd::eval::parse_iterations(text);
+            }
             else if (argument == "--output" && index + 1 < argc)
             {
                 result.output_directory = argv[++index];
@@ -80,7 +95,7 @@ namespace
             }
             else
             {
-                throw std::invalid_argument{"usage: zstdpp_eval [--iterations N] [--output DIR] [--readme FILE]"};
+                throw std::invalid_argument{"usage: zstdpp_eval [--iterations N] [--trials N] [--output DIR] [--readme FILE]"};
             }
         }
         return result;
@@ -139,7 +154,7 @@ namespace
         return static_cast<std::uint64_t>(size);
     }
 
-    auto throughput(std::uint64_t bytes, sph::zstd::eval::worker_result const& result) -> std::uint64_t
+    auto throughput(std::uint64_t bytes, sph::zstd::eval::worker_result const& result) -> long double
     {
         if (result.elapsed_nanoseconds == 0)
         {
@@ -147,28 +162,37 @@ namespace
         }
         auto const value{static_cast<long double>(bytes) * static_cast<long double>(result.iterations) *
             1'000'000'000.0L / static_cast<long double>(result.elapsed_nanoseconds) / 1'048'576.0L};
-        return static_cast<std::uint64_t>(std::llround(value));
+        return value;
     }
 
-    constexpr auto kibibytes(std::uint64_t bytes) -> std::uint64_t { return (bytes + 1023U) / 1024U; }
-    constexpr auto mebibytes(std::uint64_t bytes) -> std::uint64_t { return (bytes + 1'048'575U) / 1'048'576U; }
+    constexpr auto kibibytes(std::uint64_t bytes) -> long double { return static_cast<long double>(bytes) / 1024.0L; }
+    constexpr auto mebibytes(std::uint64_t bytes) -> long double { return static_cast<long double>(bytes) / 1'048'576.0L; }
 
-    auto make_report(std::vector<level_results> const& results, std::uint64_t iterations) -> std::string
+    auto percentage_of_reference(long double value, long double reference) -> std::string
     {
-        std::vector<std::uint64_t> sph_compressed_size;
-        std::vector<std::uint64_t> reference_compressed_size;
-        std::vector<std::uint64_t> sph_compress_speed;
-        std::vector<std::uint64_t> reference_compress_speed;
-        std::vector<std::uint64_t> sph_compress_memory;
-        std::vector<std::uint64_t> reference_compress_memory;
-        std::vector<std::uint64_t> sph_compress_code;
-        std::vector<std::uint64_t> reference_compress_code;
-        std::vector<std::uint64_t> sph_decompress_speed;
-        std::vector<std::uint64_t> reference_decompress_speed;
-        std::vector<std::uint64_t> sph_decompress_memory;
-        std::vector<std::uint64_t> reference_decompress_memory;
-        std::vector<std::uint64_t> sph_decompress_code;
-        std::vector<std::uint64_t> reference_decompress_code;
+        if (reference == 0.0L) return "N/A";
+        std::ostringstream output;
+        output << std::fixed << std::setprecision(2) << 100.0L * value / reference << '%';
+        return output.str();
+    }
+
+    auto make_report(std::vector<level_results> const& results, std::uint64_t iterations,
+        std::vector<level_results> const& raw, std::uint64_t trials) -> std::string
+    {
+        std::vector<long double> sph_compressed_size;
+        std::vector<long double> reference_compressed_size;
+        std::vector<long double> sph_compress_speed;
+        std::vector<long double> reference_compress_speed;
+        std::vector<long double> sph_compress_memory;
+        std::vector<long double> reference_compress_memory;
+        std::vector<long double> sph_compress_code;
+        std::vector<long double> reference_compress_code;
+        std::vector<long double> sph_decompress_speed;
+        std::vector<long double> reference_decompress_speed;
+        std::vector<long double> sph_decompress_memory;
+        std::vector<long double> reference_decompress_memory;
+        std::vector<long double> sph_decompress_code;
+        std::vector<long double> reference_decompress_code;
 
         for (auto const& result : results)
         {
@@ -189,18 +213,25 @@ namespace
         }
 
         std::ostringstream output;
+        output << std::fixed << std::setprecision(2);
         output << report_begin << "\n\n## Current evaluation\n\n"
             << "Generated by `zstdpp_eval` using **" << SPH_EVAL_COMPILER << "**, "
-            << SPH_EVAL_BUILD_TYPE << ", " << iterations << " timed iterations, and a deterministic 1 MiB "
+            << SPH_EVAL_BUILD_TYPE << ", " << trials << " alternating trials of " << iterations
+            << " timed iterations each, and a deterministic " << SPH_EVAL_CORPUS_SIZE << "-byte "
             << "mixed corpus. **Key: `C++` is sph-zstd++; `Reference` is reference zstd.** Code size is the complete worker "
             << "executable; memory is peak resident set "
-            << "size, so both intentionally include runtime overhead.\n\n"
+            << "size, so both intentionally include runtime overhead. Each percentage is C++ / Reference * 100, "
+            << "computed before display rounding. Higher is better for throughput; lower is better for memory and code size.\n\n"
+            << "Throughput is derived from median elapsed time; memory is the median of process peak RSS. "
+            << "For even trial counts, central values are averaged with integer rounding down. "
+            << "Each trial alternates which implementation runs first, for both operations. "
+            << "All measurements are preserved in `trials.csv` and per-trial worker CSVs; `metrics.csv` contains aggregates.\n\n"
             << "Compression workers receive identical input. Decompression workers both consume the same "
             << "reference-zstd-generated frame at each level, so their throughput and memory results use "
             << "identical compressed bytes.\n\n"
             << "### Compression\n\n"
-            << "| Level | C++ size (KiB) | Reference size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |\n"
-            << "|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
+            << "| Level | C++ size (KiB) | Reference size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |\n"
+            << "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
         for (std::size_t index{}; index < results.size(); ++index)
         {
             output << "| " << results[index].level
@@ -208,23 +239,56 @@ namespace
                 << " | " << reference_compressed_size[index]
                 << " | " << sph_compress_speed[index]
                 << " | " << reference_compress_speed[index]
+                << " | " << percentage_of_reference(sph_compress_speed[index], reference_compress_speed[index])
                 << " | " << sph_compress_memory[index]
                 << " | " << reference_compress_memory[index]
+                << " | " << percentage_of_reference(sph_compress_memory[index], reference_compress_memory[index])
                 << " | " << sph_compress_code[index]
-                << " | " << reference_compress_code[index] << " |\n";
+                << " | " << reference_compress_code[index]
+                << " | " << percentage_of_reference(sph_compress_code[index], reference_compress_code[index]) << " |\n";
         }
         output << "\n### Decompression\n\n"
-            << "| Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | C++ memory (MiB) | Reference memory (MiB) | C++ code (KiB) | Reference code (KiB) |\n"
-            << "|---:|---:|---:|---:|---:|---:|---:|\n";
+            << "| Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |\n"
+            << "|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n";
         for (std::size_t index{}; index < results.size(); ++index)
         {
             output << "| " << results[index].level
                 << " | " << sph_decompress_speed[index]
                 << " | " << reference_decompress_speed[index]
+                << " | " << percentage_of_reference(sph_decompress_speed[index], reference_decompress_speed[index])
                 << " | " << sph_decompress_memory[index]
                 << " | " << reference_decompress_memory[index]
+                << " | " << percentage_of_reference(sph_decompress_memory[index], reference_decompress_memory[index])
                 << " | " << sph_decompress_code[index]
-                << " | " << reference_decompress_code[index] << " |\n";
+                << " | " << reference_decompress_code[index]
+                << " | " << percentage_of_reference(sph_decompress_code[index], reference_decompress_code[index]) << " |\n";
+        }
+        output << "\n### Trial variability\n\n"
+            << "| Level | Operation | C++ min–max (MiB/s) | Reference min–max (MiB/s) | C++ paired wins / trials |\n"
+            << "|---:|---|---:|---:|---:|\n";
+        for (auto const& result : results)
+        {
+            for (bool compress : {true, false})
+            {
+                long double cpp_min{std::numeric_limits<long double>::max()}, cpp_max{};
+                long double reference_min{cpp_min}, reference_max{};
+                std::uint64_t wins{};
+                for (auto const& sample : raw)
+                {
+                    if (sample.level != result.level) continue;
+                    auto const& cpp{compress ? sample.sph_compress : sample.sph_decompress};
+                    auto const& reference{compress ? sample.reference_compress : sample.reference_decompress};
+                    auto const cpp_rate{throughput(compress ? cpp.input_bytes : cpp.output_bytes, cpp)};
+                    auto const reference_rate{throughput(compress ? reference.input_bytes : reference.output_bytes, reference)};
+                    cpp_min = std::min(cpp_min, cpp_rate); cpp_max = std::max(cpp_max, cpp_rate);
+                    reference_min = std::min(reference_min, reference_rate);
+                    reference_max = std::max(reference_max, reference_rate);
+                    if (cpp_rate > reference_rate) ++wins;
+                }
+                output << "| " << result.level << " | " << (compress ? "Compression" : "Decompression")
+                    << " | " << cpp_min << "–" << cpp_max << " | " << reference_min << "–" << reference_max
+                    << " | " << wins << " / " << trials << " |\n";
+            }
         }
         output << '\n';
         output << report_end << '\n';
@@ -235,7 +299,11 @@ namespace
     {
         std::ifstream input{path};
         if (!input) throw std::runtime_error{"cannot open README: " + path.string()};
-        return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        std::ostringstream contents;
+        contents << input.rdbuf();
+        if (input.bad() || contents.bad())
+            throw std::runtime_error{"cannot read README: " + path.string()};
+        return contents.str();
     }
 
     void update_readme(std::filesystem::path const& path, std::string const& report)
@@ -291,16 +359,18 @@ namespace
             << report.substr(content_begin, end - content_begin);
     }
 
-    void write_csv(std::filesystem::path const& path, std::vector<level_results> const& results)
+    void write_csv(std::filesystem::path const& path, std::vector<level_results> const& results, bool raw = false)
     {
         std::ofstream output{path, std::ios::trunc};
         if (!output) throw std::runtime_error{"cannot write evaluation CSV: " + path.string()};
+        if (raw) output << "trial,cpp_first,";
         output << "level,operation,implementation,elapsed_ns,iterations,input_bytes,output_bytes,peak_bytes,code_bytes\n";
         for (auto const& result : results)
         {
-            auto write = [&output, &result](std::string_view operation, std::string_view implementation,
+            auto write = [&output, &result, raw](std::string_view operation, std::string_view implementation,
                 sph::zstd::eval::worker_result const& metrics, std::uint64_t code_size)
             {
+                if (raw) output << result.trial << ',' << (result.cpp_first ? 1 : 0) << ',';
                 output << result.level << ',' << operation << ',' << implementation << ','
                     << metrics.elapsed_nanoseconds << ',' << metrics.iterations << ',' << metrics.input_bytes << ','
                     << metrics.output_bytes << ',' << metrics.peak_resident_bytes << ',' << code_size << '\n';
@@ -310,6 +380,7 @@ namespace
             write("decompress", "sph-zstd++", result.sph_decompress, result.sph_decompress_code);
             write("decompress", "reference-zstd", result.reference_decompress, result.reference_decompress_code);
         }
+        if (!output) throw std::runtime_error{"cannot write evaluation CSV: " + path.string()};
     }
 }
 
@@ -318,6 +389,9 @@ int main(int argc, char** argv)
     try
     {
         auto const configuration{parse_options(argc, argv)};
+        if (std::filesystem::exists(configuration.output_directory) &&
+            !std::filesystem::is_empty(configuration.output_directory))
+            throw std::invalid_argument{"evaluation output directory must be empty to preserve raw trials"};
         std::filesystem::create_directories(configuration.output_directory);
         auto const corpus{sph::zstd::eval::make_mixed_corpus(SPH_EVAL_CORPUS_SIZE)};
         auto const corpus_path{configuration.output_directory / "corpus.bin"};
@@ -328,6 +402,7 @@ int main(int argc, char** argv)
         auto const executable_extension{controller_path.extension().string()};
         auto const iterations_text{std::to_string(configuration.iterations)};
         std::vector<level_results> results;
+        std::vector<level_results> raw;
 
         for (auto level : levels)
         {
@@ -343,36 +418,74 @@ int main(int argc, char** argv)
 
             auto const sph_frame{configuration.output_directory / ("sph" + suffix + ".zst")};
             auto const reference_frame{configuration.output_directory / ("reference" + suffix + ".zst")};
-            auto const sph_compress_metrics{configuration.output_directory / ("sph_compress" + suffix + ".csv")};
-            auto const reference_compress_metrics{configuration.output_directory /
-                ("reference_compress" + suffix + ".csv")};
-            auto const sph_decompress_metrics{configuration.output_directory / ("sph_decompress" + suffix + ".csv")};
-            auto const reference_decompress_metrics{configuration.output_directory /
-                ("reference_decompress" + suffix + ".csv")};
+            std::vector<level_results> samples;
+            for (std::uint64_t trial{}; trial < configuration.trials; ++trial)
+            {
+                auto const trial_suffix{suffix + "_trial" + std::to_string(trial + 1U)};
+                auto const sph_compress_metrics{configuration.output_directory / ("sph_compress" + trial_suffix + ".csv")};
+                auto const reference_compress_metrics{configuration.output_directory /
+                    ("reference_compress" + trial_suffix + ".csv")};
+                auto const sph_decompress_metrics{configuration.output_directory / ("sph_decompress" + trial_suffix + ".csv")};
+                auto const reference_decompress_metrics{configuration.output_directory /
+                    ("reference_decompress" + trial_suffix + ".csv")};
 
-            run_worker(sph_compress_executable,
-                {corpus_path, sph_frame, iterations_text, sph_compress_metrics});
-            run_worker(reference_compress_executable,
-                {corpus_path, reference_frame, iterations_text, reference_compress_metrics});
-            run_worker(sph_decompress_executable,
-                {reference_frame, corpus_path, iterations_text, sph_decompress_metrics});
-            run_worker(reference_decompress_executable,
-                {reference_frame, corpus_path, iterations_text, reference_decompress_metrics});
+                auto const cpp_first{(trial + results.size()) % 2U == 0U};
+                auto run_compress = [&](bool cpp) {
+                    run_worker(cpp ? sph_compress_executable : reference_compress_executable,
+                        {corpus_path, cpp ? sph_frame : reference_frame, iterations_text,
+                            cpp ? sph_compress_metrics : reference_compress_metrics});
+                };
+                run_compress(cpp_first);
+                run_compress(!cpp_first);
+                if (sph::zstd::eval::read_binary(sph_frame) !=
+                    sph::zstd::eval::read_binary(reference_frame))
+                {
+                    throw std::runtime_error{"compression byte parity failed at level " +
+                        std::to_string(level) + "; benchmark report was not updated"};
+                }
+                auto run_decompress = [&](bool cpp) {
+                    run_worker(cpp ? sph_decompress_executable : reference_decompress_executable,
+                        {reference_frame, corpus_path, iterations_text,
+                            cpp ? sph_decompress_metrics : reference_decompress_metrics});
+                };
+                run_decompress(cpp_first);
+                run_decompress(!cpp_first);
 
-            results.push_back({
-                .level = level,
-                .sph_compress = sph::zstd::eval::read_result(sph_compress_metrics),
-                .reference_compress = sph::zstd::eval::read_result(reference_compress_metrics),
-                .sph_decompress = sph::zstd::eval::read_result(sph_decompress_metrics),
-                .reference_decompress = sph::zstd::eval::read_result(reference_decompress_metrics),
-                .sph_compress_code = executable_size(sph_compress_executable),
-                .reference_compress_code = executable_size(reference_compress_executable),
-                .sph_decompress_code = executable_size(sph_decompress_executable),
-                .reference_decompress_code = executable_size(reference_decompress_executable)
-            });
+                samples.push_back({
+                    .level = level,
+                    .trial = trial + 1U,
+                    .cpp_first = cpp_first,
+                    .sph_compress = sph::zstd::eval::read_result(sph_compress_metrics),
+                    .reference_compress = sph::zstd::eval::read_result(reference_compress_metrics),
+                    .sph_decompress = sph::zstd::eval::read_result(sph_decompress_metrics),
+                    .reference_decompress = sph::zstd::eval::read_result(reference_decompress_metrics),
+                    .sph_compress_code = executable_size(sph_compress_executable),
+                    .reference_compress_code = executable_size(reference_compress_executable),
+                    .sph_decompress_code = executable_size(sph_decompress_executable),
+                    .reference_decompress_code = executable_size(reference_decompress_executable)
+                });
+                raw.push_back(samples.back());
+                write_csv(configuration.output_directory / "trials.csv", raw, true);
+            }
+            auto aggregate = [&samples](sph::zstd::eval::worker_result level_results::* member) {
+                std::vector<sph::zstd::eval::worker_result> workers;
+                for (auto const& sample : samples) workers.push_back(sample.*member);
+                return sph::zstd::eval::summarize_trials(workers);
+            };
+            auto summary{samples.front()};
+            summary.trial = 0U;
+            summary.sph_compress = aggregate(&level_results::sph_compress);
+            summary.reference_compress = aggregate(&level_results::reference_compress);
+            summary.sph_decompress = aggregate(&level_results::sph_decompress);
+            summary.reference_decompress = aggregate(&level_results::reference_decompress);
+            sph::zstd::eval::write_result(configuration.output_directory / ("sph_compress" + suffix + ".csv"), summary.sph_compress);
+            sph::zstd::eval::write_result(configuration.output_directory / ("reference_compress" + suffix + ".csv"), summary.reference_compress);
+            sph::zstd::eval::write_result(configuration.output_directory / ("sph_decompress" + suffix + ".csv"), summary.sph_decompress);
+            sph::zstd::eval::write_result(configuration.output_directory / ("reference_decompress" + suffix + ".csv"), summary.reference_decompress);
+            results.push_back(summary);
         }
 
-        auto const report{make_report(results, configuration.iterations)};
+        auto const report{make_report(results, configuration.iterations, raw, configuration.trials)};
         write_csv(configuration.output_directory / "metrics.csv", results);
         write_metrics_markdown(configuration.output_directory / "METRICS.md", report);
         update_readme(configuration.readme, report);

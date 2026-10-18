@@ -12,6 +12,10 @@
 #include "hist.h"
 #include "zstd_opt.h"
 
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+#include <stdio.h>
+#endif
+
 #if !defined(ZSTD_EXCLUDE_BTLAZY2_BLOCK_COMPRESSOR) \
  || !defined(ZSTD_EXCLUDE_BTOPT_BLOCK_COMPRESSOR) \
  || !defined(ZSTD_EXCLUDE_BTULTRA_BLOCK_COMPRESSOR)
@@ -20,6 +24,12 @@
 #define ZSTD_MAX_PRICE     (1<<30)
 
 #define ZSTD_PREDEF_THRESHOLD 8   /* if srcSize < ZSTD_PREDEF_THRESHOLD, symbols' cost is assumed static, directly determined by pre-defined distributions */
+
+#ifdef SPH_ZSTDPP_TRACE_BT
+extern unsigned long long sph_zstdpp_bt_unsorted_visits;
+extern unsigned long long sph_zstdpp_bt_main_visits;
+extern unsigned long long sph_zstdpp_bt_match_extensions;
+#endif
 
 
 /*-*************************************
@@ -489,6 +499,10 @@ U32 ZSTD_insertBt1(
     for (; nbCompares && (matchIndex >= windowLow); --nbCompares) {
         U32* const nextPtr = bt + 2*(matchIndex & btMask);
         size_t matchLength = MIN(commonLengthSmaller, commonLengthLarger);   /* guaranteed minimum nb of common bytes */
+#ifdef SPH_ZSTDPP_TRACE_BT
+        ++sph_zstdpp_bt_unsorted_visits;
+        ++sph_zstdpp_bt_match_extensions;
+#endif
         assert(matchIndex < curr);
 
 #ifdef ZSTD_C_PREDICT   /* note : can create issues when hlog small <= 11 */
@@ -572,6 +586,11 @@ void ZSTD_updateTree_internal(
 
     while(idx < target) {
         U32 const forward = ZSTD_insertBt1(ms, base+idx, iend, target, mls, dictMode == ZSTD_extDict);
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+        if (target - ms->window.dictLimit < 131076)
+            fprintf(stderr, "U %u %u %u\n", idx - ms->window.dictLimit,
+                    target - ms->window.dictLimit, forward);
+#endif
         assert(idx < (U32)(idx + forward));
         idx += forward;
     }
@@ -725,6 +744,9 @@ ZSTD_insertBtAndGetAllMatches (
         U32* const nextPtr = bt + 2*(matchIndex & btMask);
         const BYTE* match;
         size_t matchLength = MIN(commonLengthSmaller, commonLengthLarger);   /* guaranteed minimum nb of common bytes */
+#ifdef SPH_ZSTDPP_TRACE_BT
+        ++sph_zstdpp_bt_main_visits;
+#endif
         assert(curr > matchIndex);
 
         if ((dictMode == ZSTD_noDict) || (dictMode == ZSTD_dictMatchState) || (matchIndex+matchLength >= dictLimit)) {
@@ -732,6 +754,9 @@ ZSTD_insertBtAndGetAllMatches (
             match = base + matchIndex;
             if (matchIndex >= dictLimit) assert(memcmp(match, ip, matchLength) == 0);  /* ensure early section of match is equal as expected */
             matchLength += ZSTD_count(ip+matchLength, match+matchLength, iLimit);
+#ifdef SPH_ZSTDPP_TRACE_BT
+            ++sph_zstdpp_bt_match_extensions;
+#endif
         } else {
             match = dictBase + matchIndex;
             assert(memcmp(match, ip, matchLength) == 0);  /* ensure early section of match is equal as expected */
@@ -1107,12 +1132,20 @@ ZSTD_compressBlock_opt_generic(ZSTD_MatchState_t* ms,
     optLdm.seqStore = ms->ldmSeqStore ? *ms->ldmSeqStore : kNullRawSeqStore;
     optLdm.endPosInBlock = optLdm.startPosInBlock = optLdm.offset = 0;
     ZSTD_opt_getNextMatchAndUpdateSeqStore(&optLdm, (U32)(ip-istart), (U32)(iend-ip));
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+    fprintf(stderr, "B %zu\n", srcSize);
+#endif
 
     /* init */
     DEBUGLOG(5, "ZSTD_compressBlock_opt_generic: current=%u, prefix=%u, nextToUpdate=%u",
                 (U32)(ip - base), ms->window.dictLimit, ms->nextToUpdate);
     assert(optLevel <= 2);
     ZSTD_rescaleFreqs(optStatePtr, (const BYTE*)src, srcSize, optLevel);
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+    fprintf(stderr, "F %u %u %u %u R %u %u %u\n",
+            optStatePtr->litSum, optStatePtr->litLengthSum, optStatePtr->matchLengthSum,
+            optStatePtr->offCodeSum, rep[0], rep[1], rep[2]);
+#endif
     ip += (ip==prefixStart);
 
     /* Match Loop */
@@ -1123,6 +1156,15 @@ ZSTD_compressBlock_opt_generic(ZSTD_MatchState_t* ms,
         {   U32 const litlen = (U32)(ip - anchor);
             U32 const ll0 = !litlen;
             U32 nbMatches = getAllMatches(matches, ms, &nextToUpdate3, ip, iend, rep, ll0, minMatch);
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+            if ((size_t)(ip - istart) < 16) {
+                U32 traceMatch;
+                fprintf(stderr, "C %zu", (size_t)(ip - istart));
+                for (traceMatch = 0; traceMatch < nbMatches; ++traceMatch)
+                    fprintf(stderr, " %u:%u", matches[traceMatch].off, matches[traceMatch].len);
+                fputc('\n', stderr);
+            }
+#endif
             ZSTD_optLdm_processMatchCandidate(&optLdm, matches, &nbMatches,
                                               (U32)(ip-istart), (U32)(iend-ip),
                                               minMatch);
@@ -1416,6 +1458,10 @@ _shortestPath:   /* cur, last_pos, best_mlen, best_off have to be set */
                         continue;   /* will finish */
                     }
 
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+                    fprintf(stderr, "S %u %u %u\n", llen, mlen, offBase);
+#endif
+
                     assert(anchor + llen <= iend);
                     ZSTD_updateStats(optStatePtr, llen, anchor, offBase, mlen);
                     ZSTD_storeSeq(seqStore, llen, anchor, iend, offBase, mlen);
@@ -1430,6 +1476,9 @@ _shortestPath:   /* cur, last_pos, best_mlen, best_off have to be set */
     }   /* while (ip < ilimit) */
 
     /* Return the last literals size */
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+    fprintf(stderr, "E %zu\n", (size_t)(iend - anchor));
+#endif
     return (size_t)(iend - anchor);
 }
 #endif /* build exclusions */

@@ -61,22 +61,24 @@ namespace sph::zstd
                         detail::greedy_match_state<0U, false,
                             effective_parameters_.window_log, effective_parameters_.hash_log,
                             effective_parameters_.chain_log, effective_parameters_.search_log,
-                            effective_parameters_.minimum_match>,
+                            effective_parameters_.minimum_match, (effective_parameters_.window_log > 14U)>,
                         std::conditional_t<effective_parameters_.strategy == compression_strategy::lazy,
                             detail::greedy_match_state<1U, false,
                                 effective_parameters_.window_log, effective_parameters_.hash_log,
                                 effective_parameters_.chain_log, effective_parameters_.search_log,
-                                effective_parameters_.minimum_match>,
+                                effective_parameters_.minimum_match, (effective_parameters_.window_log > 14U)>,
                             detail::greedy_match_state<2U, false,
                                 effective_parameters_.window_log, effective_parameters_.hash_log,
                                 effective_parameters_.chain_log, effective_parameters_.search_log,
-                                effective_parameters_.minimum_match>>>,
+                                effective_parameters_.minimum_match, (effective_parameters_.window_log > 14U)>>>,
                     std::conditional_t<
-                        effective_parameters_.strategy == compression_strategy::binary_tree_lazy2,
+                        effective_parameters_.strategy >= compression_strategy::binary_tree_lazy2,
                         detail::greedy_match_state<2U, true,
                             effective_parameters_.window_log, effective_parameters_.hash_log,
                             effective_parameters_.chain_log, effective_parameters_.search_log,
-                            effective_parameters_.minimum_match>, detail::empty_match_state>>>>;
+                            effective_parameters_.minimum_match, false,
+                            (effective_parameters_.strategy == compression_strategy::binary_tree_optimal)>,
+                        detail::empty_match_state>>>>;
 
         static_assert(Parameters.block_size > 0 && Parameters.block_size <= maximum_block_size,
             "zstd_compress block_size must be in [1, 128 KiB]");
@@ -94,6 +96,7 @@ namespace sph::zstd
             if constexpr (effective_parameters_.strategy != compression_strategy::fast &&
                 effective_parameters_.strategy != compression_strategy::double_fast &&
                 effective_parameters_.strategy != compression_strategy::greedy &&
+                effective_parameters_.strategy != compression_strategy::lazy &&
                 effective_parameters_.strategy != compression_strategy::lazy2 &&
                 effective_parameters_.strategy != compression_strategy::binary_tree_lazy2)
             {
@@ -101,7 +104,14 @@ namespace sph::zstd
                 compression_workspace_.fast_latest.positions.reserve(table_size);
                 compression_workspace_.fast_latest.generations.reserve(table_size);
             }
-            compressed_.reserve(Parameters.block_size);
+            if constexpr (effective_parameters_.strategy >= compression_strategy::binary_tree_optimal)
+            {
+                compression_workspace_.optimal.reserve();
+            }
+            // Entropy coding can transiently exceed the raw block by headers
+            // before the raw-block fallback wins.  Reserve the bounded frame
+            // overhead up front so reset/reuse never grows this hot buffer.
+            compressed_.reserve(Parameters.block_size + Parameters.block_size / 128U + 64U);
             if constexpr (Parameters.pledged_source_size != unknown_content_size &&
                 Parameters.pledged_source_size <= std::numeric_limits<std::size_t>::max())
             {
@@ -262,6 +272,8 @@ namespace sph::zstd
             history_.clear();
             match_state_.reset();
             compression_workspace_.reset_entropy_history();
+            compression_workspace_.optimal.initialized = false;
+            compression_workspace_.optimal.repeat_offsets = {1U, 4U, 8U};
             checksum_.reset();
             status_ = stream_status::ready;
         }
@@ -299,7 +311,7 @@ namespace sph::zstd
                     effective_parameters_.search_log, effective_parameters_.minimum_match,
                     effective_parameters_.target_length};
             }
-            else if constexpr (effective_parameters_.strategy == compression_strategy::binary_tree_lazy2)
+            else if constexpr (effective_parameters_.strategy >= compression_strategy::binary_tree_lazy2)
             {
                 return match_state_type{effective_parameters_.window_log,
                     effective_parameters_.hash_log, effective_parameters_.chain_log,
@@ -438,7 +450,8 @@ namespace sph::zstd
                     block_size = chunk_split_size<43U, 8U>(bytes);
                 }
             }
-            else if constexpr (effective_parameters_.strategy == compression_strategy::greedy)
+            else if constexpr (effective_parameters_.strategy == compression_strategy::greedy ||
+                effective_parameters_.strategy == compression_strategy::lazy)
             {
                 if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
@@ -451,6 +464,19 @@ namespace sph::zstd
                 if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
                 {
                     block_size = chunk_split_size<5U, 10U>(bytes);
+                }
+            }
+            else if constexpr (effective_parameters_.strategy == compression_strategy::binary_tree_optimal ||
+                effective_parameters_.strategy == compression_strategy::binary_tree_ultra ||
+                effective_parameters_.strategy == compression_strategy::binary_tree_ultra2)
+            {
+                // Reference optimal strategies use split level 4: inspect every
+                // two-byte sample, after an earlier block proves compressibility.
+                if (bytes.size() == maximum_block_size && compression_savings_ >= 3)
+                {
+                    // All uniform chunks have identical fingerprints, so no
+                    // split can be selected. Verify every byte before skipping.
+                    block_size = detail::is_rle(bytes) ? bytes.size() : chunk_split_size<1U, 10U>(bytes);
                 }
             }
             return block_size;
@@ -470,6 +496,7 @@ namespace sph::zstd
             std::size_t block_size, bool last)
         {
             auto const bytes{input.subspan(block_begin, block_size)};
+            auto const initial_optimal_repeats{compression_workspace_.optimal.repeat_offsets};
             // Fast parsers defer the full RLE scan until the encoded-size gate can pass.
             // Deeper parsers retain the eager scan because its sequential pass warms the input cache.
             constexpr bool lazy_rle_check =
@@ -486,19 +513,53 @@ namespace sph::zstd
                 effective_parameters_.strategy == compression_strategy::greedy ||
                 effective_parameters_.strategy == compression_strategy::lazy ||
                 effective_parameters_.strategy == compression_strategy::lazy2 ||
-                effective_parameters_.strategy == compression_strategy::binary_tree_lazy2;
+                effective_parameters_.strategy >= compression_strategy::binary_tree_lazy2;
             if constexpr (has_reference_parser)
             {
-                // Once a frame has established its history, an all-RLE block is
-                // emitted directly. Reference zstd applies the same small-block
-                // RLE gate; avoiding parser work here matters for zero-heavy frames.
-                if (!(input_is_rle && block_count_ != 0U))
+                // Optimal strategies must update their tree and price history
+                // even when the encoded block will use RLE framing.
+                if (!input_is_rle || block_count_ == 0U ||
+                    effective_parameters_.strategy >= compression_strategy::binary_tree_optimal)
                 {
 #ifdef SPH_ZSTDPP_TRACE_PHASES
                     auto const parse_start{std::chrono::steady_clock::now()};
 #endif
-                    parsed_ = match_state_.parse(input, block_begin, bytes.size(), std::move(parsed_),
-                        rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt);
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                    // GCC 13 measurements favor parser-time collection for
+                    // minMatch 7; minMatch 6 benefits from encoder collection.
+                    if constexpr (effective_parameters_.strategy == compression_strategy::fast &&
+                        effective_parameters_.minimum_match >= 7U)
+                        parsed_ = match_state_.template parse<true>(input, block_begin, bytes.size(),
+                            std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt,
+                            compression_workspace_.literals);
+                    else
+#endif
+                    if constexpr (effective_parameters_.strategy >= compression_strategy::binary_tree_optimal)
+                    {
+                        if constexpr (effective_parameters_.strategy == compression_strategy::binary_tree_ultra2)
+                        {
+                            if (block_begin == 0U && bytes.size() > 8U &&
+                                !compression_workspace_.optimal.initialized)
+                            {
+                                // Ultra2 seeds entropy prices with a preliminary
+                                // first-block parse, then forgets only its history.
+                                parsed_ = detail::parse_optimal_block(match_state_, input, block_begin,
+                                    bytes.size(), compression_workspace_, std::move(parsed_), true,
+                                    effective_parameters_.target_length);
+                                match_state_.reset();
+                                compression_workspace_.optimal.repeat_offsets = initial_optimal_repeats;
+                            }
+                        }
+                        parsed_ = detail::parse_optimal_block(match_state_, input, block_begin,
+                            bytes.size(), compression_workspace_, std::move(parsed_),
+                            effective_parameters_.strategy != compression_strategy::binary_tree_optimal,
+                            effective_parameters_.target_length);
+                    }
+                    else
+                    {
+                        parsed_ = match_state_.parse(input, block_begin, bytes.size(), std::move(parsed_),
+                            rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt);
+                    }
 #ifdef SPH_ZSTDPP_TRACE_PHASES
                     compression_trace.parse_ns += static_cast<std::uint64_t>(
                         std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -506,11 +567,46 @@ namespace sph::zstd
 #endif
                     if (!parsed_.sequences.empty())
                     {
+                        if constexpr (effective_parameters_.strategy >= compression_strategy::binary_tree_optimal &&
+                            effective_parameters_.window_log >= 17U)
+                        {
+                            bool estimates_valid{true};
+                            auto estimate = [&](detail::parsed_block_view const& range)
+                            {
+                                auto const size{detail::estimate_partition_size(input, range, compression_workspace_)};
+                                estimates_valid = estimates_valid && size.has_value();
+                                return size.value_or(std::numeric_limits<std::size_t>::max() / 4U);
+                            };
+                            auto const partitions{detail::derive_sequence_partitions(parsed_, estimate)};
+#ifdef SPH_ZSTDPP_TRACE_OPTIMAL
+                            std::fprintf(stderr, "P %zu", parsed_.sequences.size());
+                            for (std::size_t index{}; index < partitions.count; ++index)
+                                std::fprintf(stderr, " %zu", partitions.ends[index]);
+                            std::fprintf(stderr, "\n");
+#endif
+                            if (estimates_valid && partitions.count > 1U)
+                            {
+                                emit_partitions(input, partitions, initial_optimal_repeats, last);
+                                return;
+                            }
+                        }
 #ifdef SPH_ZSTDPP_TRACE_PHASES
                         auto const encode_start{std::chrono::steady_clock::now()};
 #endif
                         detail::encode_sequences_block<
-                            (effective_parameters_.strategy >= compression_strategy::lazy)>(
+                            (effective_parameters_.strategy >= compression_strategy::lazy)
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                            , (effective_parameters_.strategy == compression_strategy::fast)
+                            , (effective_parameters_.strategy == compression_strategy::fast &&
+                               effective_parameters_.minimum_match >= 7U)
+#else
+                            , false, false
+#endif
+                            , (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra)
+                            , (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra ?
+                                static_cast<unsigned>(effective_parameters_.strategy) - 1U : 6U)
+                            , (effective_parameters_.strategy == compression_strategy::double_fast)
+                            >(
                             input, parsed_, compression_workspace_, compressed);
 #ifdef SPH_ZSTDPP_TRACE_PHASES
                         compression_trace.encode_ns += static_cast<std::uint64_t>(
@@ -585,6 +681,73 @@ namespace sph::zstd
             compression_savings_ += static_cast<std::int64_t>(block_size) -
                 static_cast<std::int64_t>(emitted_size);
             ++block_count_;
+        }
+
+        void emit_partitions(std::span<std::uint8_t const> input,
+            detail::sequence_partitions const& partitions,
+            std::array<std::uint32_t, 3> encoder_repeats, bool last)
+        {
+            auto decoder_repeats{encoder_repeats};
+            auto& workspace{compression_workspace_};
+            detail::parsed_block_view const full{parsed_};
+            std::size_t begin{};
+            for (std::size_t index{}; index < partitions.count; ++index)
+            {
+                auto const end{partitions.ends[index]};
+                auto const part{full.subblock(begin, end)};
+                auto const bytes{input.subspan(part.input_begin,
+                    part.trailing_literal_position + part.trailing_literal_length - part.input_begin)};
+                auto const saved_repeats{decoder_repeats};
+                auto const saved_sequences{workspace.sequence_histories};
+                auto const saved_lengths{workspace.huffman_repeat_lengths};
+                auto const saved_frequencies{workspace.huffman_repeat_frequencies};
+                auto const saved_log{workspace.huffman_repeat_log};
+                auto const saved_maximum{workspace.huffman_repeat_maximum_symbol};
+                auto const saved_size{workspace.huffman_repeat_literal_size};
+                auto const saved_valid{workspace.huffman_repeat_valid};
+                detail::reconcile_partition_repeats(
+                    std::span<detail::parsed_sequence>{parsed_.sequences}.subspan(begin, end - begin),
+                    encoder_repeats, decoder_repeats);
+                detail::encode_sequences_block<true, false, false,
+                    (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra),
+                    (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra ?
+                        static_cast<unsigned>(effective_parameters_.strategy) - 1U : 6U)>(
+                    input, part, workspace, compressed_);
+                constexpr auto gain_log{effective_parameters_.strategy >= compression_strategy::binary_tree_ultra ?
+                    static_cast<unsigned>(effective_parameters_.strategy) - 1U : 6U};
+                auto const minimum_gain{(bytes.size() >> gain_log) + 2U};
+                if (bytes.size() <= minimum_gain || compressed_.size() >= bytes.size() - minimum_gain)
+                    compressed_.clear();
+                auto const rle{block_count_ != 0U && compressed_.size() < 25U && detail::is_rle(bytes)};
+                if (rle || compressed_.empty())
+                {
+                    decoder_repeats = saved_repeats;
+                    workspace.sequence_histories = saved_sequences;
+                    workspace.huffman_repeat_lengths = saved_lengths;
+                    workspace.huffman_repeat_frequencies = saved_frequencies;
+                    workspace.huffman_repeat_log = saved_log;
+                    workspace.huffman_repeat_maximum_symbol = saved_maximum;
+                    workspace.huffman_repeat_literal_size = saved_size;
+                    workspace.huffman_repeat_valid = saved_valid;
+                    workspace.huffman_repeat_codes_valid = false;
+                }
+                auto const type{rle ? 1U : compressed_.empty() ? 0U : 2U};
+                auto const stored_size{type == 2U ? compressed_.size() : bytes.size()};
+                auto const header{(static_cast<std::uint32_t>(stored_size) << 3U) |
+                    (type << 1U) | (last && index + 1U == partitions.count ? 1U : 0U)};
+                std::array<std::uint8_t, 3> const encoded_header{
+                    static_cast<std::uint8_t>(header), static_cast<std::uint8_t>(header >> 8U),
+                    static_cast<std::uint8_t>(header >> 16U)};
+                emit(encoded_header);
+                if (rle) emit(bytes.first<1>());
+                else if (type == 2U) emit(compressed_);
+                else emit(bytes);
+                compression_savings_ += static_cast<std::int64_t>(bytes.size()) -
+                    static_cast<std::int64_t>(rle ? 4U : stored_size + 3U);
+                ++block_count_;
+                begin = end;
+            }
+            workspace.optimal.repeat_offsets = decoder_repeats;
         }
 
         [[nodiscard]] static auto fast_split_size(std::span<std::uint8_t const> bytes) -> std::size_t
@@ -712,8 +875,24 @@ namespace sph::zstd
         std::size_t block_count_{};
         std::int64_t compression_savings_{};
         std::vector<std::uint8_t> history_;
-        detail::parsed_block parsed_;
-        detail::compression_workspace compression_workspace_;
+        // Compact storage benefits the minMatch-7 fast parser, but the minMatch-6
+        // path and deeper strategies retain the original sequence representation.
+        std::conditional_t<effective_parameters_.strategy == compression_strategy::fast &&
+            effective_parameters_.minimum_match >= 7U,
+            detail::compact_parsed_block, detail::parsed_block> parsed_;
+        // Alignment benefits the four-byte double-fast literal distribution.
+        // Larger-source five-byte presets retain ordinary storage: their
+        // measured copy/layout tradeoff did not reproduce that improvement.
+        // GCC 13 fast minMatch3..6 also avoids a measured raw-literal copy
+        // alignment penalty. Keep unmeasured compilers and minMatch7 unchanged.
+        detail::basic_compression_workspace<
+            (effective_parameters_.strategy == compression_strategy::double_fast &&
+            effective_parameters_.minimum_match == 4U)
+#if defined(__GNUC__) && __GNUC__ == 13 && !defined(__clang__)
+            || (effective_parameters_.strategy == compression_strategy::fast &&
+            effective_parameters_.minimum_match < 7U)
+#endif
+            > compression_workspace_;
         std::vector<std::uint8_t> compressed_;
         match_state_type match_state_{make_match_state()};
     };

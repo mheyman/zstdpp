@@ -2,6 +2,7 @@
 #define ZSTD_DISABLE_DEPRECATE_WARNINGS
 
 #include <sph/zstd++/zstd_compress.h>
+#include <sph/zstd++/zstd_decompress.h>
 
 #include "eval_corpus.h"
 
@@ -13,8 +14,10 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -90,6 +93,29 @@ namespace
         }
         encoded.resize(result);
         return encoded;
+    }
+
+    auto reference_decodes(std::span<std::uint8_t const> encoded, std::span<std::uint8_t const> input) -> bool
+    {
+        std::vector<std::uint8_t> decoded(input.size());
+        auto const result{ZSTD_decompress(decoded.data(), decoded.size(), encoded.data(), encoded.size())};
+        return ZSTD_isError(result) == 0U && result == input.size() && std::ranges::equal(decoded, input);
+    }
+
+    auto cpp_decodes(std::span<std::uint8_t const> encoded, std::span<std::uint8_t const> input) -> bool
+    {
+        std::vector<std::uint8_t> decoded;
+        auto decompressor = sph::zstd::zstd_decompress{
+            [&decoded](std::span<std::uint8_t const> output)
+            {
+                decoded.insert(decoded.end(), output.begin(), output.end());
+            }};
+        for (auto chunk : encoded | std::views::chunk(17U))
+        {
+            decompressor.update(chunk);
+        }
+        decompressor.finish();
+        return decompressor.decoded_size() == input.size() && std::ranges::equal(decoded, input);
     }
 
     auto reference_sequence_blocks(std::span<std::uint8_t const> input, int level)
@@ -172,13 +198,16 @@ namespace
         return blocks;
     }
 
-    template <unsigned LazyDepth = 0U, bool BinaryTree = false>
+    template <int Level, unsigned LazyDepth = 0U, bool BinaryTree = false>
     auto cpp_greedy_sequence_blocks(std::span<std::uint8_t const> input,
-        sph::zstd::compression_parameters const& parameters)
+        sph::zstd::compression_parameters const& settings)
         -> std::vector<sph::zstd::detail::parsed_block>
     {
-        sph::zstd::detail::greedy_match_state<LazyDepth, BinaryTree> state{parameters.window_log,
-            parameters.hash_log, parameters.chain_log, parameters.search_log, parameters.minimum_match};
+        constexpr auto p{sph::zstd::detail::resolve_parameters(parameters<Level>)};
+        sph::zstd::detail::greedy_match_state<LazyDepth, BinaryTree, p.window_log,
+            p.hash_log, p.chain_log, p.search_log, p.minimum_match,
+            (!BinaryTree && p.window_log > 14U)> state{settings.window_log,
+            settings.hash_log, settings.chain_log, settings.search_log, settings.minimum_match};
         std::vector<sph::zstd::detail::parsed_block> blocks;
         for (std::size_t begin{}; begin < input.size(); begin += sph::zstd::maximum_block_size)
         {
@@ -242,15 +271,15 @@ namespace
             }
             else if constexpr (Level == 5)
             {
-                return cpp_greedy_sequence_blocks(input, cpp_parameters);
+                return cpp_greedy_sequence_blocks<5>(input, cpp_parameters);
             }
             else if constexpr (Level == 9)
             {
-                return cpp_greedy_sequence_blocks<2U>(input, cpp_parameters);
+                return cpp_greedy_sequence_blocks<9, 2U>(input, cpp_parameters);
             }
             else if constexpr (Level == 15)
             {
-                return cpp_greedy_sequence_blocks<2U, true>(input, cpp_parameters);
+                return cpp_greedy_sequence_blocks<15, 2U, true>(input, cpp_parameters);
             }
             else
             {
@@ -263,6 +292,8 @@ namespace
         auto const output_equal{!reference.empty() && cpp == reference};
         auto const reset_output_equal{cpp_after_reset == reference};
         auto const frame_output_equal{cpp_frame_after_reset == reference};
+        auto const reference_decodes_cpp{reference_decodes(cpp, input)};
+        auto const cpp_decodes_reference{cpp_decodes(reference, input)};
         auto const common_size{std::min(cpp.size(), reference.size())};
         auto const mismatch{std::mismatch(cpp.begin(), cpp.begin() + static_cast<std::ptrdiff_t>(common_size),
             reference.begin())};
@@ -302,7 +333,11 @@ namespace
                   << "  streaming output after reset: "
                   << (reset_output_equal ? "[PASS]" : "[FAIL]") << '\n'
                   << "  one-shot output after reset: "
-                  << (frame_output_equal ? "[PASS]" : "[FAIL]") << '\n';
+                  << (frame_output_equal ? "[PASS]" : "[FAIL]") << '\n'
+                  << "  reference decodes zstd++: "
+                  << (reference_decodes_cpp ? "[PASS]" : "[FAIL]") << '\n'
+                  << "  zstd++ decodes reference: "
+                  << (cpp_decodes_reference ? "[PASS]" : "[FAIL]") << '\n';
         if (!output_equal)
         {
             std::cout << "  first output mismatch: byte " << mismatch_offset;
@@ -325,7 +360,8 @@ namespace
             }
             std::cout << '\n';
         }
-        return parameters_equal && output_equal && reset_output_equal && frame_output_equal;
+        return parameters_equal && output_equal && reset_output_equal && frame_output_equal &&
+            reference_decodes_cpp && cpp_decodes_reference;
     }
 }
 
@@ -335,14 +371,74 @@ int main()
     auto const input{std::span<std::uint8_t const>{corpus}};
     auto const results{std::array{
         check_level<1>(input),
+        check_level<2>(input),
         check_level<3>(input),
+        check_level<4>(input),
         check_level<5>(input),
+        check_level<6>(input),
         check_level<7>(input),
         check_level<8>(input),
         check_level<9>(input),
-        check_level<15>(input)
+        check_level<10>(input),
+        check_level<11>(input),
+        check_level<12>(input),
+        check_level<13>(input),
+        check_level<14>(input),
+        check_level<15>(input),
+        check_level<16>(input),
+        check_level<17>(input),
+        check_level<18>(input),
+        check_level<19>(input),
+        check_level<20>(input),
+        check_level<21>(input),
+        check_level<22>(input)
     }};
-    if (!std::ranges::all_of(results, std::identity{}))
+    // Starting with text exposes ultra's optimal-depth Huffman selection,
+    // which the mixed corpus's initial RLE blocks do not exercise.
+    auto text_first{corpus};
+    std::rotate(text_first.begin(), text_first.begin() + corpus_size / 4U, text_first.end());
+    std::cout << "text-first corpus:\n";
+    auto const text_first_matches{check_level<18>(text_first)};
+    auto const text_first_ultra2_matches{check_level<22>(text_first)};
+    std::vector<std::uint8_t> varied_text(corpus_size);
+    constexpr std::string_view paragraph{
+        "Header-only compression makes specialization visible to the optimizer. "
+        "Huffman coding handles the literals while FSE reconstructs match sequences.\n"};
+    for (std::size_t index{}; index < varied_text.size(); ++index)
+        varied_text[index] = static_cast<std::uint8_t>(paragraph[index % paragraph.size()]);
+    for (std::size_t index{96U}; index < varied_text.size(); index += 149U)
+        varied_text[index] = static_cast<std::uint8_t>((index / 149U) & 255U);
+    std::cout << "varied-text corpus:\n";
+    auto const varied_row_matches{std::array{
+        check_level<5>(varied_text), check_level<6>(varied_text),
+        check_level<7>(varied_text), check_level<8>(varied_text),
+        check_level<9>(varied_text), check_level<10>(varied_text),
+        check_level<11>(varied_text), check_level<12>(varied_text)}};
+    auto const varied_text_matches{check_level<16>(varied_text)};
+    auto const varied_text_ultra_matches{check_level<18>(varied_text)};
+    auto const varied_text_ultra2_matches{check_level<22>(varied_text)};
+    auto const transition_input{sph::zstd::eval::make_tag_transition_corpus()};
+    std::cout << "tag-transition corpus:\n";
+    auto const transition_matches{std::array{
+        check_level<3>(transition_input), check_level<4>(transition_input)}};
+    auto const presplit_input{sph::zstd::eval::make_optimal_presplit_corpus()};
+    std::cout << "optimal pre-split regression corpus:\n";
+    auto const presplit_matches{std::array{
+        check_level<16>(presplit_input), check_level<17>(presplit_input),
+        check_level<18>(presplit_input), check_level<19>(presplit_input),
+        check_level<20>(presplit_input), check_level<21>(presplit_input),
+        check_level<22>(presplit_input)}};
+    // A raw-literal block must not discard a preceding Huffman table: this
+    // fixture reuses that table in the next partition at level 19.
+    std::cout << "Huffman history across raw literals:\n";
+    auto const huffman_history_matches{check_level<19>(
+        sph::zstd::eval::make_optimal_presplit_corpus(11U))};
+    if (!huffman_history_matches || !std::ranges::all_of(presplit_matches, std::identity{}) ||
+        !std::ranges::all_of(transition_matches, std::identity{}) ||
+        !std::ranges::all_of(varied_row_matches, std::identity{}) ||
+        !text_first_matches || !text_first_ultra2_matches || !varied_text_matches ||
+        !varied_text_ultra_matches || !varied_text_ultra2_matches ||
+        !std::ranges::all_of(results, std::identity{}))
     {
         std::cerr << "compression parameter and byte-for-byte output parity is required at every acceptance level\n";
         return 1;
