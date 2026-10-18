@@ -697,6 +697,29 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Cross-strategy index-epoch audit (2026-10-18)
+
+Commit `a2f82a2` extends index-rollover protection to double-fast, hash-chain,
+binary-tree and row-table storage. A near-limit audit exposed wrapped indices
+in double-fast/hash-chain and an ASan crash in binary-tree lazy parsing, even
+though two ordinary double-fast reuse screens had passed. Boundary tests are
+therefore checked independently of whether a particular input still compresses
+to the same bytes.
+
+Rebasing preserves current-frame entries and discards stale epochs. Chain/tree
+ring slots move with their links and byte tags; tree sentinels, repeat offsets,
+update cursors and row-local state retain their meaning. Optimal parsing supplies
+the complete block extent before preparing the tree. No new processing-time
+workspace allocation is introduced.
+
+All ten optimized GCC CTests pass, including reciprocal acceptance at levels
+1–22. ASan/UBSan and MSVC pass 768 boundary-block comparisons across aligned
+and unaligned origins, tagged/runtime double-fast, lazy/hash-chain, three/four-byte
+optimal trees, varied text, random tiles and RLE. Additional checks cover ring
+mapping, sentinels, row-origin rebasing, range rejection and aligned-allocation
+balance. These are correctness changes, not claimed throughput improvements;
+the earlier performance tables predate this commit.
+
 ### Fast index-epoch correctness fix (2026-10-18)
 
 Commit `903eeef` fixes a repeated-frame crash when a fast-parser frame exceeds
