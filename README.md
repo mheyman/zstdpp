@@ -697,6 +697,24 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Current level-22 varied-text confirmation (2026-10-18)
+
+The older level-22 varied-text deficit below no longer describes the current
+binary. Six alternating-order, CPU-2 pairs of optimized GCC 13 workers each
+compressed 20 one-MiB frames. Every C++ frame matched reference byte for byte
+and the workers reported no post-warmup allocations. C++ won all six pairs;
+the ranges were 2.56–2.73 versus 1.67–1.76 MiB/s. Peak RSS and whole-worker
+code size are reported alongside the throughput medians.
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Level 22, 1 MiB varied text | 2.65 | 1.74 | 152.16% | 21.70 | 22.25 | 97.52% | 140.65 | 628.16 | 22.39% |
+
+An instruction-sampling profile attributed about 97% of C++ level-22 work to
+the optimal parser and binary-tree match search. The current 256-KiB level-1
+varied-text deficit remains a separate target. Raw paired results:
+`out/aligned-strategy-control/l22-varied-current-*`.
+
 ### Trusted grouped-FSE transitions (2026-10-18, rejected)
 
 The grouped level-1 sequence writer was tested with the per-symbol RLE check
