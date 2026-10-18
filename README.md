@@ -697,6 +697,28 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Cached fast-parser epoch limit (2026-10-18, rejected)
+
+An isolated GCC 13 x86-64 prototype stores the largest safe block end when a
+frame starts or indices are rebased. The common check becomes one comparison;
+the cached value occupies existing object padding (104 bytes before and after).
+The complete 4 MiB rollover regression passed ASan/UBSan, as did units and
+all-level reciprocal acceptance. Six balanced 8 GiB trials per implementation
+and workload used optimized binaries and verified exact frames and allocations:
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Cached limit, varied level 1 | 3160.94 | 3385.93 | 93.36% | 5.13 | 5.90 | 87.05% | 126.71 | 628.16 | 20.17% |
+| Cached limit, mixed level 1 | 2223.17 | 2086.78 | 106.54% | 5.38 | 6.14 | 87.63% | 126.71 | 628.16 | 20.17% |
+| Cached limit, varied level 2 | 3232.20 | 3432.26 | 94.17% | 5.25 | 6.11 | 85.93% | 122.51 | 628.16 | 19.50% |
+| Cached limit, mixed level 2 | 2680.15 | 2502.74 | 107.09% | 5.61 | 6.26 | 89.55% | 122.51 | 628.16 | 19.50% |
+
+Compared with the corrected production baseline, median changes were +0.17%,
++0.55%, -0.72% and +0.62%, respectively. All ranges overlap and instruction
+counts change by less than 0.01%. The cached check is not retained; it does not
+demonstrate a reliable throughput improvement. Artifacts:
+`out/aligned-strategy-control/fast-epoch-cache-1048576-*`.
+
 ### Cross-strategy index-epoch audit (2026-10-18)
 
 Commit `a2f82a2` extends index-rollover protection to double-fast, hash-chain,
