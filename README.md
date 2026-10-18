@@ -697,6 +697,86 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Fast index-epoch correctness fix (2026-10-18)
+
+Commit `903eeef` fixes a repeated-frame crash when a fast-parser frame exceeds
+its window and exhausts the 32-bit index epoch mid-frame. The permanent
+regression fails under ASan before the fix and passes afterward: 2,049 complete
+4 MiB frames remain byte-identical, alongside 35,200 parser/reset/literal cases.
+MSVC passes the same regression; all nine optimized GCC CTests, including
+reciprocal acceptance at levels 1–22, pass.
+
+Six balanced 8 GiB trials compare corrected C++ against the pre-fix binary and
+reference for 1 MiB inputs. Six alternating 8 GiB trials compare corrected C++
+and reference for 4 MiB inputs. Every trial passes exact reference-frame and
+post-warmup allocation guards. There is **no valid unfixed 4 MiB baseline** at
+this reuse count: that executable crashes. Both implementations use matching
+compression parameters, optimized GCC 13 builds and CPU 2.
+
+| Level 1 workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Corrected epoch, 1 MiB varied | 3166.38 | 3382.73 | 93.60% | 5.12 | 5.88 | 87.08% | 126.71 | 628.16 | 20.17% |
+| Corrected epoch, 1 MiB mixed | 2158.92 | 2086.38 | 103.48% | 5.35 | 6.15 | 87.04% | 126.71 | 628.16 | 20.17% |
+| Corrected epoch, 4 MiB varied | 3175.76 | 3216.05 | 98.75% | 8.11 | 11.87 | 68.27% | 126.71 | 628.16 | 20.17% |
+| Corrected epoch, 4 MiB mixed | 1979.57 | 1942.48 | 101.91% | 9.11 | 12.12 | 75.11% | 126.71 | 628.16 | 20.17% |
+
+Pre-fix 1 MiB medians were 3163.69 MiB/s varied and 2220.32 MiB/s mixed:
+the correction changes these by **+0.09%** and **-2.77%**, with overlapping
+ranges. Instructions rise 0.33% and 0.49%. Retention is required for correctness,
+not justified as a speedup; reducing the guard's cost remains an optimization
+opportunity. Varied-text throughput still trails reference at both sizes.
+Artifacts: `out/aligned-strategy-control/fast-epoch-fixed-{1048576,4194304}-*`.
+
+### Packed fast-parser entries (2026-10-18, experimental)
+
+An isolated GCC 13 minMatch-7 prototype combines the full 32-bit history index
+and byte tag into one 64-bit table entry. It preserves the tag filter, insertion
+order and index-rollover semantics, replacing separate index/tag address streams
+and stores. The default table grows from 64+16 KiB to 128 KiB; this is a locality
+tradeoff, not an allocation reduction or an assumed cache benefit.
+
+Strict units, all-level reciprocal acceptance tests, and 49,875 parser-oracle
+blocks under ASan/UBSan passed, including collisions, resets, index rollover and
+custom skip distance. Assembly confirms combined 64-bit loads/stores. Six
+balanced production/candidate/reference trials processed 8 GiB per measurement:
+
+| Candidate / workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Packed fast entries, varied text | 3227.18 | 3443.67 | 93.71% | 5.12 | 5.89 | 87.03% | 126.71 | 628.16 | 20.17% |
+| Packed fast entries, mixed data | 2293.89 | 2137.42 | 107.32% | 5.48 | 6.10 | 89.85% | 126.71 | 628.16 | 20.17% |
+
+Production medians were 3208.93 and 2230.61 MiB/s: **+0.57%** and **+2.84%**.
+Ranges overlap for both workloads: varied 3077.07–3235.54 versus
+3185.16–3254.36; mixed 2166.90–2283.73 versus 2281.04–2347.82.
+Instructions changed +0.97% and -0.20%; cycles fell 0.41% and 3.15%.
+All exact-frame and allocation guards passed. This is not integrated; longer
+same-binary reversed-order confirmation and broader gates are required.
+Artifacts: `out/aligned-strategy-control/fast-packed-entry-1048576-*`.
+
+Longer confirmation used the exact same binaries, reversed trial order, and
+six 16 GiB measurements per implementation/workload:
+
+| Candidate / workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Packed entries confirmation, varied text | 3209.37 | 3410.53 | 94.10% | 5.09 | 5.89 | 86.43% | 126.71 | 628.16 | 20.17% |
+| Packed entries confirmation, mixed data | 2282.03 | 2154.19 | 105.93% | 5.50 | 6.13 | 89.74% | 126.71 | 628.16 | 20.17% |
+
+Production medians were 3171.70 and 2223.69 MiB/s: **+1.19%** and **+2.62%**,
+with 5/6 paired wins for each workload and overlapping ranges. All frames and
+allocation guards passed. The expanded 79,800-case collected-literal oracle,
+270 streaming/reuse cases and full unit suite passed ASan/UBSan; the disabled
+MSVC path passed the expanded oracle too.
+
+The subsequent 4 MiB screen exposed a pre-existing fast-parser index-epoch
+overflow in **both** production and the candidate after repeated frame resets.
+Those aborted trials are invalid performance measurements. A complete-frame
+regression reproduced the crash under ASan. The packing candidate remains
+unintegrated and must be rechecked against the corrected baseline; the numbers
+above predate that correctness fix. The fix rebases current-frame indices before
+overflow and discards stale epochs without new allocation. It is not itself a
+claimed speedup. Other strategies' epoch handling remains a follow-up audit.
+Artifacts: `out/aligned-strategy-control/fast-packed-entry-confirm-1048576-*`.
+
 ### Parser-time sequence symbols (2026-10-18, experimental)
 
 The fast minMatch-7 parser already has each sequence's logical lengths and
@@ -860,7 +940,7 @@ removing append calls did not establish a benefit from this design. Artifacts:
 
 ### Repeated all-level evaluation (2026-10-18)
 
-The current evaluation below uses six alternating trials of 2,000 frames per
+The all-level checkpoint below uses six alternating trials of 2,000 frames per
 implementation, operation, and level: **528 measurements**, optimized GCC 13
 Release builds, tracing off, WSL CPU 2, and the deterministic 1 MiB mixed corpus.
 C++ median throughput exceeds reference at **all 22 compression levels and all
@@ -879,7 +959,11 @@ They are not an additional algorithmic speedup.
 This establishes an all-level result for the mixed corpus, not universal
 superiority. Timing ranges overlap in several cases, and known varied-text and
 small-input compression gaps remain optimization targets. All nine metrics and
-the per-level ranges and paired win counts are in the current evaluation tables.
+the per-level ranges and paired win counts are in the evaluation tables.
+This checkpoint predates the later fast-parser index-epoch correctness fix
+(`903eeef`); its raw results are preserved rather than attributed to a rebuilt
+binary. The corrected parser requires fresh performance controls and a later
+full-matrix refresh before those numbers describe current source exactly.
 
 ### Level 14/15 confirmation (2026-10-18)
 
