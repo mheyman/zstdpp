@@ -697,6 +697,27 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Separated level-1 literal gather (2026-10-18, rejected)
+
+The GCC 13 grouped level-1 encoder was tested with literal copies in a first
+pass and LL/OF/ML code generation in a second pass. This is the level-1
+counterpart of the earlier rejected level-2 split-loop experiment. GCC unit
+and all-level reciprocal acceptance tests passed. Six balanced CPU-2 trials
+per corpus processed 8 GiB per worker; all candidate and baseline frames
+matched reference and no post-warmup allocations were reported.
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Split gather, 256 KiB varied | 3431.80 | 3963.11 | 86.59% | 4.32 | 4.40 | 98.18% | 106.30 | 628.16 | 16.92% |
+| Split gather, 256 KiB scaled mixed | 2374.03 | 2448.32 | 96.97% | 4.49 | 4.50 | 99.78% | 106.30 | 628.16 | 16.92% |
+
+Against the same-source C++ baseline, varied text fell from 3545.40 to
+3431.80 MiB/s (-3.20%, zero of six paired wins); scaled mixed fell from
+2387.87 to 2374.03 MiB/s (-0.58%, overlapping ranges). Instructions and
+cycles rose on both inputs. The smaller candidate executable does not offset
+the throughput regression. Production is unchanged. Raw results:
+`out/aligned-strategy-control/separate-gather-262144-*`.
+
 ### Current level-22 varied-text confirmation (2026-10-18)
 
 The older level-22 varied-text deficit below no longer describes the current
