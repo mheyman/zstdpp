@@ -48,6 +48,12 @@ if(SPH_ZSTDPP_BUILD_TESTS)
     target_compile_features(fast_match_selection_tests PRIVATE cxx_std_23)
     sph_zstdpp_enable_strict_warnings(fast_match_selection_tests)
     add_test(NAME fast_match_selection_tests COMMAND fast_match_selection_tests)
+
+    add_executable(fast_index_epoch_tests fast_index_epoch_tests.cpp)
+    target_link_libraries(fast_index_epoch_tests PRIVATE sph::zstdpp)
+    target_compile_features(fast_index_epoch_tests PRIVATE cxx_std_23)
+    sph_zstdpp_enable_strict_warnings(fast_index_epoch_tests)
+    add_test(NAME fast_index_epoch_tests COMMAND fast_index_epoch_tests)
 endif()
 
 if(SPH_ZSTDPP_BUILD_ACCEPTANCE_TESTS)

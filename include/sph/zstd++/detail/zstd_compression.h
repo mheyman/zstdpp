@@ -1027,6 +1027,8 @@ namespace sph::zstd::detail
                 return result;
             }
 
+            ensure_index_headroom(block_begin + block_size);
+
             if constexpr (CollectLiterals)
             {
                 if (literal_storage.size() < block_size)
@@ -1265,6 +1267,23 @@ namespace sph::zstd::detail
         static constexpr std::size_t hash_read_size{8U};
         static constexpr std::size_t index_bias{2U};
         static constexpr unsigned search_strength{8U};
+
+        void ensure_index_headroom(std::size_t block_end)
+        {
+            constexpr auto maximum{std::numeric_limits<std::uint32_t>::max()};
+            if (block_end > maximum - index_bias)
+                throw entropy_error{"fast parser frame exceeds the 32-bit index range"};
+            if (static_cast<std::uint64_t>(frame_index_base_) + block_end + index_bias <= maximum)
+                return;
+
+            // reset() reserves a window, not an arbitrarily large next frame.
+            // Rebase before an index can wrap within that frame. Current-frame
+            // entries retain their positions; stale epochs become empty slots.
+            auto const first_current{frame_index_base_ + static_cast<std::uint32_t>(index_bias)};
+            for (auto& index : hash_table_)
+                index = index >= first_current ? index - frame_index_base_ : 0U;
+            frame_index_base_ = 0U;
+        }
 
         [[nodiscard]] static constexpr auto resolve_target_length(
             std::size_t runtime) noexcept -> std::size_t
