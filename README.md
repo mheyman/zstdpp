@@ -153,7 +153,6 @@ For example, from a Visual Studio Developer PowerShell on Windows:
 cmake --preset msvc-release-eval
 cmake --build --preset msvc-pair
 .\out\build\msvc-release-eval\eval\bin\zstdpp_pair.exe --level 3 `
-  --input .\out\build\msvc-release-eval\eval\results\corpus.bin `
   --iterations 1000 --trials 6
 ```
 
@@ -169,6 +168,10 @@ input snapshot, and each encoded frame; it does not change this README.
 The summary includes throughput, peak memory, and worker code size for both
 implementations. `--output DIR` selects an empty results directory. Without
 `--input`, the tool generates the deterministic mixed corpus.
+To compare a specific file, add `--input path\to\file`; its size must match
+the configured corpus size described below. The `*-pair` build presets are
+already part of the project, so no separate script or full matrix run is
+needed for this check.
 
 Because the C++ worker specializes its pledged source size, the input must
 have exactly `SPH_ZSTDPP_EVAL_CORPUS_SIZE` bytes (1 MiB by default). To test
