@@ -225,6 +225,41 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Isolated level-2 double-fast literal collection (2026-10-24)
+
+The measured GCC 13 Release 256-KiB level-2 preset now gathers literals while
+finding matches, avoiding the encoder's later
+literal-gather pass. The ordinary double-fast parser keeps its original
+compiled path: level-3/4 1-MiB and level-2/5 1-MiB worker `.text` sections
+matched their saved baselines byte-for-byte. This is a scoped throughput gain,
+not a claim that level 2 now beats reference on these inputs.
+
+On WSL CPU 2, six alternating direct baseline/candidate pairs (40,000 frames
+for varied and balanced, 100,000 for mixed) produced identical frames. Median
+C++ throughput improved from 3051.90 to 3077.42 MiB/s on varied text (+0.84%,
+five paired wins), 2007.32 to 2068.41 on balanced (+3.04%, six wins), and
+2034.99 to 2050.73 on mixed (+0.77%, five wins). The native paired executable
+also checked reference-byte parity on every trial and verified both decoders
+against both encodings. GCC 13 Release passed 11/11 tests including all-level
+parity; GCC 13 ASan/UBSan passed 9/9; MSVC Debug passed 10/10. A direct unit
+test checks collected literals, bounds, match decisions, reset, and cross-block
+history. System GCC 16's strict unit build still stops on its previously known
+compiler diagnostics, so no GCC 16 performance claim is made.
+
+Final six alternating C++/reference pairs used the same optimized GCC 13 build
+and 256-KiB input size:
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 / varied text, 256 KiB | 3099.41 | 3609.28 | 85.87 | 4.43 | 4.53 | 97.84 | 132.22 | 628.16 | 21.05 |
+| 2 / balanced, 256 KiB | 2081.85 | 2133.96 | 97.56 | 4.55 | 4.47 | 101.70 | 132.22 | 628.16 | 21.05 |
+| 2 / mixed, 256 KiB | 2060.17 | 2091.78 | 98.49 | 4.57 | 4.55 | 100.34 | 132.22 | 628.16 | 21.05 |
+
+Raw C++ baseline/candidate trials are in `out/l2-parser-literals-20261024/`.
+The final paired reports are in
+`out/build/gcc13-l2-256k-release/eval/pair-results/` under run IDs
+`1792878288346744-0`, `1792878324675777-0`, and `1792878381900989-0`.
+
 ### Collected-literal Huffman policy (2026-10-24)
 
 The fast strategy now uses rank-based canonical Huffman code assignment for

@@ -1899,6 +1899,66 @@ namespace
         }
     }
 
+    void test_double_fast_parser_literal_gathering()
+    {
+        using state_type = sph::zstd::detail::double_fast_match_state<18U, 14U, 14U, 5U>;
+        for (auto const size : {7U, 8U, 16U, 127U, 1024U, 4096U, 131072U})
+        {
+            for (bool const uniform : {false, true})
+            {
+                auto input{make_input(size)};
+                if (uniform) std::fill(input.begin(), input.end(), std::uint8_t{42});
+                state_type ordinary{18U, 14U, 14U, 5U};
+                state_type collecting{18U, 14U, 14U, 5U};
+                std::vector<std::uint8_t> storage(size + 16U, 0xA5U);
+                for (unsigned iteration{}; iteration < 2U; ++iteration)
+                {
+                    auto const expected_block{ordinary.parse(input, 0U, input.size())};
+                    auto const collected{collecting.parse_collecting(input, 0U, input.size(), {},
+                        std::nullopt, std::span<std::uint8_t>{storage}.first(size))};
+                    check(collected.sequences == expected_block.sequences &&
+                        collected.trailing_literal_position == expected_block.trailing_literal_position &&
+                        collected.trailing_literal_length == expected_block.trailing_literal_length,
+                        "collected double-fast parser preserves ordinary match decisions");
+                    std::vector<std::uint8_t> expected_literals;
+                    auto position{collected.input_begin};
+                    for (auto const& sequence : collected.sequences)
+                    {
+                        auto const literals{std::span<std::uint8_t const>{input}.subspan(
+                            position, sequence.literal_length)};
+                        expected_literals.insert(expected_literals.end(), literals.begin(), literals.end());
+                        position += sequence.literal_length + sequence.match_length;
+                    }
+                    auto const tail{std::span<std::uint8_t const>{input}.subspan(
+                        collected.trailing_literal_position, collected.trailing_literal_length)};
+                    expected_literals.insert(expected_literals.end(), tail.begin(), tail.end());
+                    check(collected.sequences.empty() ||
+                        std::equal(expected_literals.begin(), expected_literals.end(), storage.begin()),
+                        "double-fast parser gathers literal runs and trailing bytes in order");
+                    check(std::all_of(storage.begin() + size, storage.end(),
+                        [](std::uint8_t value) { return value == 0xA5U; }),
+                        "double-fast parser gathering respects the supplied storage boundary");
+                    ordinary.reset();
+                    collecting.reset();
+                }
+            }
+        }
+        auto const input{make_input(262144U)};
+        state_type ordinary{18U, 14U, 14U, 5U};
+        state_type collecting{18U, 14U, 14U, 5U};
+        std::vector<std::uint8_t> storage(131072U);
+        for (std::size_t begin{}; begin < input.size(); begin += 131072U)
+        {
+            auto const expected{ordinary.parse(input, begin, 131072U)};
+            auto const actual{collecting.parse_collecting(input, begin, 131072U, {},
+                std::nullopt, storage)};
+            check(actual.sequences == expected.sequences &&
+                actual.trailing_literal_position == expected.trailing_literal_position &&
+                actual.trailing_literal_length == expected.trailing_literal_length,
+                "double-fast collected parser preserves cross-block match history");
+        }
+    }
+
     void test_fast_parser_direct_candidates()
     {
         // A small hash table forces collisions. Compare the minMatch-6
@@ -2694,6 +2754,7 @@ int main()
         test_error_reporting();
         test_direct_output_bounds();
         test_fast_parser_literal_gathering();
+        test_double_fast_parser_literal_gathering();
         test_fast_parser_direct_candidates();
         test_optimal_parser_workspace();
         test_optimal_frontier_initialization();

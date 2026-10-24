@@ -42,6 +42,22 @@ namespace sph::zstd
     class zstd_compress
     {
         static constexpr auto effective_parameters_{detail::resolve_parameters(Parameters)};
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+        // Parser-time literal collection removes the encoder's late gather
+        // pass only for the measured short level-2 double-fast specialization.
+        // Other presets retain their original parser and generated code.
+        static constexpr bool collect_double_fast_literals_{
+            effective_parameters_.strategy == compression_strategy::double_fast &&
+            effective_parameters_.window_log == 18U &&
+            effective_parameters_.hash_log == 14U &&
+            effective_parameters_.chain_log == 14U &&
+            effective_parameters_.minimum_match == 5U &&
+            Parameters.compression_level == 2 &&
+            effective_parameters_.pledged_source_size != 0U &&
+            effective_parameters_.pledged_source_size <= 262144U};
+#else
+        static constexpr bool collect_double_fast_literals_{false};
+#endif
 
         using match_state_type = std::conditional_t<
             effective_parameters_.strategy == compression_strategy::fast,
@@ -532,6 +548,10 @@ namespace sph::zstd
                         parsed_ = match_state_.template parse<true>(input, block_begin, bytes.size(),
                             std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt,
                             compression_workspace_.literals);
+                    else if constexpr (collect_double_fast_literals_)
+                        parsed_ = match_state_.parse_collecting(input, block_begin, bytes.size(),
+                            std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt,
+                            compression_workspace_.literals);
                     else
 #endif
                     if constexpr (effective_parameters_.strategy >= compression_strategy::binary_tree_optimal)
@@ -603,8 +623,9 @@ namespace sph::zstd
                                 effective_parameters_.pledged_source_size != 0U &&
                                 Parameters.compression_level == 3 &&
                                 effective_parameters_.pledged_source_size <= 65536U))
-                            , (effective_parameters_.strategy == compression_strategy::fast &&
-                               effective_parameters_.minimum_match >= 7U)
+                            , ((effective_parameters_.strategy == compression_strategy::fast &&
+                               effective_parameters_.minimum_match >= 7U) ||
+                               collect_double_fast_literals_)
 #else
                             , false, false
 #endif
