@@ -225,6 +225,35 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### MSVC level-3 grouped sequence writes (2026-10-24)
+
+The MSVC level-3 double-fast path now emits each OF/ML/LL FSE state-bit group
+with one bounded append. It reuses the existing grouped writer without changing
+parser decisions, entropy tables, or frame bytes. On the optimized MSVC 19.51
+Release workers, six alternating 10,000-frame direct baseline/candidate pairs
+with identical frame hashes and no post-warmup allocations favored the new path
+in all six varied-text trials (median paired change +1.48%). Mixed input won
+four of six longer trials (median +1.52%), but a shorter production-build
+confirmation was nearly tied; no stable mixed speedup is claimed. Separate
+untagged-parser and reference-style input-prefetch experiments were rejected
+after varied-text regressions. MSVC Debug passed 10/10 tests, MSVC Release
+all-level parity passed, and GCC 13 Release passed 12/12 tests.
+
+Final optimized MSVC Release `zstdpp_pair` results, six alternating 4,000-frame
+pairs per one-MiB corpus, passed exact reference bytes and reciprocal decoding:
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 / varied text, 1 MiB | 2398.40 | 2834.70 | 84.61 | 7.11 | 7.08 | 100.50 | 119.00 | 382.00 | 31.15 |
+| 3 / mixed, 1 MiB | 1725.96 | 1737.30 | 99.35 | 7.38 | 7.18 | 102.77 | 119.00 | 382.00 | 31.15 |
+
+The earlier prepared-storage results below are historical; level 3 still does
+not consistently beat the reference on MSVC. Direct trials are under
+`out/msvc-l3-ipo-20261024/direct-prepared-*-10000-candidate-first-grouped/`;
+final paired reports are under
+`out/build/msvc-l3-grouped-final-20261024/eval/pair-results/` at runs
+`1792885317611216-0` and `1792885339243718-0`.
+
 ### MSVC level-3 prepared sequence storage (2026-10-24)
 
 The MSVC level-3 double-fast parser now keeps its ordinary 12-byte sequence
