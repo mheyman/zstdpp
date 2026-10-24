@@ -3365,6 +3365,80 @@ namespace sph::zstd::detail
         unsigned bit_count_{};
     };
 
+    // The short-frame fast path benefits from a 64-bit accumulator. Writes may
+    // overlap by one partial byte; finish_into() trims the speculative tail.
+    class wide_sequence_bit_writer
+    {
+    public:
+        void reset(std::vector<std::uint8_t>& output) noexcept
+        {
+            output_ = &output;
+            position_ = output.size();
+            container_ = 0U;
+            count_ = 0U;
+        }
+
+        void append(std::uint32_t value, unsigned count)
+        {
+            assert(count <= 32U);
+            if (count == 0U) return;
+            auto const mask{count == 32U ? std::numeric_limits<std::uint32_t>::max() :
+                (std::uint32_t{1} << count) - 1U};
+            append_unchecked(value & mask, count);
+        }
+
+        void append_unchecked(std::uint32_t value, unsigned count)
+        {
+            assert(count <= 32U);
+            if (count_ + count > 64U) flush_bytes();
+            container_ |= static_cast<std::uint64_t>(value) << count_;
+            count_ += count;
+            if (count_ >= 56U) flush_bytes();
+        }
+
+        void finish_into(std::vector<std::uint8_t>& output)
+        {
+            if (output_ != &output)
+                throw entropy_error{"wide bit writer finished into a different output buffer"};
+            output.resize(position_);
+            auto remaining{container_};
+            auto const byte_count{(count_ + 7U) / 8U};
+            for (unsigned index{}; index < byte_count; ++index)
+            {
+                output.push_back(static_cast<std::uint8_t>(remaining));
+                remaining >>= 8U;
+            }
+            if ((count_ & 7U) == 0U)
+                output.push_back(1U);
+            else
+                output.back() |= static_cast<std::uint8_t>(1U << (count_ & 7U));
+            output_ = nullptr;
+        }
+
+    private:
+        void flush_bytes()
+        {
+            assert(output_ != nullptr && count_ >= 8U);
+            auto completed{container_};
+            if constexpr (std::endian::native == std::endian::big)
+                completed = std::byteswap(completed);
+            auto& output{*output_};
+            constexpr std::size_t chunk_size{256U};
+            if (position_ + sizeof(completed) > output.size())
+                output.resize(position_ + chunk_size);
+            std::memcpy(output.data() + position_, &completed, sizeof(completed));
+            auto const completed_bytes{count_ / 8U};
+            position_ += completed_bytes;
+            container_ = completed_bytes == 8U ? 0U : container_ >> (completed_bytes * 8U);
+            count_ &= 7U;
+        }
+
+        std::vector<std::uint8_t>* output_{};
+        std::size_t position_{};
+        std::uint64_t container_{};
+        unsigned count_{};
+    };
+
     struct fse_compression_transform
     {
         std::int32_t delta_find_state{};
@@ -3529,7 +3603,8 @@ namespace sph::zstd::detail
             value_ = table_->states[static_cast<std::size_t>(index)];
         }
 
-        void flush(forward_bit_writer& bits) const
+        template <typename BitWriter>
+        void flush(BitWriter& bits) const
         {
             if (!table_->run_length_symbol)
             {
@@ -4441,6 +4516,7 @@ namespace sph::zstd::detail
         std::vector<std::uint8_t> offset_codes;
         std::vector<std::uint8_t> match_codes;
         forward_bit_writer sequence_bits;
+        wide_sequence_bit_writer wide_sequence_bits;
         std::vector<std::uint8_t> huffman_body;
         std::vector<std::uint8_t> huffman_repeat_body;
         std::vector<std::uint8_t> compressed_weights;
@@ -5093,11 +5169,13 @@ namespace sph::zstd::detail
 
     template <bool CarefulSelection = false, bool GroupFse = false, bool CollectedLiterals = false,
         bool OptimalHuffmanDepth = false, unsigned LiteralGainLog = (OptimalHuffmanDepth ? 7U : 6U),
-        bool DeferredCodes = false, bool AlignedLiterals, typename ParsedView = parsed_block_view>
+        bool DeferredCodes = false, bool WideSequenceBits = false,
+        bool AlignedLiterals, typename ParsedView = parsed_block_view>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         std::type_identity_t<ParsedView> const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
         std::vector<std::uint8_t>& output)
     {
+        static_assert(!WideSequenceBits || GroupFse);
         output.clear();
         if (parsed.sequences.empty())
         {
@@ -5247,7 +5325,11 @@ namespace sph::zstd::detail
         offset_state.initialize(last_offset_code);
         match_state.initialize(last_match_code);
 
-        auto& bits{workspace.sequence_bits};
+        auto& bits{[&]() -> auto&
+        {
+            if constexpr (WideSequenceBits) return workspace.wide_sequence_bits;
+            else return workspace.sequence_bits;
+        }()};
         bits.reset(output);
         bits.append(last.literal_length, literal_length_bits[last_literal_code]);
         bits.append(last.match_length - 3U, match_length_bits[last_match_code]);
@@ -5301,13 +5383,14 @@ namespace sph::zstd::detail
 
     template <bool CarefulSelection = false, bool GroupFse = false, bool CollectedLiterals = false,
         bool OptimalHuffmanDepth = false, unsigned LiteralGainLog = (OptimalHuffmanDepth ? 7U : 6U),
-        bool DeferredCodes = false, bool AlignedLiterals>
+        bool DeferredCodes = false, bool WideSequenceBits = false, bool AlignedLiterals>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         compact_parsed_block const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
         std::vector<std::uint8_t>& output)
     {
         encode_sequences_block<CarefulSelection, GroupFse, CollectedLiterals,
-            OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, AlignedLiterals, compact_parsed_block_view>(
+            OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, WideSequenceBits,
+            AlignedLiterals, compact_parsed_block_view>(
                 input, compact_parsed_block_view{parsed}, workspace, output);
     }
 

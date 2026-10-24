@@ -606,6 +606,16 @@ namespace sph::zstd
                             , (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra ?
                                 static_cast<unsigned>(effective_parameters_.strategy) - 1U : 6U)
                             , (effective_parameters_.strategy == compression_strategy::double_fast)
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                            // Balanced controls favor the wide sequence writer
+                            // on short pledged fast frames; the 1-MiB mixed
+                            // corpus consistently favors the existing writer.
+                            , (effective_parameters_.strategy == compression_strategy::fast &&
+                               effective_parameters_.pledged_source_size != 0U &&
+                               effective_parameters_.pledged_source_size <= 262144U)
+#else
+                            , false
+#endif
                             >(
                             input, parsed_, compression_workspace_, compressed);
 #ifdef SPH_ZSTDPP_TRACE_PHASES

@@ -24,6 +24,7 @@ extern "C" unsigned HUF_optimalTableLog(unsigned, std::size_t, unsigned, void*, 
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -921,7 +922,7 @@ namespace
                 "dominant-prefix histogram falls back for varied symbols");
             if (length >= 128U)
             {
-                std::ranges::fill(codes, 7U);
+                std::ranges::fill(codes, std::uint8_t{7U});
                 codes[17] = 13U;
                 codes.back() = 19U;
                 expected.fill(0U);
@@ -2534,6 +2535,46 @@ namespace
             }
         }
     }
+
+    void test_wide_sequence_bit_writer()
+    {
+        constexpr std::array<unsigned, 11> widths{0U, 1U, 7U, 8U, 9U, 16U,
+            24U, 28U, 31U, 32U, 3U};
+        for (std::size_t prefix_size : {0U, 1U, 7U, 255U})
+        {
+            for (unsigned field_count : {0U, 1U, 31U, 64U, 1024U})
+            {
+                sph::zstd::detail::forward_bit_writer expected_writer;
+                sph::zstd::detail::wide_sequence_bit_writer wide_writer;
+                std::vector<std::uint8_t> actual(prefix_size, 0xA5U);
+                wide_writer.reset(actual);
+                for (unsigned index{}; index < field_count; ++index)
+                {
+                    auto const width{widths[index % widths.size()]};
+                    auto const value{0x9E3779B9U ^ (index * 0x85EBCA6BU)};
+                    if ((index & 1U) == 0U)
+                    {
+                        expected_writer.append(value, width);
+                        wide_writer.append(value, width);
+                    }
+                    else
+                    {
+                        auto const mask{width == 32U ? std::numeric_limits<std::uint32_t>::max() :
+                            (std::uint32_t{1} << width) - 1U};
+                        expected_writer.append_unchecked(value & mask, width);
+                        wide_writer.append_unchecked(value & mask, width);
+                    }
+                }
+                auto const expected{expected_writer.finish()};
+                wide_writer.finish_into(actual);
+                check(actual.size() == prefix_size + expected.size() &&
+                    std::ranges::all_of(std::span<std::uint8_t const>{actual}.first(prefix_size),
+                        [](std::uint8_t value) { return value == 0xA5U; }) &&
+                    std::ranges::equal(std::span<std::uint8_t const>{actual}.subspan(prefix_size),
+                        expected), "wide sequence bit writer preserves prefix and exact payload");
+            }
+        }
+    }
 }
 
 int main()
@@ -2611,6 +2652,7 @@ int main()
         test_optimal_three_byte_matches();
         test_flush_and_reset();
         test_chunked_bit_writer();
+        test_wide_sequence_bit_writer();
     }
     catch (std::exception const& error)
     {

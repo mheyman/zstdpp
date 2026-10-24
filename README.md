@@ -6822,3 +6822,36 @@ still prevent an overall completion claim.
 | Integrated confirmation compression 16 | 90.42 | 83.62 | 108.13% | 21.45 | 21.87 | 98.11% | 140.57 | 628.16 | 22.38% |
 
 Raw results: `out/aligned-strategy-control/integrated-l16-confirm-*`.
+
+### Wider fast-sequence bit writer for short pledged frames
+
+GCC 13's grouped fast-strategy sequence writer now uses a 64-bit accumulator
+when the compile-time pledged frame size is at most 256 KiB. Larger and
+unpledged frames keep the previous writer. This targets the small mixed-input
+gap without applying the wider writer to 1-MiB mixed input, where eight
+CPU-affined baseline/candidate pairs all favored the previous writer.
+
+Direct, order-balanced GCC Release comparisons of the old and wider C++ workers
+on CPU 2 used byte-identical frames in every trial. On 64-KiB scaled-mixed
+input, the wider writer won five of six pairs (5,000 MiB per worker per trial);
+median paired throughput gain was 2.53% (range -4.17% to +6.99%). On 256-KiB
+scaled-mixed input, it won
+five of six pairs at the same work size; median gain was 1.46% (range -1.48%
+to +2.67%). The gated builds' executable code sections are identical to the
+measured wider
+workers. The 1-MiB mixed fallback showed a small median -0.70% change in six
+CPU-affined pairs, while the varied-text control was roughly neutral. This is a
+targeted small-input gain, not an all-level or all-input speed lead.
+
+Fresh six-trial paired reports for the gated builds provide all nine metrics:
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64-KiB scaled-mixed compression 1 | 1752.93 | 1871.27 | 93.68% | 4.12 | 4.01 | 102.78% | 122.47 | 628.16 | 19.50% |
+| 256-KiB scaled-mixed compression 1 | 2343.59 | 2402.37 | 97.55% | 4.46 | 4.52 | 98.79% | 122.48 | 628.16 | 19.50% |
+
+Reports: `out/build/gcc13-pair-64k/eval/pair-results/run-1792850162060163-0/`
+and `out/build/gcc13-pair-256k/eval/pair-results/run-1792850210934910-0/`.
+All 22 GCC Release acceptance levels, both decoders, the focused writer unit
+test, and GCC address/undefined sanitizer controls passed. The remaining
+small-input reference gaps are still optimization targets.
