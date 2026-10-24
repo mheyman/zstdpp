@@ -697,6 +697,41 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Entropy follow-up: profiler and rejected variants (2026-10-24)
+
+A fresh CPU-cycle profile of the optimized generic GCC 13 workers on 256-KiB
+varied text sampled 2,329 C++ and 2,043 reference events. The C++ fast parser
+was 42.49% of about 10.23 billion sampled cycles, versus reference fast block
+compression at 53.68% of about 9.06 billion: roughly 4.35 versus 4.86
+billion cycles in the parser. These are sampling estimates, but they change
+the next target: the remaining gap is not primarily the match parser.
+C++ sequence-block encoding, Huffman literal selection/streaming, and FSE
+table selection account for much of the rest. The reference profile uses
+BMI2-specific sequence and Huffman routines even in the generic build.
+
+Six balanced 2-GiB trials per worker screened three entropy changes; each
+candidate emitted exact reference frames and made no post-warmup allocations.
+Medians below are C++ production to candidate, in MiB/s:
+
+| Rejected variant | 256-KiB varied | 256-KiB scaled mixed |
+|---|---:|---:|
+| One sequence histogram below 1024 symbols | 3664.33 to 3659.23 | 2439.67 to 2439.36 |
+| Five-symbol Huffman batches | 3662.51 to 3619.49 | 2470.34 to 2518.97 |
+| BMI2-targeted Huffman stream without dispatch | 3599.61 to 3554.49 | 2419.42 to 2447.28 |
+
+Omitting unused fast-strategy FSE repeat-history copies initially improved
+256-KiB varied from 3640.45 to 3697.19 MiB/s (+1.56%) and scaled mixed
+from 2462.24 to 2487.53 (+1.03%) in six reversed-order 16-GiB pairs. But
+matched 1-MiB level-1 controls regressed on both varied text (3310.74 to
+3285.69) and mixed input (2340.13 to 2292.74). A compile-time small-frame
+scope removed the large-frame regression, but its new code generation also
+lost the target gain: 256-KiB varied measured 3632.71 to 3624.71 MiB/s in
+the final six long pairs. All-level parity tests passed; neither version was
+retained. This reinforces that GCC code layout matters as much as the
+apparent memory-copy reduction in the current entropy selector. Raw data:
+`out/aligned-strategy-control/sequence-hist-1024-*`, `huf-five-*`,
+`huf-bmi2-*`, `no-fast-history-*`, and `scoped-history-*`.
+
 ### Chunked external bit-writer growth (2026-10-24)
 
 The sequence bit writer previously resized its output vector for every
