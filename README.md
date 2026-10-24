@@ -7076,3 +7076,43 @@ The 1-MiB reports are in `out/build/gcc13-all-levels/eval/pair-results/`
 optimized and ASan/UBSan units, and MSVC Release level-1/3 paired accuracy
 smoke tests passed. The varied-text level-1–3 and 256-KiB level-2 gaps remain;
 this is not an all-level speed lead.
+
+### Batch-local row insertion for depth-one lazy parsing
+
+The four-entry row matcher now uses its existing batch-local insertion path at
+lazy depth one, as well as for greedy parsing. It keeps the row pointer and
+insertion cursor local across the pending batch and uses branch-free row wrap;
+deeper lazy strategies retain their previous path. The change adds no
+post-warmup allocation. Direct alternating comparisons with saved pre-change
+workers produced identical frames and improved median compression throughput
+at 1 MiB by 43.09%/10.96% (level 6 varied/mixed) and 19.58%/10.11% (level 7
+varied/mixed), with all six candidate trials faster in each case. At 256 KiB,
+the corresponding varied/balanced gains were 32.48%/21.43% for level 6 and
+28.94%/13.10% for level 7, again with all six candidate trials faster.
+
+Current paired optimized GCC 13 Release results use six alternating trials per
+row. The 1-MiB varied rows use 1,000 frames per trial and mixed rows use 4,000;
+all 256-KiB rows use 4,000. Every trial matched reference compressed bytes,
+and both decoders recovered both encodings. Memory is median peak RSS; code is
+worker executable size.
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB varied-text compression 6 | 330.91 | 287.18 | 115.23% | 7.33 | 8.35 | 87.80% | 122.82 | 628.16 | 19.55% |
+| 1-MiB mixed compression 6 | 2445.93 | 1866.19 | 131.07% | 7.73 | 8.50 | 90.92% | 122.82 | 628.16 | 19.55% |
+| 1-MiB varied-text compression 7 | 265.58 | 251.89 | 105.43% | 9.96 | 10.87 | 91.62% | 122.82 | 628.16 | 19.55% |
+| 1-MiB mixed compression 7 | 2157.52 | 1680.76 | 128.37% | 10.22 | 10.97 | 93.18% | 122.82 | 628.16 | 19.55% |
+| 256-KiB varied-text compression 6 | 263.11 | 246.52 | 106.73% | 6.75 | 6.88 | 98.07% | 122.82 | 628.16 | 19.55% |
+| 256-KiB balanced compression 6 | 979.74 | 923.77 | 106.06% | 6.86 | 6.89 | 99.55% | 122.82 | 628.16 | 19.55% |
+| 256-KiB varied-text compression 7 | 230.13 | 216.73 | 106.18% | 6.73 | 6.85 | 98.32% | 122.82 | 628.16 | 19.55% |
+| 256-KiB balanced compression 7 | 813.85 | 884.79 | 91.98% | 6.88 | 6.88 | 99.91% | 122.82 | 628.16 | 19.55% |
+
+The 1-MiB paired reports are under
+`out/build/gcc13-all-levels/eval/pair-results/` (`run-1792870965793397-0`
+through `run-1792871095343356-0`); 256-KiB reports are under
+`out/build/gcc13-lazy1-256k/eval/pair-results/` (`run-1792871697196732-0`
+through `run-1792871814225397-0`). Direct 256-KiB baseline/candidate frames,
+worker metrics, and the comparison script are in `out/lazy1-256k-compare/`.
+GCC 13 optimized and ASan/UBSan tests passed, as did the MSVC Debug
+compression acceptance executable. Level-7 balanced 256-KiB throughput still
+trails reference; the full all-level goal remains open.

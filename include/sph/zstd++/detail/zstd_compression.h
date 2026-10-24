@@ -1954,8 +1954,8 @@ namespace sph::zstd::detail
                 return hash<MinimumMatch, RowLog>(input, index, hash_bits);
             };
             auto insert_until = [&](std::uint32_t end) {
-                // Greedy parsing benefits from batch-local state and branch-free
-                // wrap. Keep lazy parsing on its independently benchmarked path.
+                // Greedy and depth-1 lazy parsing benefit from batch-local state
+                // and branch-free wrap. Deeper lazy parsing keeps its measured path.
                 if constexpr (!BatchLocal || RowLog != 4U)
                 {
                     while (next < end)
@@ -2547,7 +2547,8 @@ namespace sph::zstd::detail
                 auto const low{current > window ? current - window : 0U};
                 // Candidate collection initializes exactly the returned prefix.
                 std::array<std::uint32_t, 64> candidates;
-                auto const count{row_state_.template find<row_mls, row_log, LazyDepth == 0U>(input,
+                auto const count{row_state_.template find<row_mls, row_log,
+                    (LazyDepth == 0U || LazyDepth == 1U)>(input,
                     current, low, HashLog - row_log + 8U,
                     std::uint32_t{1} << std::min(SearchLog, row_log), lazy_skipping, candidates)};
                 match_result best;
