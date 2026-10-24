@@ -179,6 +179,31 @@ namespace sph::zstd::detail
         return workspace[0];
     }
 
+    [[nodiscard]] inline auto count_symbols_dominant_prefix(std::span<std::uint8_t const> input,
+        symbol_count_workspace& workspace) noexcept -> symbol_counts const&
+    {
+        // Four independent counters avoid dependencies for long streams;
+        // short streams are cheaper without a dominance probe.
+        if (input.size() < 1500U || input.size() > 5000U ||
+            !std::all_of(input.begin() + 1, input.begin() + 17,
+                [first = input.front()](std::uint8_t value) { return value == first; }))
+            return count_symbols<128U>(input, workspace);
+
+        auto const dominant{input.front()};
+        auto& counts{workspace[0]};
+        counts.fill(0U);
+        std::uint32_t dominant_count{};
+        for (auto const symbol : input)
+        {
+            if (symbol == dominant)
+                ++dominant_count;
+            else
+                ++counts[symbol];
+        }
+        counts[dominant] = dominant_count;
+        return counts;
+    }
+
     template <unsigned Configured>
     class match_parameter
     {
@@ -4936,7 +4961,7 @@ namespace sph::zstd::detail
         throw entropy_error{"unknown predefined FSE compression table"};
     }
 
-    template <bool CarefulSelection = false>
+    template <bool CarefulSelection = false, bool DominantPrefix = false>
     [[nodiscard]] inline auto select_sequence_table(
         std::span<std::uint8_t const> codes,
         std::span<std::int16_t const> default_counts,
@@ -4949,7 +4974,8 @@ namespace sph::zstd::detail
         sequence_table_history& history) -> selected_sequence_table
     {
         description.clear();
-        auto const& counts{count_symbols<128U>(codes, histogram_workspace)};
+        auto const& counts{DominantPrefix ? count_symbols_dominant_prefix(codes, histogram_workspace) :
+            count_symbols<128U>(codes, histogram_workspace)};
         unsigned maximum_symbol{};
         for (unsigned symbol{}; symbol < counts.size(); ++symbol)
         {
@@ -5176,11 +5202,11 @@ namespace sph::zstd::detail
         entropy_trace.literals_ns += entropy_trace_elapsed(entropy_phase_start);
         entropy_phase_start = std::chrono::steady_clock::now();
 #endif
-        auto const literal_table{select_sequence_table<CarefulSelection>(literal_code_bytes,
+        auto const literal_table{select_sequence_table<CarefulSelection, GroupFse>(literal_code_bytes,
             literal_length_default_norm, 6U, 9U, true, workspace.table_descriptions[0],
             workspace.sequence_tables[0], workspace.histogram_workspace,
             workspace.sequence_histories[0])};
-        auto const offset_table{select_sequence_table<CarefulSelection>(offset_code_bytes,
+        auto const offset_table{select_sequence_table<CarefulSelection, GroupFse>(offset_code_bytes,
             offset_default_norm, 5U, 8U,
             // Code generation rejects symbols outside the default alphabet.
             // Skip the redundant scan in the measured grouped fast path;
@@ -5188,7 +5214,7 @@ namespace sph::zstd::detail
             GroupFse || *std::max_element(offset_code_bytes.begin(), offset_code_bytes.end()) <= 28U,
             workspace.table_descriptions[1], workspace.sequence_tables[1],
             workspace.histogram_workspace, workspace.sequence_histories[1])};
-        auto const match_length_table{select_sequence_table<CarefulSelection>(match_code_bytes,
+        auto const match_length_table{select_sequence_table<CarefulSelection, GroupFse>(match_code_bytes,
             match_length_default_norm, 6U, 9U, true, workspace.table_descriptions[2],
             workspace.sequence_tables[2], workspace.histogram_workspace,
             workspace.sequence_histories[2])};

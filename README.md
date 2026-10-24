@@ -723,6 +723,39 @@ Against the matched pre-change C++ worker, median throughput rose from
 means this is incremental progress, not completion of the all-level goal.
 Raw data: `out/aligned-strategy-control/ranked-repeat-confirm-*`.
 
+### Dominant-symbol sequence histograms (2026-10-24)
+
+On the optimized GCC 13 level-1 path, the sequence-table selector previously
+cleared and merged four histograms even when a code stream consisted almost
+entirely of one symbol. A new single-counter path handles medium-sized
+(1,500–5,000 symbol) streams whose first 17 codes are identical. It counts
+that symbol in a register and records only outliers in the histogram; short,
+large, and non-dominated streams retain the four-counter implementation.
+The size window avoids a measured large-stream regression at level 2.
+The profiler put sequence-table selection at 7.75% of C++ cycle samples on
+256-KiB varied text. New unit cases cover poisoned workspace reuse and both
+size boundaries. All ten GCC tests, including all-level byte parity and
+cross-decoding, and the address/UB-sanitized unit test pass.
+
+Optimized GCC 13 C++ and reference workers ran on CPU 2 in six
+position-balanced trials per row. The 256-KiB trials processed 16 GiB per
+worker; size controls processed 4 GiB. Throughput uses median elapsed time,
+memory is median peak RSS, and code size is the complete no-debug worker
+binary. Every candidate frame matched reference and every C++ worker
+reported zero allocations after warmup.
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64 KiB scaled-mixed compression 1 | 1793.69 | 1913.24 | 93.75% | 4.09 | 4.01 | 102.00% | 126.48 | 628.16 | 20.13% |
+| 256 KiB varied compression 1 | 3708.21 | 4044.94 | 91.68% | 4.36 | 4.35 | 100.13% | 126.48 | 628.16 | 20.13% |
+| 256 KiB scaled-mixed compression 1 | 2431.79 | 2474.00 | 98.29% | 4.49 | 4.50 | 99.78% | 126.48 | 628.16 | 20.13% |
+| 1 MiB mixed compression 2 | 2765.74 | 2504.13 | 110.45% | 5.62 | 6.25 | 89.97% | 126.48 | 628.16 | 20.14% |
+
+Against matched pre-change C++ workers, median throughput changed by
++1.54%, +2.67%, +0.32%, and +0.13% respectively. The 1-MiB change is
+effectively neutral. The 256-KiB varied gap remains, so the all-level speed
+goal is not complete. Raw data: `out/aligned-strategy-control/dominant-window-*`.
+
 ### Huffman scratch-buffer controls (2026-10-24, rejected)
 
 The current level-1 profile still attributes about 2.8% of samples to

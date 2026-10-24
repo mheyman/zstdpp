@@ -898,7 +898,7 @@ namespace
         symbol_count_workspace workspace;
         for (std::size_t alphabet : {1U, 29U, 36U, 53U, 256U})
             for (std::size_t length : {0U, 1U, 2U, 127U, 128U, 129U, 255U, 256U,
-                1499U, 1500U, 2048U, 8191U, 8192U, 8193U})
+                1499U, 1500U, 2048U, 4999U, 5000U, 5001U, 8191U, 8192U, 8193U})
         {
             std::vector<std::uint8_t> codes(length);
             symbol_counts expected{};
@@ -916,6 +916,22 @@ namespace
             for (auto& stripe : workspace) stripe.fill(0xcafeU);
             check(count_symbols<8192U>(codes, workspace) == expected,
                 "fast literal histogram changes paths without changing counts");
+            for (auto& stripe : workspace) stripe.fill(0xf00dU);
+            check(count_symbols_dominant_prefix(codes, workspace) == expected,
+                "dominant-prefix histogram falls back for varied symbols");
+            if (length >= 128U)
+            {
+                std::ranges::fill(codes, 7U);
+                codes[17] = 13U;
+                codes.back() = 19U;
+                expected.fill(0U);
+                expected[7] = static_cast<std::uint32_t>(length - 2U);
+                expected[13] = 1U;
+                expected[19] = 1U;
+                for (auto& stripe : workspace) stripe.fill(0xdeadU);
+                check(count_symbols_dominant_prefix(codes, workspace) == expected,
+                    "dominant-prefix histogram counts rare outliers and clears stale state");
+            }
         }
     }
 
