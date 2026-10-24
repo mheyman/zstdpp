@@ -225,6 +225,41 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### MSVC level-3 prepared sequence storage (2026-10-24)
+
+The MSVC level-3 double-fast parser now keeps its ordinary 12-byte sequence
+records live in pre-sized storage and appends through a logical cursor. This
+removes the generated `std::vector` reallocation/capacity paths from the parser
+without changing the encoded frame. Other compiler/level paths retain their
+existing sequence representation. AMD uProf 5.3 Windows hotspot samples helped
+locate this work: the C++ double-fast parser and its match helper dominated the
+level-3 compression profile. The profiler is a hotspot guide, not the throughput
+measurement below.
+
+Six alternating direct MSVC 19.51 Release baseline/candidate pairs of 10,000
+one-MiB frames each matched frame hashes and passed the workers' no-post-warmup-
+allocation guards. The candidate won five of six varied-text trials (median
+paired change +1.06%) and all six mixed trials (median +1.60%). A shorter
+production-build varied screen was effectively tied, so the gain is modest and
+host-sensitive. The parser/storage unit test passed under GCC ASan/UBSan; MSVC
+Debug 10/10 tests, MSVC Release all-level compression parity, and GCC 13
+Release 12/12 tests passed.
+
+Final optimized MSVC Release `zstdpp_pair` runs used six alternating 4,000-frame
+pairs per corpus. Every compressed frame matched the reference byte-for-byte,
+and both decoders recovered both encodings:
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 / varied text, 1 MiB | 2327.05 | 2820.92 | 82.49 | 7.11 | 7.08 | 100.47 | 119.00 | 382.00 | 31.15 |
+| 3 / mixed, 1 MiB | 1673.83 | 1722.33 | 97.18 | 7.37 | 7.19 | 102.47 | 119.00 | 382.00 | 31.15 |
+
+The C++ implementation remains slower than the reference at level 3 on these
+MSVC inputs. Raw direct comparisons are in
+`out/msvc-l3-ipo-20261024/direct-prepared-*-10000-base-first-final/`;
+paired reports are under `out/build/msvc-l3-final-20261024/eval/pair-results/`
+at runs `1792884232628341-0` and `1792884596572905-0`.
+
 ### Isolated level-2 double-fast literal collection (2026-10-24)
 
 The measured GCC 13 Release 256-KiB level-2 preset now gathers literals while

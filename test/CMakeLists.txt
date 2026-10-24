@@ -24,6 +24,12 @@ if(SPH_ZSTDPP_BUILD_TESTS)
     sph_zstdpp_enable_strict_warnings(compact_sequence_tests)
     add_test(NAME compact_sequence_tests COMMAND compact_sequence_tests)
 
+    add_executable(prepared_sequence_tests prepared_sequence_tests.cpp)
+    target_link_libraries(prepared_sequence_tests PRIVATE sph::zstdpp)
+    target_compile_features(prepared_sequence_tests PRIVATE cxx_std_23)
+    sph_zstdpp_enable_strict_warnings(prepared_sequence_tests)
+    add_test(NAME prepared_sequence_tests COMMAND prepared_sequence_tests)
+
     add_executable(fse_transition_tests fse_transition_tests.cpp)
     target_link_libraries(fse_transition_tests PRIVATE sph::zstdpp)
     target_compile_features(fse_transition_tests PRIVATE cxx_std_23)

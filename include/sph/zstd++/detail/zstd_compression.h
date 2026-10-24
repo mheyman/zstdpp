@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #ifdef SPH_ZSTDPP_TRACE_PHASES
@@ -900,6 +901,59 @@ namespace sph::zstd::detail
         std::size_t trailing_literal_length{};
     };
 
+    // Pre-size ordinary 12-byte records once so the double-fast parser can
+    // append by index without repeating vector capacity and lifetime work.
+    class prepared_sequence_store
+    {
+    public:
+        prepared_sequence_store() = default;
+        prepared_sequence_store(prepared_sequence_store&& other) noexcept
+            : records_{std::move(other.records_)}, count_{std::exchange(other.count_, 0U)} {}
+        auto operator=(prepared_sequence_store&& other) noexcept -> prepared_sequence_store&
+        {
+            if (this != &other)
+            {
+                records_ = std::move(other.records_);
+                count_ = std::exchange(other.count_, 0U);
+            }
+            return *this;
+        }
+        void reserve(std::size_t count)
+        {
+            if (records_.size() < count) records_.resize(count);
+        }
+        void clear() noexcept { count_ = 0U; }
+        [[nodiscard]] auto size() const noexcept -> std::size_t { return count_; }
+        [[nodiscard]] auto empty() const noexcept -> bool { return count_ == 0U; }
+        [[nodiscard]] auto data() noexcept -> parsed_sequence* { return records_.data(); }
+        [[nodiscard]] auto data() const noexcept -> parsed_sequence const* { return records_.data(); }
+        [[nodiscard]] auto begin() const noexcept -> parsed_sequence const* { return data(); }
+        [[nodiscard]] auto end() const noexcept -> parsed_sequence const* { return data() + count_; }
+        [[nodiscard]] auto operator[](std::size_t index) const noexcept -> parsed_sequence const&
+        {
+            assert(index < count_);
+            return records_[index];
+        }
+        void push_back(parsed_sequence value) noexcept
+        {
+            assert(count_ < records_.size());
+            records_[count_++] = value;
+        }
+
+    private:
+        std::vector<parsed_sequence> records_;
+        std::size_t count_{};
+    };
+
+    struct prepared_parsed_block
+    {
+        using sequence_type = parsed_sequence;
+        prepared_sequence_store sequences;
+        std::size_t input_begin{};
+        std::size_t trailing_literal_position{};
+        std::size_t trailing_literal_length{};
+    };
+
     // Partitions borrow the parser's sequence storage. Only the partition ending
     // at the parent's end owns its trailing literals, as in ZSTD_deriveSeqStoreChunk.
     struct parsed_block_view
@@ -907,6 +961,11 @@ namespace sph::zstd::detail
         parsed_block_view() = default;
         parsed_block_view(parsed_block const& block) noexcept
             : sequences{block.sequences}, input_begin{block.input_begin},
+              trailing_literal_position{block.trailing_literal_position},
+              trailing_literal_length{block.trailing_literal_length} {}
+        parsed_block_view(prepared_parsed_block const& block) noexcept
+            : sequences{block.sequences.data(), block.sequences.size()},
+              input_begin{block.input_begin},
               trailing_literal_position{block.trailing_literal_position},
               trailing_literal_length{block.trailing_literal_length} {}
 
@@ -1495,9 +1554,10 @@ namespace sph::zstd::detail
             repeat_offsets_ = {1U, 4U, 8U};
         }
 
+        template <typename Block = parsed_block>
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
-            parsed_block result = {}, std::optional<bool> known_rle = std::nullopt) -> parsed_block
+            Block result = {}, std::optional<bool> known_rle = std::nullopt) -> Block
         {
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
             if constexpr (MinimumMatch == 5U)

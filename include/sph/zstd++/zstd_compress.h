@@ -58,6 +58,13 @@ namespace sph::zstd
 #else
         static constexpr bool collect_double_fast_literals_{false};
 #endif
+#if defined(_MSC_VER)
+        static constexpr bool prepared_double_fast_sequences_{
+            effective_parameters_.strategy == compression_strategy::double_fast &&
+            Parameters.compression_level == 3};
+#else
+        static constexpr bool prepared_double_fast_sequences_{false};
+#endif
 
         using match_state_type = std::conditional_t<
             effective_parameters_.strategy == compression_strategy::fast,
@@ -279,6 +286,8 @@ namespace sph::zstd
         /** Starts another frame while retaining the callback and compile-time parameters. */
         void reset()
         {
+            if constexpr (prepared_double_fast_sequences_)
+                parsed_.sequences.reserve(Parameters.block_size / 3U + 1U);
             buffered_size_ = 0;
             source_size_ = 0;
             encoded_size_ = 0;
@@ -942,7 +951,10 @@ namespace sph::zstd
         // path and deeper strategies retain the original sequence representation.
         std::conditional_t<effective_parameters_.strategy == compression_strategy::fast &&
             effective_parameters_.minimum_match >= 7U,
-            detail::compact_parsed_block, detail::parsed_block> parsed_;
+            detail::compact_parsed_block,
+            std::conditional_t<prepared_double_fast_sequences_,
+                detail::prepared_parsed_block, detail::parsed_block>
+            > parsed_;
         // Alignment benefits the four-byte double-fast literal distribution.
         // Larger-source five-byte presets retain ordinary storage: their
         // measured copy/layout tradeoff did not reproduce that improvement.

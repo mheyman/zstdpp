@@ -1,14 +1,14 @@
 // This body is instantiated twice inside double_fast_match_state. The ordinary
 // instantiation preprocesses to its original tokens, preserving other levels'
 // generated parser code; the selected collection path adds literal writes.
-        template <bool UseTags>
+        template <bool UseTags, typename Block = parsed_block>
         [[nodiscard]] auto SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
-            parsed_block result = {}, std::optional<bool> known_rle = std::nullopt
+            Block result = {}, std::optional<bool> known_rle = std::nullopt
 #if SPH_ZSTDPP_DOUBLE_FAST_COLLECT
             , std::span<std::uint8_t> literal_storage = {}
 #endif
-            ) -> parsed_block
+            ) -> Block
         {
             result.sequences.clear();
             result.input_begin = block_begin;
