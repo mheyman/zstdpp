@@ -141,12 +141,13 @@ measurement is retained in `trials.csv` and per-trial worker CSVs; `metrics.csv`
 contains the aggregates. The variability table includes throughput ranges and
 paired win counts. Use a fresh output directory for each evaluation.
 
-For a quick, single-level comparison on a chosen input, build the native
-`zstdpp_pair` target and run it from the repository root. For example, on
-Windows with the Release preset:
+For a quick, single-level comparison on a chosen input, use the native
+`zstdpp_pair` executable, now included in each Release evaluation build preset.
+For example, on Windows:
 
 ```powershell
-cmake --build --preset msvc-release-eval --target zstdpp_pair
+cmake --preset msvc-release-eval
+cmake --build --preset msvc-release-eval
 .\out\build\msvc-release-eval\eval\bin\zstdpp_pair.exe --level 3 `
   --input .\out\build\msvc-release-eval\eval\results\corpus.bin `
   --iterations 1000 --trials 6
@@ -154,8 +155,9 @@ cmake --build --preset msvc-release-eval --target zstdpp_pair
 
 On WSL, use the corresponding executable in `out/build/gcc13-release-eval/eval/bin/`.
 The tool alternates optimized C++ and reference compression workers, compares
-the actual encoded bytes after **every** trial, and checks that both decoders
-recover the original input. A mismatch stops the run without a summary.
+the actual encoded bytes after **every** trial, and checks that each decoder
+recovers the original input from **both** implementations' frames. A mismatch
+stops the run without a summary.
 It creates a fresh output directory with `SUMMARY.md`, `trials.csv`, the
 input snapshot, and each encoded frame; it does not change this README.
 The summary includes throughput, peak memory, and worker code size for both

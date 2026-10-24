@@ -223,7 +223,8 @@ namespace
         report << "# Paired compression benchmark — level " << level << "\n\n"
             << "Input: " << cpp.input_bytes << " bytes; " << trials.size()
             << " alternating trials of " << cpp.iterations << " iterations. "
-            << "Frames matched byte-for-byte in every trial; both decoders recovered the input. "
+            << "Frames matched byte-for-byte in every trial; both decoders recovered the input "
+            << "from both encodings. "
             << "Workers were built with the same optimized CMake configuration.\n\n"
             << "| C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | "
             "C++ memory (MiB) | Reference memory (MiB) | % of Reference | "
@@ -240,7 +241,7 @@ namespace
             << static_cast<double>(cpp_code) / static_cast<double>(reference_code) * 100.0
             << " |\n";
         if (!report) throw std::runtime_error{"cannot complete SUMMARY.md"};
-        std::cout << "Byte parity and both decoders: PASS\n"
+        std::cout << "Byte parity and both encodings with both decoders: PASS\n"
                   << "C++: " << std::fixed << std::setprecision(2) << cpp_speed << " MiB/s; "
                   << "reference: " << reference_speed << " MiB/s; "
                   << cpp_speed / reference_speed * 100.0 << "% of reference\n"
@@ -298,6 +299,10 @@ int main(int argc, char** argv)
                 run_worker(cpp_decoder, {cpp_frame, input_path, "1", output / "cpp-decode-check.csv"});
                 run_worker(reference_decoder,
                     {cpp_frame, input_path, "1", output / "reference-decode-check.csv"});
+                run_worker(cpp_decoder,
+                    {reference_frame, input_path, "1", output / "cpp-reference-decode-check.csv"});
+                run_worker(reference_decoder,
+                    {reference_frame, input_path, "1", output / "reference-reference-decode-check.csv"});
             }
             results.push_back({checked_result(cpp_metrics, cpp_frame, input.size(),
                 configuration.iterations), checked_result(reference_metrics, reference_frame,
