@@ -33,6 +33,25 @@ namespace
         return value;
     }();
 
+    inline constexpr auto short_level3_parameters = []
+    {
+        auto value{parameters<3>};
+        value.pledged_source_size = 65536U;
+        return value;
+    }();
+
+    auto compress_cpp_short_level3(std::span<std::uint8_t const> input) -> std::vector<std::uint8_t>
+    {
+        std::vector<std::uint8_t> encoded;
+        auto compressor = sph::zstd::make_zstd_compress<short_level3_parameters>(
+            [&encoded](std::span<std::uint8_t const> output)
+            {
+                encoded.insert(encoded.end(), output.begin(), output.end());
+            });
+        compressor.compress_frame(input);
+        return encoded;
+    }
+
     template <int Level>
     auto compress_cpp(std::span<std::uint8_t const> input) -> std::vector<std::uint8_t>
     {
@@ -408,6 +427,20 @@ int main()
         varied_text[index] = static_cast<std::uint8_t>(paragraph[index % paragraph.size()]);
     for (std::size_t index{96U}; index < varied_text.size(); index += 149U)
         varied_text[index] = static_cast<std::uint8_t>((index / 149U) & 255U);
+    auto check_short_level3 = [](std::span<std::uint8_t const> short_input,
+        std::string_view name) -> bool
+    {
+        auto const cpp{compress_cpp_short_level3(short_input)};
+        auto const reference{compress_reference(short_input, 3)};
+        auto const matched{cpp == reference && reference_decodes(cpp, short_input) &&
+            cpp_decodes(reference, short_input)};
+        std::cout << "64-KiB level 3 " << name << ": " << (matched ? "[PASS]" : "[FAIL]") << '\n';
+        return matched;
+    };
+    auto const short_mixed{sph::zstd::eval::make_mixed_corpus(65536U)};
+    auto const short_mixed_matches{check_short_level3(short_mixed, "mixed")};
+    auto const short_varied_matches{check_short_level3(
+        std::span<std::uint8_t const>{varied_text}.first(65536U), "varied text")};
     std::cout << "varied-text corpus:\n";
     auto const varied_row_matches{std::array{
         check_level<5>(varied_text), check_level<6>(varied_text),
@@ -433,7 +466,8 @@ int main()
     std::cout << "Huffman history across raw literals:\n";
     auto const huffman_history_matches{check_level<19>(
         sph::zstd::eval::make_optimal_presplit_corpus(11U))};
-    if (!huffman_history_matches || !std::ranges::all_of(presplit_matches, std::identity{}) ||
+    if (!short_mixed_matches || !short_varied_matches || !huffman_history_matches ||
+        !std::ranges::all_of(presplit_matches, std::identity{}) ||
         !std::ranges::all_of(transition_matches, std::identity{}) ||
         !std::ranges::all_of(varied_row_matches, std::identity{}) ||
         !text_first_matches || !text_first_ultra2_matches || !varied_text_matches ||

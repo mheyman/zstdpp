@@ -596,7 +596,14 @@ namespace sph::zstd
                         detail::encode_sequences_block<
                             (effective_parameters_.strategy >= compression_strategy::lazy)
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
-                            , (effective_parameters_.strategy == compression_strategy::fast)
+                            // Short pledged level-3 frames also benefit from
+                            // grouped FSE writes; larger double-fast frames
+                            // retain the separately validated scalar path.
+                            , (effective_parameters_.strategy == compression_strategy::fast ||
+                               (effective_parameters_.strategy == compression_strategy::double_fast &&
+                                Parameters.compression_level == 3 &&
+                                effective_parameters_.pledged_source_size != 0U &&
+                                effective_parameters_.pledged_source_size <= 65536U))
                             , (effective_parameters_.strategy == compression_strategy::fast &&
                                effective_parameters_.minimum_match >= 7U)
 #else

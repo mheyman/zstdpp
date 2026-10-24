@@ -6891,3 +6891,33 @@ Direct baseline comparisons: `out/build/gcc13-pair-64k/eval/pair-results/grouped
 and `grouped-gated-pack64-repeat-20261024/`. All 11 GCC Release tests,
 including 22-level compression parity, passed, as did the updated GCC
 ASan/UBSan unit suite and MSVC unit test.
+
+### Grouped level-3 sequence encoding for 64-KiB pledged frames
+
+The GCC 13 double-fast level-3 encoder now uses the existing grouped FSE
+sequence writer when the compile-time pledged frame size is at most 64 KiB.
+Other double-fast levels and larger or unpledged level-3 frames retain their
+previous writer. The gated 64-KiB worker is byte-identical at the executable
+level to the measured candidate; the 1-MiB level-3 worker's instruction
+section is identical to its pre-change binary.
+
+On a 64-KiB scaled-mixed corpus, an order-balanced plain Release comparison
+favored the candidate in 8 of 12 CPU-affined baseline/candidate pairs, with a
+0.40% median paired gain. A separate six-pair run favored it in four pairs but
+was substantially noisier. `perf stat` measured 2.33% fewer instructions and
+1.38% fewer cycles in the 60,000-frame comparison. Every output matched the
+baseline and reference byte-for-byte. This is a modest, workload-specific
+improvement, not a broad level-3 speed lead.
+
+The final six-trial plain GCC 13 Release report also verified both encodings
+with both decoders:
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64-KiB scaled-mixed compression 3 | 1517.17 | 1562.02 | 97.13% | 4.62 | 4.32 | 107.06% | 122.77 | 628.16 | 19.54% |
+
+Report: `out/build/gcc13-l3-64k-release/eval/pair-results/run-1792853555387026-0/`.
+Direct baseline comparison: `out/build/gcc13-l3-64k-release/eval/pair-results/grouped-gated-l3group-release-12-20261024/`.
+The acceptance suite now checks 64-KiB level-3 mixed and varied-text frames,
+including reciprocal decoding, in addition to its 22-level matrix. GCC 13
+Release and MSVC Debug acceptance runs both passed.
