@@ -723,6 +723,35 @@ Against the matched pre-change C++ worker, median throughput rose from
 means this is incremental progress, not completion of the all-level goal.
 Raw data: `out/aligned-strategy-control/ranked-repeat-confirm-*`.
 
+### Huffman scratch-buffer controls (2026-10-24, rejected)
+
+The current level-1 profile still attributes about 2.8% of samples to
+resizing the Huffman stream scratch vector. Computing the exact bit count
+before resizing preserved bytes but added a literal pass and slowed 256-KiB
+varied text from 3518.96 to 3281.66 MiB/s in six short balanced trials.
+Specializing the non-RLE FSE sequence loop was effectively neutral.
+
+An allocator that default-constructs scratch bytes without clearing them
+passed all ten GCC tests and an address/UB-sanitized unit run. The direct
+stream test now poisons its scratch storage before encoding to verify that
+every emitted byte is overwritten. Six longer 16-GiB trials showed modest
+256-KiB gains, but a separate 16-GiB-per-trial 64-KiB mixed control lost all
+six paired trials. The allocator was therefore not retained.
+
+| Corpus / level | Baseline MiB/s | Candidate MiB/s | Reference MiB/s |
+|---|---:|---:|---:|
+| 256 KiB varied / 1 | 3634.79 | 3682.76 | 3986.63 |
+| 256 KiB scaled mixed / 1 | 2421.78 | 2435.81 | 2452.90 |
+| 64 KiB scaled mixed / 1 | 1790.95 | 1771.68 | 1916.84 |
+| 1 MiB mixed / 2 | 2810.34 | 2820.44 | 2548.66 |
+
+The 256-KiB and 64-KiB rows use six 16-GiB position-balanced trials;
+the 1-MiB row uses six 4-GiB trials. Throughput is based on median elapsed
+time. Every candidate frame matched reference and reported no post-warmup
+allocations. Raw data: `out/aligned-strategy-control/exact-huf-size-*`,
+`fse-no-rle-*`, `overwrite-huf-confirm-*`, `overwrite-huf-size-*`, and
+`overwrite-huf-long-*`.
+
 ### Entropy follow-up: profiler and rejected variants (2026-10-24)
 
 A fresh CPU-cycle profile of the optimized generic GCC 13 workers on 256-KiB

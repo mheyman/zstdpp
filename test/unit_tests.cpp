@@ -1719,6 +1719,8 @@ namespace
                     scalar.append_unchecked(code.value, code.number_bits);
                 }
                 scalar.finish_into(expected);
+                actual.assign((length * 11U + 7U) / 8U + 8U, 0xA5U);
+                actual.clear();
                 sph::zstd::detail::encode_huffman_stream(input, codes, actual);
                 check(actual == expected, "direct Huffman stream matches scalar packing and end marker");
                 check(actual.capacity() == capacity, "direct Huffman stream reuses reserved storage");
@@ -1737,6 +1739,8 @@ namespace
                 for (auto count{length}; count > 0U; --count)
                     scalar.append_unchecked(value, width);
                 scalar.finish_into(expected);
+                actual.assign((length * 11U + 7U) / 8U + 8U, 0xA5U);
+                actual.clear();
                 sph::zstd::detail::encode_huffman_stream(input, codes, actual);
                 check(actual == expected, "minimum/maximum-length Huffman codes preserve full-stream packing");
                 check(actual.capacity() == capacity, "worst-case Huffman stream needs no growth");
