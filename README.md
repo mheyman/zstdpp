@@ -697,6 +697,31 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Rejected short-literal copy variants (2026-10-24)
+
+The level-1 256-KiB varied-text parser produces 1,746 three-byte literal runs
+among 1,759 sequences per frame. The scaled-mixed case produces 3,948
+one-byte runs among 4,355 sequences. This suggested replacing the encoder's
+overlapping 16-byte stores with exact three-/one-byte copies. A second variant
+used a four-byte store for the three-byte run. Both variants preserved exact
+reference frames and passed the workers' post-warmup allocation checks.
+Six balanced, CPU-2, optimized GCC 13 trials processed 2 GiB per worker per
+corpus. The retained production binary was rebuilt from the current source
+before either candidate. Medians in MiB/s were:
+
+| Corpus | Production | Exact small copy | Four-byte overlapping copy | Reference |
+|---|---:|---:|---:|---:|
+| 256 KiB varied text | 3618.73 / 3628.85 | 3604.60 | 3629.07 | 4058.61 / 4035.34 |
+| 256 KiB scaled mixed | 2426.73 / 2424.59 | 2431.80 | 2437.92 | 2515.50 / 2508.43 |
+
+The two production/reference values correspond to the separate exact-copy and
+four-byte experiments. The exact-copy candidate reduced instructions but was
+slower on varied text; the four-byte variant was neutral there. Mixed-input
+differences are small relative to trial variation. Neither variant is retained.
+The next target is sequence/entropy processing rather than literal copy width.
+Raw data: `out/aligned-strategy-control/exact-small-*` and
+`out/aligned-strategy-control/overlap-four-*`.
+
 ### Single-histogram fast literals below 8 KiB (2026-10-18)
 
 The GCC 13 grouped fast encoder now uses one literal histogram below 8 KiB,
