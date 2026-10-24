@@ -697,6 +697,37 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Rejected sequence-writer branch and bit-batching trials (2026-10-24)
+
+The lagging 256-KiB varied-text case has 1,759 sequences per frame. Its
+offset codes are 1,758 zeroes and one outlier; match-length codes are 1,757
+copies of code 43 and two outliers. Scaled mixed has 4,355 sequences, of
+which 3,839 use match-length code 12 and 4,241 use offset code zero. Three
+candidate writers were tested against a saved, same-source optimized GCC 13
+production binary on CPU 2. All emitted byte-identical reference frames and
+reported no post-warmup allocations.
+
+| Trial and corpus | Production throughput (MiB/s) | Candidate throughput (MiB/s) | Change |
+|---|---:|---:|---:|
+| Hoist FSE run-length checks, varied, 2 GiB/trial | 3573.49 | 3604.29 | +0.86% |
+| Hoist FSE run-length checks, scaled mixed, 2 GiB/trial | 2435.44 | 2412.61 | -0.94% |
+| Combine sequence extra fields, varied, 2 GiB/trial | 3599.82 | 3488.63 | -3.09% |
+| Combine sequence extra fields, scaled mixed, 2 GiB/trial | 2412.89 | 2471.21 | +2.42% |
+| Skip zero-bit extra fields, varied, 16 GiB/trial | 3600.54 | 3527.42 | -2.03% |
+| Skip zero-bit extra fields, scaled mixed, 16 GiB/trial | 2417.61 | 2433.29 | +0.65% |
+
+Each row is the median of six position-balanced trials. The FSE specialization
+did not lower retired instructions; GCC already handles that mode check well.
+The broad extra-field combination helped mixed but hurt the larger varied-text
+gap. A short 2-GiB screen initially favored the narrower zero-bit shortcut on
+both inputs, but the reversed-order 16-GiB confirmation showed a repeatable
+varied-text regression. Rebuilt unit and all-level reciprocal-decoding
+acceptance tests passed with that candidate; it was nevertheless reverted.
+No sequence-writer candidate is retained. The next architectural investigation
+is the bit writer's per-word vector growth versus reference's pointer writer.
+Raw data: `out/aligned-strategy-control/nonrle-fse-*`, `group-extra-*`,
+`zero-extra-*`, and `zero-extra-confirm-*`.
+
 ### Rejected short-literal copy variants (2026-10-24)
 
 The level-1 256-KiB varied-text parser produces 1,746 three-byte literal runs
