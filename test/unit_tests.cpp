@@ -2481,6 +2481,39 @@ namespace
         compressor.reset();
         check(compressor.status() == sph::zstd::stream_status::ready, "reset restores ready state");
     }
+
+    void test_chunked_bit_writer()
+    {
+        sph::zstd::detail::forward_bit_writer external_writer;
+        sph::zstd::detail::forward_bit_writer internal_writer;
+        for (std::size_t prefix_size : {0U, 1U, 7U, 255U})
+        {
+            for (unsigned word_count : {0U, 1U, 63U, 64U, 65U, 127U, 128U})
+            {
+                std::vector<std::uint8_t> external(prefix_size, 0xA5U);
+                external_writer.reset(external);
+                internal_writer.reset();
+                for (unsigned index{}; index < word_count; ++index)
+                {
+                    auto const value{0x9E3779B9U ^ (index * 0x85EBCA6BU)};
+                    external_writer.append(value, 32U);
+                    internal_writer.append(value, 32U);
+                    if ((index & 7U) == 0U)
+                    {
+                        external_writer.append_unchecked(1U, 1U);
+                        internal_writer.append_unchecked(1U, 1U);
+                    }
+                }
+                auto const expected{internal_writer.finish()};
+                external_writer.finish_into(external);
+                check(external.size() == prefix_size + expected.size() &&
+                    std::ranges::all_of(std::span<std::uint8_t const>{external}.first(prefix_size),
+                        [](std::uint8_t value) { return value == 0xA5U; }) &&
+                    std::ranges::equal(std::span<std::uint8_t const>{external}.subspan(prefix_size),
+                        expected), "chunked external bit writer preserves prefix and exact payload");
+            }
+        }
+    }
 }
 
 int main()
@@ -2557,6 +2590,7 @@ int main()
         test_match_state_table_allocations();
         test_optimal_three_byte_matches();
         test_flush_and_reset();
+        test_chunked_bit_writer();
     }
     catch (std::exception const& error)
     {

@@ -3213,6 +3213,7 @@ namespace sph::zstd::detail
         {
             bytes_.clear();
             external_output_ = nullptr;
+            external_write_position_ = 0U;
             bit_container_ = 0U;
             bit_count_ = 0U;
         }
@@ -3221,6 +3222,7 @@ namespace sph::zstd::detail
         {
             bytes_.clear();
             external_output_ = &output;
+            external_write_position_ = output.size();
             bit_container_ = 0U;
             bit_count_ = 0U;
         }
@@ -3237,17 +3239,7 @@ namespace sph::zstd::detail
             bit_count_ += count;
             if (bit_count_ >= 32U)
             {
-                auto& output{external_output_ != nullptr ? *external_output_ : bytes_};
-                auto const previous_size{output.size()};
-                output.resize(previous_size + sizeof(std::uint32_t));
-                auto completed{static_cast<std::uint32_t>(bit_container_)};
-                if constexpr (std::endian::native == std::endian::big)
-                {
-                    completed = std::byteswap(completed);
-                }
-                std::memcpy(output.data() + previous_size, &completed, sizeof(completed));
-                bit_container_ >>= 32U;
-                bit_count_ -= 32U;
+                flush_word();
             }
         }
 
@@ -3260,17 +3252,7 @@ namespace sph::zstd::detail
             bit_count_ += count;
             if (bit_count_ >= 32U)
             {
-                auto& output{external_output_ != nullptr ? *external_output_ : bytes_};
-                auto const previous_size{output.size()};
-                output.resize(previous_size + sizeof(std::uint32_t));
-                auto completed{static_cast<std::uint32_t>(bit_container_)};
-                if constexpr (std::endian::native == std::endian::big)
-                {
-                    completed = std::byteswap(completed);
-                }
-                std::memcpy(output.data() + previous_size, &completed, sizeof(completed));
-                bit_container_ >>= 32U;
-                bit_count_ -= 32U;
+                flush_word();
             }
         }
 
@@ -3291,6 +3273,10 @@ namespace sph::zstd::detail
             {
                 throw entropy_error{"bit writer finished into a different output buffer"};
             }
+            else
+            {
+                output.resize(external_write_position_);
+            }
             auto remaining{bit_container_};
             auto const byte_count{(bit_count_ + 7U) / 8U};
             for (unsigned index{}; index < byte_count; ++index)
@@ -3303,6 +3289,37 @@ namespace sph::zstd::detail
         }
 
     private:
+        void flush_word()
+        {
+            auto completed{static_cast<std::uint32_t>(bit_container_)};
+            if constexpr (std::endian::native == std::endian::big)
+            {
+                completed = std::byteswap(completed);
+            }
+            if (external_output_ != nullptr)
+            {
+                // Resize in chunks so a long sequence stream does not update
+                // vector size and zero-initialize four bytes on every flush.
+                // finish_into() removes the unused part of the last chunk.
+                constexpr std::size_t chunk_size{256U};
+                auto& output{*external_output_};
+                if (external_write_position_ + sizeof(completed) > output.size())
+                {
+                    output.resize(external_write_position_ + chunk_size);
+                }
+                std::memcpy(output.data() + external_write_position_, &completed, sizeof(completed));
+                external_write_position_ += sizeof(completed);
+            }
+            else
+            {
+                auto const previous_size{bytes_.size()};
+                bytes_.resize(previous_size + sizeof(completed));
+                std::memcpy(bytes_.data() + previous_size, &completed, sizeof(completed));
+            }
+            bit_container_ >>= 32U;
+            bit_count_ -= 32U;
+        }
+
         void finish_marker(std::vector<std::uint8_t>& output) const
         {
             auto const bit_offset{bit_count_ & 7U};
@@ -3318,6 +3335,7 @@ namespace sph::zstd::detail
 
         std::vector<std::uint8_t> bytes_;
         std::vector<std::uint8_t>* external_output_{};
+        std::size_t external_write_position_{};
         std::uint64_t bit_container_{};
         unsigned bit_count_{};
     };

@@ -697,6 +697,45 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Chunked external bit-writer growth (2026-10-24)
+
+The sequence bit writer previously resized its output vector for every
+completed 32-bit word. It now grows the external output in 256-byte chunks,
+writes completed words at a separate logical cursor, and trims the unused tail
+when the stream finishes. The internal bit-writer mode is unchanged. This
+amortizes vector-size updates and zero-fill calls without adding
+post-warmup allocations. A new unit test covers reused writers, nonempty
+prefixes, and both sides of the chunk boundary; a GCC address/UB-sanitized
+stress test also passes. All ten GCC tests, including all-level byte parity
+and reciprocal decoding, pass.
+
+The optimized GCC 13 comparison used `-O3 -DNDEBUG` for the C++ and reference
+workers, CPU 2, and six position-balanced trials per row. The 256-KiB rows
+are the longer, reversed-order 16-GiB confirmations; size controls processed
+4 GiB per worker per trial. Every candidate and baseline frame matched
+reference, and the C++ workers detected no allocations after warmup. Peak
+RSS and complete no-debug-symbol worker sizes use the same definitions as the
+other reports. The final 256-KiB worker is byte-identical to the measured one.
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64 KiB varied compression 1 | 3640.05 | 3549.88 | 102.54% | 4.13 | 4.01 | 103.02% | 126.55 | 628.16 | 20.15% |
+| 64 KiB scaled-mixed compression 1 | 1809.84 | 1929.55 | 93.80% | 4.08 | 4.01 | 101.80% | 126.55 | 628.16 | 20.15% |
+| 256 KiB varied compression 1 | 3566.06 | 3997.29 | 89.21% | 4.37 | 4.37 | 100.09% | 126.55 | 628.16 | 20.15% |
+| 256 KiB scaled-mixed compression 1 | 2390.44 | 2466.71 | 96.91% | 4.50 | 4.50 | 100.04% | 126.55 | 628.16 | 20.15% |
+| 1 MiB varied compression 1 | 3313.09 | 3455.90 | 95.87% | 5.11 | 5.88 | 86.87% | 126.87 | 628.16 | 20.20% |
+| 1 MiB mixed compression 1 | 2335.65 | 2166.69 | 107.80% | 5.49 | 6.14 | 89.38% | 126.87 | 628.16 | 20.20% |
+| 1 MiB mixed compression 2 | 2811.85 | 2542.37 | 110.60% | 5.59 | 6.23 | 89.75% | 126.56 | 628.16 | 20.15% |
+
+Against freshly matched C++ baseline binaries, the respective changes were
++0.44%, +1.68%, +0.70%, -0.21%, +0.04%, +1.73%, and +3.49%. On the longer
+256-KiB varied confirmation, C++ won five of six pairs; instructions fell
+from 78.373 to 78.004 billion and cycles from 20.715 to 20.501 billion.
+The scaled-mixed confirmation was effectively neutral. The wider varied-text
+gap remains, so this is an incremental improvement, not completion of the
+all-level speed goal. Raw data: `out/aligned-strategy-control/chunked-bits-*`
+and `out/aligned-strategy-control/chunk-size-*`.
+
 ### Rejected sequence-writer branch and bit-batching trials (2026-10-24)
 
 The lagging 256-KiB varied-text case has 1,759 sequences per frame. Its
