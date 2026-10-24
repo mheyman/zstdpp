@@ -137,15 +137,20 @@ namespace sph::zstd::detail
         return largest_total <= ((2U * sample_size) >> 7U) + 4U;
     }
 
-    template <std::size_t ParallelThreshold = 1500U>
+    // Sequence-code callers may bound the alphabet; only that prefix of the
+    // returned workspace is valid when AlphabetSize is smaller than 256.
+    template <std::size_t ParallelThreshold = 1500U, std::size_t AlphabetSize = 256U>
     [[nodiscard]] inline auto count_symbols(std::span<std::uint8_t const> input,
         symbol_count_workspace& workspace) noexcept -> symbol_counts const&
     {
+        static_assert(AlphabetSize > 0U && AlphabetSize <= 256U);
         if (input.size() < ParallelThreshold)
         {
-            workspace[0].fill(0U);
+            if constexpr (AlphabetSize == 256U) workspace[0].fill(0U);
+            else std::fill_n(workspace[0].begin(), AlphabetSize, 0U);
             for (auto const symbol : input)
             {
+                assert(symbol < AlphabetSize);
                 ++workspace[0][symbol];
             }
             return workspace[0];
@@ -153,7 +158,8 @@ namespace sph::zstd::detail
 
         for (auto& counts : workspace)
         {
-            counts.fill(0U);
+            if constexpr (AlphabetSize == 256U) counts.fill(0U);
+            else std::fill_n(counts.begin(), AlphabetSize, 0U);
         }
         auto position{std::size_t{0}};
         for (; position + 16U <= input.size(); position += 16U)
@@ -161,6 +167,8 @@ namespace sph::zstd::detail
             for (std::size_t stripe{}; stripe < 4U; ++stripe)
             {
                 auto const begin{position + stripe * 4U};
+                assert(input[begin] < AlphabetSize && input[begin + 1U] < AlphabetSize &&
+                    input[begin + 2U] < AlphabetSize && input[begin + 3U] < AlphabetSize);
                 ++workspace[0][input[begin]];
                 ++workspace[1][input[begin + 1U]];
                 ++workspace[2][input[begin + 2U]];
@@ -169,9 +177,10 @@ namespace sph::zstd::detail
         }
         for (; position < input.size(); ++position)
         {
+            assert(input[position] < AlphabetSize);
             ++workspace[0][input[position]];
         }
-        for (std::size_t symbol{}; symbol < workspace[0].size(); ++symbol)
+        for (std::size_t symbol{}; symbol < AlphabetSize; ++symbol)
         {
             workspace[0][symbol] += workspace[1][symbol] + workspace[2][symbol] +
                 workspace[3][symbol];
@@ -5037,7 +5046,8 @@ namespace sph::zstd::detail
         throw entropy_error{"unknown predefined FSE compression table"};
     }
 
-    template <bool CarefulSelection = false, bool DominantPrefix = false>
+    template <bool CarefulSelection = false, bool DominantPrefix = false,
+        std::size_t AlphabetSize = 256U>
     [[nodiscard]] inline auto select_sequence_table(
         std::span<std::uint8_t const> codes,
         std::span<std::int16_t const> default_counts,
@@ -5051,9 +5061,9 @@ namespace sph::zstd::detail
     {
         description.clear();
         auto const& counts{DominantPrefix ? count_symbols_dominant_prefix(codes, histogram_workspace) :
-            count_symbols<128U>(codes, histogram_workspace)};
+            count_symbols<128U, AlphabetSize>(codes, histogram_workspace)};
         unsigned maximum_symbol{};
-        for (unsigned symbol{}; symbol < counts.size(); ++symbol)
+        for (unsigned symbol{}; symbol < AlphabetSize; ++symbol)
         {
             if (counts[symbol] != 0U)
             {
@@ -5358,11 +5368,13 @@ namespace sph::zstd::detail
         entropy_trace.literals_ns += entropy_trace_elapsed(entropy_phase_start);
         entropy_phase_start = std::chrono::steady_clock::now();
 #endif
-        auto const literal_table{select_sequence_table<CarefulSelection, GroupFse>(literal_code_bytes,
+        auto const literal_table{select_sequence_table<CarefulSelection, GroupFse,
+            CarefulSelection ? 256U : literal_length_base.size()>(literal_code_bytes,
             literal_length_default_norm, 6U, 9U, true, workspace.table_descriptions[0],
             workspace.sequence_tables[0], workspace.histogram_workspace,
             workspace.sequence_histories[0])};
-        auto const offset_table{select_sequence_table<CarefulSelection, GroupFse>(offset_code_bytes,
+        auto const offset_table{select_sequence_table<CarefulSelection, GroupFse,
+            CarefulSelection ? 256U : offset_base.size()>(offset_code_bytes,
             offset_default_norm, 5U, 8U,
             // Code generation rejects symbols outside the default alphabet.
             // Skip the redundant scan in the measured grouped fast path;
@@ -5370,7 +5382,8 @@ namespace sph::zstd::detail
             GroupFse || *std::max_element(offset_code_bytes.begin(), offset_code_bytes.end()) <= 28U,
             workspace.table_descriptions[1], workspace.sequence_tables[1],
             workspace.histogram_workspace, workspace.sequence_histories[1])};
-        auto const match_length_table{select_sequence_table<CarefulSelection, GroupFse>(match_code_bytes,
+        auto const match_length_table{select_sequence_table<CarefulSelection, GroupFse,
+            CarefulSelection ? 256U : match_length_base.size()>(match_code_bytes,
             match_length_default_norm, 6U, 9U, true, workspace.table_descriptions[2],
             workspace.sequence_tables[2], workspace.histogram_workspace,
             workspace.sequence_histories[2])};

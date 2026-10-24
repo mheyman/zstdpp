@@ -7029,3 +7029,50 @@ and `run-1792856217808323-0/`. Direct comparisons: the same build's
 `pair-results/grouped-gated-adaptive-wide-l2-{varied,balanced,balanced-confirm}-20261024/`.
 GCC 13 all-level Release parity and units, GCC ASan/UBSan units, and MSVC Debug
 units and all-level reciprocal acceptance passed.
+
+### Bounded sequence-code histograms for fast and double-fast levels
+
+The fast and double-fast entropy path now scans only the valid sequence-code
+counters: 36 literal-length, 32 offset, and 53 match-length symbols. Its
+ordinary striped histogram also clears and combines only those prefixes;
+the specialized dominant-prefix histogram retains its existing counting
+policy. The general 256-symbol and careful-selection paths remain unchanged.
+No per-frame allocation was added.
+
+Against saved optimized C++ workers, six alternating direct pairs showed
+level-1 varied 1-MiB compression improving from 3281.89 to 3391.64 MiB/s
+(+3.34%, six wins) and level-3 varied/mixed improving from 2476.15/1814.10
+to 2525.83/1932.11 MiB/s (+2.01%/+6.51%, six wins each). Level-2 1-MiB
+varied/mixed changes were small (+0.25%/+0.88%). The strongest level-2
+256-KiB effect was mixed input: a reversed-order, 200,000-frame confirmation
+improved 22675.80 to 23623.20 MiB/s (+4.18%, six wins); varied and balanced
+were +0.13% and +1.16% in the same confirmation. Every direct comparison
+produced identical frames. On 256-KiB mixed input, `perf stat` measured about
+2.0% fewer user instructions and 1.9% fewer user cycles.
+
+Current paired optimized GCC 13 Release reports (six alternating trials per
+row) check exact compressed bytes and decode both encodings with both
+implementations. The 1-MiB rows use 2,000 frames per trial; the 256-KiB rows
+use 4,000. Memory is median peak RSS; code is worker executable size.
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB varied-text compression 1 | 3405.61 | 3433.57 | 99.19% | 5.11 | 5.88 | 86.95% | 131.23 | 628.16 | 20.89% |
+| 1-MiB mixed compression 1 | 2327.44 | 2191.72 | 106.19% | 5.49 | 6.14 | 89.37% | 131.23 | 628.16 | 20.89% |
+| 1-MiB varied-text compression 2 | 3352.88 | 3467.76 | 96.69% | 5.22 | 6.12 | 85.31% | 127.15 | 628.16 | 20.24% |
+| 1-MiB mixed compression 2 | 2793.79 | 2516.55 | 111.02% | 5.63 | 6.26 | 89.92% | 127.15 | 628.16 | 20.24% |
+| 1-MiB varied-text compression 3 | 2546.23 | 2573.23 | 98.95% | 5.98 | 6.62 | 90.38% | 127.61 | 628.16 | 20.31% |
+| 1-MiB mixed compression 3 | 1902.74 | 1786.28 | 106.52% | 6.25 | 6.70 | 93.21% | 127.61 | 628.16 | 20.31% |
+| 256-KiB varied-text compression 2 | 3073.33 | 3617.66 | 84.95% | 4.36 | 4.49 | 97.09% | 131.66 | 628.16 | 20.96% |
+| 256-KiB balanced compression 2 | 2010.57 | 2080.60 | 96.63% | 4.61 | 4.45 | 103.69% | 131.66 | 628.16 | 20.96% |
+| 256-KiB mixed compression 2 | 22801.06 | 9451.15 | 241.25% | 4.36 | 4.51 | 96.75% | 131.66 | 628.16 | 20.96% |
+
+The 1-MiB reports are in `out/build/gcc13-all-levels/eval/pair-results/`
+(`run-1792866582114652-0` through `run-1792866628081761-0`); the
+256-KiB reports are in `out/build/gcc13-l2-256k-release/eval/pair-results/`
+(`run-1792866661649730-0`, `run-1792866665683205-0`, and
+`run-1792866672055478-0`). Direct baseline trials are in
+`out/bounded-sequence-hist-20261024/`. GCC 13 Release all-level acceptance,
+optimized and ASan/UBSan units, and MSVC Release level-1/3 paired accuracy
+smoke tests passed. The varied-text level-1–3 and 256-KiB level-2 gaps remain;
+this is not an all-level speed lead.

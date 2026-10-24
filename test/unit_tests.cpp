@@ -936,6 +936,35 @@ namespace
         }
     }
 
+    void test_bounded_sequence_histograms()
+    {
+        using namespace sph::zstd::detail;
+        auto const verify = []<std::size_t AlphabetSize>()
+        {
+            symbol_count_workspace workspace;
+            for (auto const length : {0U, 1U, 127U, 128U, 129U, 1500U, 5000U})
+            {
+                std::vector<std::uint8_t> codes(length);
+                symbol_counts expected{};
+                for (std::size_t index{}; index < codes.size(); ++index)
+                {
+                    codes[index] = static_cast<std::uint8_t>((index * 13U + AlphabetSize - 1U) % AlphabetSize);
+                    ++expected[codes[index]];
+                }
+                for (auto& stripe : workspace) stripe.fill(0xbeefU);
+                auto const& actual{count_symbols<128U, AlphabetSize>(codes, workspace)};
+                check(std::equal(expected.begin(), expected.begin() + AlphabetSize, actual.begin()),
+                    "bounded sequence histogram matches full-alphabet counts");
+                check(std::all_of(actual.begin() + AlphabetSize, actual.end(),
+                    [](auto count) { return count == 0xbeefU; }),
+                    "bounded sequence histogram leaves unused counters untouched");
+            }
+        };
+        verify.template operator()<32U>();
+        verify.template operator()<36U>();
+        verify.template operator()<53U>();
+    }
+
     void test_rle_blocks()
     {
         std::vector<std::uint8_t> const input(400, 0xA5U);
@@ -2632,6 +2661,7 @@ int main()
         test_huffman_explicit_depths();
         test_predefined_sequence_table_description();
         test_symbol_histogram_reuse();
+        test_bounded_sequence_histograms();
         test_rle_blocks();
         test_normalized_count_round_trips();
         test_fse_table_replacement();
