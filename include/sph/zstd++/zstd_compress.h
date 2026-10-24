@@ -639,8 +639,14 @@ namespace sph::zstd
                                Parameters.compression_level == 2 &&
                                effective_parameters_.pledged_source_size != 0U &&
                                effective_parameters_.pledged_source_size <= 262144U)
+                            // Dense-sequence blocks use the wider grouped
+                            // writer; sparse blocks keep the scalar writer.
+                            , (effective_parameters_.strategy == compression_strategy::double_fast &&
+                               Parameters.compression_level == 2 &&
+                               effective_parameters_.pledged_source_size != 0U &&
+                               effective_parameters_.pledged_source_size <= 262144U)
 #else
-                            , false, false, false, false
+                            , false, false, false, false, false
 #endif
                             >(
                             input, parsed_, compression_workspace_, compressed);

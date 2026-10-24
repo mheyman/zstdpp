@@ -6961,3 +6961,39 @@ and `run-1792855006085205-0/`. Direct comparisons: the same build's
 The acceptance suite now checks 256-KiB level-2 mixed and varied-text frames
 with reciprocal decoding, alongside the 22-level matrix. GCC 13 Release and
 MSVC Debug acceptance, GCC Release units, and GCC ASan/UBSan units passed.
+
+### Block-scoped wide sequence writer for 256-KiB level 2
+
+The GCC 13 level-2 double-fast encoder now selects its sequence bit writer
+after shared Huffman and FSE table construction. Blocks with at most eight
+literal bytes per sequence use the 64-bit grouped writer; other blocks keep
+the 32-bit scalar writer. This avoids the balanced-input regression measured
+when the 64-bit writer was applied to every block. The optimization remains
+limited to pledged frames of at most 256 KiB. Rebuilt 64-KiB level-1 and
+level-3 workers and the 1-MiB level-2 worker have instruction sections
+identical to their pre-change versions.
+
+Against the saved C++ baseline, eight of eight order-balanced 20,000-frame
+varied-text pairs favored the block-scoped writer (2.66% median paired gain);
+all frames matched byte-for-byte. An initial eight balanced-input pairs were
+mixed. A longer, 40,000-frame-per-worker confirmation favored the candidate
+in eight of twelve pairs (1.22% median paired gain), but individual results
+still ranged from -2.70% to +5.96%. Balanced `perf stat` measured 0.59% fewer
+instructions but essentially unchanged cycles, so its gain is not established
+as strongly as the varied-text gain. The small mixed fixture was too fast to
+serve as a reliable control. The reference remains faster on both reported
+inputs.
+
+Final six-trial optimized GCC 13 Release reports check exact frames in every
+trial and decode both encodings with both implementations:
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256-KiB varied-text compression 2 | 3047.92 | 3586.16 | 84.99% | 4.51 | 4.51 | 99.96% | 127.02 | 628.16 | 20.22% |
+| 256-KiB balanced compression 2 | 2077.20 | 2130.42 | 97.50% | 4.62 | 4.54 | 101.76% | 127.02 | 628.16 | 20.22% |
+
+Reports: `out/build/gcc13-l2-256k-release/eval/pair-results/run-1792856199236846-0/`
+and `run-1792856217808323-0/`. Direct comparisons: the same build's
+`pair-results/grouped-gated-adaptive-wide-l2-{varied,balanced,balanced-confirm}-20261024/`.
+GCC 13 all-level Release parity and units, GCC ASan/UBSan units, and MSVC Debug
+units and all-level reciprocal acceptance passed.
