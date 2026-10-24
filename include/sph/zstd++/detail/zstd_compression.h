@@ -5170,12 +5170,14 @@ namespace sph::zstd::detail
     template <bool CarefulSelection = false, bool GroupFse = false, bool CollectedLiterals = false,
         bool OptimalHuffmanDepth = false, unsigned LiteralGainLog = (OptimalHuffmanDepth ? 7U : 6U),
         bool DeferredCodes = false, bool WideSequenceBits = false,
+        bool PackedLengthBits = false,
         bool AlignedLiterals, typename ParsedView = parsed_block_view>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         std::type_identity_t<ParsedView> const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
         std::vector<std::uint8_t>& output)
     {
         static_assert(!WideSequenceBits || GroupFse);
+        static_assert(!PackedLengthBits || GroupFse);
         output.clear();
         if (parsed.sequences.empty())
         {
@@ -5368,8 +5370,25 @@ namespace sph::zstd::detail
                 match_state.encode(bits, match_code);
                 literal_state.encode(bits, literal_code);
             }
-            bits.append(sequence.literal_length, literal_length_bits[literal_code]);
-            bits.append(sequence.match_length - 3U, match_length_bits[match_code]);
+            if constexpr (PackedLengthBits)
+            {
+                auto const ll_bits{literal_length_bits[literal_code]};
+                auto const ml_bits{match_length_bits[match_code]};
+                auto const count{static_cast<unsigned>(ll_bits) + ml_bits};
+                if (count != 0U)
+                {
+                    auto const ll_mask{(1U << ll_bits) - 1U};
+                    auto const ml_mask{(1U << ml_bits) - 1U};
+                    auto const packed{(sequence.literal_length & ll_mask) |
+                        (((sequence.match_length - 3U) & ml_mask) << ll_bits)};
+                    bits.append_unchecked(packed, count);
+                }
+            }
+            else
+            {
+                bits.append(sequence.literal_length, literal_length_bits[literal_code]);
+                bits.append(sequence.match_length - 3U, match_length_bits[match_code]);
+            }
             bits.append(encoded_offset, offset_code);
         }
         match_state.flush(bits);
@@ -5383,13 +5402,15 @@ namespace sph::zstd::detail
 
     template <bool CarefulSelection = false, bool GroupFse = false, bool CollectedLiterals = false,
         bool OptimalHuffmanDepth = false, unsigned LiteralGainLog = (OptimalHuffmanDepth ? 7U : 6U),
-        bool DeferredCodes = false, bool WideSequenceBits = false, bool AlignedLiterals>
+        bool DeferredCodes = false, bool WideSequenceBits = false,
+        bool PackedLengthBits = false, bool AlignedLiterals>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         compact_parsed_block const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
         std::vector<std::uint8_t>& output)
     {
         encode_sequences_block<CarefulSelection, GroupFse, CollectedLiterals,
             OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, WideSequenceBits,
+            PackedLengthBits,
             AlignedLiterals, compact_parsed_block_view>(
                 input, compact_parsed_block_view{parsed}, workspace, output);
     }

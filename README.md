@@ -6857,3 +6857,37 @@ and `out/build/gcc13-pair-256k/eval/pair-results/run-1792850210934910-0/`.
 All 22 GCC Release acceptance levels, both decoders, the focused writer unit
 test, and GCC address/undefined sanitizer controls passed. The remaining
 small-input reference gaps are still optimization targets.
+
+### Packed length extra bits for 64-KiB level 1
+
+The GCC 13 level-1 fast writer now combines the literal-length and match-length
+extra-bit fields into one bit-writer append when the compile-time pledged frame
+size is at most 64 KiB. The two fields total at most 32 bits; a focused unit
+test checks every pair of legal widths (0–16 bits) against separate writes,
+including the 32-bit boundary. No other strategy or larger frame uses the
+packing path.
+
+Two independent, order-balanced runs of six CPU-2-affined baseline/candidate
+pairs on 64-KiB scaled-mixed input (60,000 frames per worker per pair) favored
+the packed writer in 10 of 12 pairs. Median paired gains were 1.94% and 1.33%.
+All frames matched exactly. The gated Release worker's executable instruction
+section has the same SHA-256 hash as the measured candidate. Level-1 1-MiB
+and level-2 workers retain instruction sections identical to their saved
+pre-change binaries. Trials at 256 KiB and 1 MiB did not establish a stable
+enough gain to enable this path there.
+
+The final six-trial GCC 13 Release comparison below used both implementations'
+optimized workers, checked exact compressed bytes in every trial, and checked
+both encodings with both decoders. Peak RSS and whole-worker code size include
+runtime overhead; this is a targeted improvement, not yet a reference-speed
+lead at 64 KiB.
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 64-KiB scaled-mixed compression 1 | 1794.84 | 1885.60 | 95.19% | 4.10 | 3.98 | 102.99% | 122.47 | 628.16 | 19.50% |
+
+Paired report: `out/build/gcc13-pair-64k/eval/pair-results/run-1792852558487886-0/`.
+Direct baseline comparisons: `out/build/gcc13-pair-64k/eval/pair-results/grouped-gated-pack64-20261024/`
+and `grouped-gated-pack64-repeat-20261024/`. All 11 GCC Release tests,
+including 22-level compression parity, passed, as did the updated GCC
+ASan/UBSan unit suite and MSVC unit test.

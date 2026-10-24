@@ -613,8 +613,15 @@ namespace sph::zstd
                             , (effective_parameters_.strategy == compression_strategy::fast &&
                                effective_parameters_.pledged_source_size != 0U &&
                                effective_parameters_.pledged_source_size <= 262144U)
+                            // Packing LL/ML extra bits wins on the measured
+                            // 64-KiB level-1 fast specialization. Larger
+                            // frames had mixed or negative paired results.
+                            , (effective_parameters_.strategy == compression_strategy::fast &&
+                               Parameters.compression_level == 1 &&
+                               effective_parameters_.pledged_source_size != 0U &&
+                               effective_parameters_.pledged_source_size <= 65536U)
 #else
-                            , false
+                            , false, false
 #endif
                             >(
                             input, parsed_, compression_workspace_, compressed);

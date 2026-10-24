@@ -2575,6 +2575,34 @@ namespace
             }
         }
     }
+
+    void test_packed_length_extra_bits()
+    {
+        for (unsigned ll_bits{}; ll_bits <= 16U; ++ll_bits)
+            for (unsigned ml_bits{}; ml_bits <= 16U; ++ml_bits)
+                for (auto const value : {0U, 0xFFFFFFFFU, 0x9E3779B9U})
+                {
+                    sph::zstd::detail::forward_bit_writer expected;
+                    sph::zstd::detail::forward_bit_writer packed;
+                    expected.append(5U, 3U);
+                    packed.append(5U, 3U);
+                    expected.append(value, ll_bits);
+                    expected.append(value ^ 0x85EBCA6BU, ml_bits);
+                    auto const count{ll_bits + ml_bits};
+                    if (count != 0U)
+                    {
+                        auto const ll_mask{(1U << ll_bits) - 1U};
+                        auto const ml_mask{(1U << ml_bits) - 1U};
+                        auto const combined{(value & ll_mask) |
+                            (((value ^ 0x85EBCA6BU) & ml_mask) << ll_bits)};
+                        packed.append_unchecked(combined, count);
+                    }
+                    expected.append(0x1F3DU, 15U);
+                    packed.append(0x1F3DU, 15U);
+                    check(expected.finish() == packed.finish(),
+                        "packed length extra bits preserve field order and boundaries");
+                }
+    }
 }
 
 int main()
@@ -2653,6 +2681,7 @@ int main()
         test_flush_and_reset();
         test_chunked_bit_writer();
         test_wide_sequence_bit_writer();
+        test_packed_length_extra_bits();
     }
     catch (std::exception const& error)
     {
