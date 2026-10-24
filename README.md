@@ -756,6 +756,43 @@ Against matched pre-change C++ workers, median throughput changed by
 effectively neutral. The 256-KiB varied gap remains, so the all-level speed
 goal is not complete. Raw data: `out/aligned-strategy-control/dominant-window-*`.
 
+### 64-KiB entropy profile and FSE-layout controls (2026-10-24)
+
+A matched optimized GCC 13 CPU-cycle sample on 16 GiB of 64-KiB scaled-mixed
+input attributed about 41.39 billion cycles to C++ and 38.56 billion to
+reference. The fast parsers accounted for approximately 15.85 and 17.06
+billion respectively, so the remaining deficit is outside match search.
+C++ `encode_sequences_block` took 33.01% of its samples and sequence-table
+selection another 10.26%; FSE emission and transition source lines alone
+accounted for about 10.45%. Reference reports its equivalent work across
+`ZSTD_encodeSequences_bmi2`, `ZSTD_seqToCodes`, and histogram builders, so
+these function percentages should not be compared one-for-one.
+
+Three output-preserving candidates were screened against matched saved
+binaries. Removing repeat code-length checks from the trusted Huffman writer
+was neutral. Caching FSE state/transform pointers like reference's state
+structure slowed 64-KiB mixed and 256-KiB varied input. Aligning the entire
+FSE table to 64 bytes also slowed both mixed controls. The measured values
+below are median MiB/s from six position-balanced 2-GiB trials for 256-KiB
+input and 4-GiB trials for 64-KiB input; none was retained.
+
+| Rejected variant / corpus | Baseline | Candidate |
+|---|---:|---:|
+| Trusted Huffman codes / 256-KiB varied | 3741.65 | 3749.51 |
+| Trusted Huffman codes / 256-KiB scaled mixed | 2459.44 | 2459.61 |
+| Direct FSE table pointers / 64-KiB scaled mixed | 1713.73 | 1689.05 |
+| Direct FSE table pointers / 256-KiB varied | 3654.80 | 3600.67 |
+| Direct FSE table pointers / 256-KiB scaled mixed | 2416.31 | 2432.25 |
+| Cache-aligned FSE table / 64-KiB scaled mixed | 1768.44 | 1759.30 |
+| Cache-aligned FSE table / 256-KiB varied | 3680.95 | 3690.11 |
+| Cache-aligned FSE table / 256-KiB scaled mixed | 2453.70 | 2419.43 |
+
+Every candidate frame matched reference and reported no post-warmup
+allocations. The next target is per-sequence bit emission and transitions,
+not table-pointer or alignment layout. Raw data:
+`out/aligned-strategy-control/trusted-huf-*`, `fse-state-pointers-*`, and
+`aligned-fse-*`.
+
 ### Huffman scratch-buffer controls (2026-10-24, rejected)
 
 The current level-1 profile still attributes about 2.8% of samples to
