@@ -33,17 +33,19 @@ namespace
         return value;
     }();
 
-    inline constexpr auto short_level3_parameters = []
+    template <int Level, std::size_t SourceSize>
+    inline constexpr auto sized_parameters = []
     {
-        auto value{parameters<3>};
-        value.pledged_source_size = 65536U;
+        auto value{parameters<Level>};
+        value.pledged_source_size = SourceSize;
         return value;
     }();
 
-    auto compress_cpp_short_level3(std::span<std::uint8_t const> input) -> std::vector<std::uint8_t>
+    template <int Level, std::size_t SourceSize>
+    auto compress_cpp_sized(std::span<std::uint8_t const> input) -> std::vector<std::uint8_t>
     {
         std::vector<std::uint8_t> encoded;
-        auto compressor = sph::zstd::make_zstd_compress<short_level3_parameters>(
+        auto compressor = sph::zstd::make_zstd_compress<sized_parameters<Level, SourceSize>>(
             [&encoded](std::span<std::uint8_t const> output)
             {
                 encoded.insert(encoded.end(), output.begin(), output.end());
@@ -135,6 +137,18 @@ namespace
         }
         decompressor.finish();
         return decompressor.decoded_size() == input.size() && std::ranges::equal(decoded, input);
+    }
+
+    template <int Level, std::size_t SourceSize>
+    auto check_sized_level(std::span<std::uint8_t const> input, std::string_view name) -> bool
+    {
+        auto const cpp{compress_cpp_sized<Level, SourceSize>(input)};
+        auto const reference{compress_reference(input, Level)};
+        auto const matched{cpp == reference && reference_decodes(cpp, input) &&
+            cpp_decodes(reference, input)};
+        std::cout << SourceSize / 1024U << "-KiB level " << Level << ' ' << name << ": "
+                  << (matched ? "[PASS]" : "[FAIL]") << '\n';
+        return matched;
     }
 
     auto reference_sequence_blocks(std::span<std::uint8_t const> input, int level)
@@ -427,20 +441,14 @@ int main()
         varied_text[index] = static_cast<std::uint8_t>(paragraph[index % paragraph.size()]);
     for (std::size_t index{96U}; index < varied_text.size(); index += 149U)
         varied_text[index] = static_cast<std::uint8_t>((index / 149U) & 255U);
-    auto check_short_level3 = [](std::span<std::uint8_t const> short_input,
-        std::string_view name) -> bool
-    {
-        auto const cpp{compress_cpp_short_level3(short_input)};
-        auto const reference{compress_reference(short_input, 3)};
-        auto const matched{cpp == reference && reference_decodes(cpp, short_input) &&
-            cpp_decodes(reference, short_input)};
-        std::cout << "64-KiB level 3 " << name << ": " << (matched ? "[PASS]" : "[FAIL]") << '\n';
-        return matched;
-    };
     auto const short_mixed{sph::zstd::eval::make_mixed_corpus(65536U)};
-    auto const short_mixed_matches{check_short_level3(short_mixed, "mixed")};
-    auto const short_varied_matches{check_short_level3(
+    auto const short_mixed_matches{check_sized_level<3, 65536U>(short_mixed, "mixed")};
+    auto const short_varied_matches{check_sized_level<3, 65536U>(
         std::span<std::uint8_t const>{varied_text}.first(65536U), "varied text")};
+    auto const medium_mixed{sph::zstd::eval::make_mixed_corpus(262144U)};
+    auto const medium_mixed_matches{check_sized_level<2, 262144U>(medium_mixed, "mixed")};
+    auto const medium_varied_matches{check_sized_level<2, 262144U>(
+        std::span<std::uint8_t const>{varied_text}.first(262144U), "varied text")};
     std::cout << "varied-text corpus:\n";
     auto const varied_row_matches{std::array{
         check_level<5>(varied_text), check_level<6>(varied_text),
@@ -466,7 +474,8 @@ int main()
     std::cout << "Huffman history across raw literals:\n";
     auto const huffman_history_matches{check_level<19>(
         sph::zstd::eval::make_optimal_presplit_corpus(11U))};
-    if (!short_mixed_matches || !short_varied_matches || !huffman_history_matches ||
+    if (!short_mixed_matches || !short_varied_matches || !medium_mixed_matches ||
+        !medium_varied_matches || !huffman_history_matches ||
         !std::ranges::all_of(presplit_matches, std::identity{}) ||
         !std::ranges::all_of(transition_matches, std::identity{}) ||
         !std::ranges::all_of(varied_row_matches, std::identity{}) ||

@@ -5170,14 +5170,15 @@ namespace sph::zstd::detail
     template <bool CarefulSelection = false, bool GroupFse = false, bool CollectedLiterals = false,
         bool OptimalHuffmanDepth = false, unsigned LiteralGainLog = (OptimalHuffmanDepth ? 7U : 6U),
         bool DeferredCodes = false, bool WideSequenceBits = false,
-        bool PackedLengthBits = false,
-        bool AlignedLiterals, typename ParsedView = parsed_block_view>
+        bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
+        bool AdaptiveGroupedWrites = false, bool AlignedLiterals,
+        typename ParsedView = parsed_block_view>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         std::type_identity_t<ParsedView> const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
         std::vector<std::uint8_t>& output)
     {
-        static_assert(!WideSequenceBits || GroupFse);
-        static_assert(!PackedLengthBits || GroupFse);
+        static_assert(!WideSequenceBits || GroupedStateWrites);
+        static_assert(!PackedLengthBits || GroupedStateWrites);
         output.clear();
         if (parsed.sequences.empty())
         {
@@ -5336,6 +5337,8 @@ namespace sph::zstd::detail
         bits.append(last.literal_length, literal_length_bits[last_literal_code]);
         bits.append(last.match_length - 3U, match_length_bits[last_match_code]);
         bits.append(last_offset_base, last_offset_code);
+        auto const use_grouped{AdaptiveGroupedWrites &&
+            literal_size <= parsed.sequences.size() * 8U};
         for (std::size_t index{last_index}; index-- > 0U;)
         {
             auto const& sequence{parsed.sequences[index]};
@@ -5344,7 +5347,7 @@ namespace sph::zstd::detail
             auto const match_code{match_codes[index]};
             auto const encoded_offset{sequence.repeat_code != 0U ?
                 static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
-            if constexpr (GroupFse)
+            if constexpr (GroupedStateWrites)
             {
                 auto const of{offset_state.template encode_bits<true>(offset_code)};
                 auto const ml{match_state.template encode_bits<true>(match_code)};
@@ -5352,6 +5355,34 @@ namespace sph::zstd::detail
                 // OF/ML/LL table logs cap the combined emission at 26 bits.
                 bits.append_unchecked(of.value | (ml.value << of.count) |
                     (ll.value << (of.count + ml.count)), of.count + ml.count + ll.count);
+            }
+            else if constexpr (AdaptiveGroupedWrites)
+            {
+                if (use_grouped)
+                {
+                    auto const of{offset_state.template encode_bits<true>(offset_code)};
+                    auto const ml{match_state.template encode_bits<true>(match_code)};
+                    auto const ll{literal_state.template encode_bits<true>(literal_code)};
+                    bits.append_unchecked(of.value | (ml.value << of.count) |
+                        (ll.value << (of.count + ml.count)), of.count + ml.count + ll.count);
+                }
+                else
+                {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                    if constexpr (!CarefulSelection)
+                    {
+                        offset_state.encode_inlined(bits, offset_code);
+                        match_state.encode_inlined(bits, match_code);
+                        literal_state.encode_inlined(bits, literal_code);
+                    }
+                    else
+#endif
+                    {
+                        offset_state.encode(bits, offset_code);
+                        match_state.encode(bits, match_code);
+                        literal_state.encode(bits, literal_code);
+                    }
+                }
             }
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
             else if constexpr (!CarefulSelection)
@@ -5403,14 +5434,15 @@ namespace sph::zstd::detail
     template <bool CarefulSelection = false, bool GroupFse = false, bool CollectedLiterals = false,
         bool OptimalHuffmanDepth = false, unsigned LiteralGainLog = (OptimalHuffmanDepth ? 7U : 6U),
         bool DeferredCodes = false, bool WideSequenceBits = false,
-        bool PackedLengthBits = false, bool AlignedLiterals>
+        bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
+        bool AdaptiveGroupedWrites = false, bool AlignedLiterals>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         compact_parsed_block const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
         std::vector<std::uint8_t>& output)
     {
         encode_sequences_block<CarefulSelection, GroupFse, CollectedLiterals,
             OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, WideSequenceBits,
-            PackedLengthBits,
+            PackedLengthBits, GroupedStateWrites, AdaptiveGroupedWrites,
             AlignedLiterals, compact_parsed_block_view>(
                 input, compact_parsed_block_view{parsed}, workspace, output);
     }

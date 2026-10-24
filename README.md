@@ -142,18 +142,24 @@ contains the aggregates. The variability table includes throughput ranges and
 paired win counts. Use a fresh output directory for each evaluation.
 
 For a quick, single-level comparison on a chosen input, use the native
-`zstdpp_pair` executable, now included in each Release evaluation build preset.
-For example, on Windows:
+`zstdpp_pair` executable, included in each Release evaluation build. The
+dedicated `*-pair` build presets compile the tool and its required workers
+without building the full evaluator. It is one command to run, but keep the
+four worker executables beside it; the controller launches them for independent
+timing and decoding checks.
+For example, from a Visual Studio Developer PowerShell on Windows:
 
 ```powershell
 cmake --preset msvc-release-eval
-cmake --build --preset msvc-release-eval
+cmake --build --preset msvc-pair
 .\out\build\msvc-release-eval\eval\bin\zstdpp_pair.exe --level 3 `
   --input .\out\build\msvc-release-eval\eval\results\corpus.bin `
   --iterations 1000 --trials 6
 ```
 
-On WSL, use the corresponding executable in `out/build/gcc13-release-eval/eval/bin/`.
+On WSL, configure with `gcc-release-eval`, build with `gcc-pair`, and run the
+corresponding executable in `out/build/gcc-release-eval/eval/bin/` (or your
+chosen build directory).
 The tool alternates optimized C++ and reference compression workers, compares
 the actual encoded bytes after **every** trial, and checks that each decoder
 recovers the original input from **both** implementations' frames. A mismatch
@@ -6921,3 +6927,37 @@ Direct baseline comparison: `out/build/gcc13-l3-64k-release/eval/pair-results/gr
 The acceptance suite now checks 64-KiB level-3 mixed and varied-text frames,
 including reciprocal decoding, in addition to its 22-level matrix. GCC 13
 Release and MSVC Debug acceptance runs both passed.
+
+### Adaptive grouped sequence writes for 256-KiB level 2
+
+The GCC 13 level-2 double-fast encoder now chooses grouped or scalar FSE
+sequence writes once per block when the compile-time pledged frame size is at
+most 256 KiB. Blocks with at most eight literal bytes per sequence use grouped
+writes; literal-heavy blocks retain the scalar path. Huffman and sequence-table
+selection stay unchanged. Measured 64-KiB level-1, 64-KiB level-3, and
+1-MiB level-2 fallback workers retain byte-identical executable instruction
+sections; larger or unpledged level-2 frames do not enter the new path.
+
+On the 256-KiB varied-text corpus, 8 of 12 order-balanced CPU-affined direct
+C++ baseline/candidate pairs favored the adaptive writer (1.04% median paired
+gain). On the balanced corpus, 10 of 12 pairs favored it (2.84% median paired
+gain). Each pair processed 20,000 frames per worker and produced identical
+bytes. Separate `perf stat` controls measured about 0.5% fewer cycles on
+varied text and 1.6% fewer on balanced input. These are modest within-C++
+gains; the varied-text gap to reference remains substantial.
+
+Final six-trial GCC 13 plain Release reports compare optimized C++ and
+reference workers, require exact frames after every trial, and cross-check
+both encodings with both decoders:
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256-KiB varied-text compression 2 | 2968.55 | 3610.29 | 82.22% | 4.32 | 4.49 | 96.09% | 122.90 | 628.16 | 19.56% |
+| 256-KiB balanced compression 2 | 2082.47 | 2134.28 | 97.57% | 4.62 | 4.50 | 102.87% | 122.90 | 628.16 | 19.56% |
+
+Reports: `out/build/gcc13-l2-256k-release/eval/pair-results/run-1792854987144947-0/`
+and `run-1792855006085205-0/`. Direct comparisons: the same build's
+`pair-results/grouped-gated-l2branch-{varied,balanced}-12-20261024/`.
+The acceptance suite now checks 256-KiB level-2 mixed and varied-text frames
+with reciprocal decoding, alongside the 22-level matrix. GCC 13 Release and
+MSVC Debug acceptance, GCC Release units, and GCC ASan/UBSan units passed.

@@ -195,6 +195,11 @@
       "targets": ["zstdpp_eval", "zstdpp_pair"]
     },
     {
+      "name": "msvc-pair",
+      "configurePreset": "msvc-release-eval",
+      "targets": ["zstdpp_pair"]
+    },
+    {
       "name": "msvc-run-eval",
       "configurePreset": "msvc-release-eval",
       "targets": ["run_eval"]
@@ -213,6 +218,11 @@
       "targets": ["zstdpp_eval", "zstdpp_pair"]
     },
     {
+      "name": "clang-pair",
+      "configurePreset": "clang-release-eval",
+      "targets": ["zstdpp_pair"]
+    },
+    {
       "name": "clang-run-eval",
       "configurePreset": "clang-release-eval",
       "targets": ["run_eval"]
@@ -228,6 +238,11 @@
       "name": "gcc-release-eval",
       "configurePreset": "gcc-release-eval",
       "targets": ["zstdpp_eval", "zstdpp_pair"]
+    },
+    {
+      "name": "gcc-pair",
+      "configurePreset": "gcc-release-eval",
+      "targets": ["zstdpp_pair"]
     },
     {
       "name": "gcc-run-eval",

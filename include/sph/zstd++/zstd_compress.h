@@ -596,13 +596,12 @@ namespace sph::zstd
                         detail::encode_sequences_block<
                             (effective_parameters_.strategy >= compression_strategy::lazy)
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
-                            // Short pledged level-3 frames also benefit from
-                            // grouped FSE writes; larger double-fast frames
-                            // retain the separately validated scalar path.
+                            // Grouped fast-path table/literal selection and
+                            // short level-3 entropy policy.
                             , (effective_parameters_.strategy == compression_strategy::fast ||
                                (effective_parameters_.strategy == compression_strategy::double_fast &&
-                                Parameters.compression_level == 3 &&
                                 effective_parameters_.pledged_source_size != 0U &&
+                                Parameters.compression_level == 3 &&
                                 effective_parameters_.pledged_source_size <= 65536U))
                             , (effective_parameters_.strategy == compression_strategy::fast &&
                                effective_parameters_.minimum_match >= 7U)
@@ -627,8 +626,21 @@ namespace sph::zstd
                                Parameters.compression_level == 1 &&
                                effective_parameters_.pledged_source_size != 0U &&
                                effective_parameters_.pledged_source_size <= 65536U)
+                            // Keep the existing fast and short level-3 writes.
+                            , (effective_parameters_.strategy == compression_strategy::fast ||
+                               (effective_parameters_.strategy == compression_strategy::double_fast &&
+                                effective_parameters_.pledged_source_size != 0U &&
+                                Parameters.compression_level == 3 &&
+                                effective_parameters_.pledged_source_size <= 65536U))
+                            // Level 2 chooses grouped or scalar sequence
+                            // writes once per block, leaving table and
+                            // Huffman policy unchanged.
+                            , (effective_parameters_.strategy == compression_strategy::double_fast &&
+                               Parameters.compression_level == 2 &&
+                               effective_parameters_.pledged_source_size != 0U &&
+                               effective_parameters_.pledged_source_size <= 262144U)
 #else
-                            , false, false
+                            , false, false, false, false
 #endif
                             >(
                             input, parsed_, compression_workspace_, compressed);
