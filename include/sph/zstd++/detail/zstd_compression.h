@@ -5338,7 +5338,9 @@ namespace sph::zstd::detail
         bool skip_huffman{};
         if constexpr (GroupFse && !CollectedLiterals)
             skip_huffman = skip_huffman_from_samples(literal_bytes, parsed.sequences.size(), workspace.histogram_workspace);
-        if (!skip_huffman && encode_huffman_literals<AlignedLiterals, !CarefulSelection, GroupFse && !CollectedLiterals, DeferredCodes>(literal_bytes, workspace, huffman_literals,
+        // Collected fast literals also benefit from rank-based canonical codes
+        // and the associated short-input histogram policy.
+        if (!skip_huffman && encode_huffman_literals<AlignedLiterals, !CarefulSelection, GroupFse, DeferredCodes>(literal_bytes, workspace, huffman_literals,
             OptimalHuffmanDepth, minimum_literal_gain))
         {
             output.swap(huffman_literals);

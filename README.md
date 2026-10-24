@@ -225,6 +225,35 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Collected-literal Huffman policy (2026-10-24)
+
+The fast strategy now uses rank-based canonical Huffman code assignment for
+parser-collected literals as well as for the existing non-collected path. This
+also selects the existing simple-histogram threshold for that policy. It does
+not change the compressed bytes. On GCC 13 Release (`-O3 -DNDEBUG`), WSL CPU 2,
+six alternating 16,000-frame direct baseline/candidate pairs at level 1 and
+1 MiB gave a varied-text median of 3204.23 to 3326.04 MiB/s (+3.80%, six of
+six paired wins). The mixed-input control was 2214.20 to 2211.09 MiB/s
+(-0.14%, three wins each), so no mixed speedup is claimed. Smaller 64- and
+256-KiB varied/scaled-mixed controls were near neutral. All direct frames
+matched; the paired executable also checked exact reference bytes and both
+decoders on both encodings. GCC Release passed all 11 tests, MSVC Debug passed
+all 10 tests, and GCC AddressSanitizer/UBSan unit tests passed.
+
+Final six alternating 16,000-frame C++/reference pairs, using the same optimized
+GCC 13 build and the native `zstdpp_pair` executable:
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 / varied text, 1 MiB | 3407.66 | 3455.23 | 98.62 | 5.12 | 5.88 | 87.21 | 126.88 | 628.16 | 20.20 |
+| 1 / mixed, 1 MiB | 2308.93 | 2185.03 | 105.67 | 5.46 | 6.12 | 89.22 | 126.88 | 628.16 | 20.20 |
+
+Raw trial CSVs, frames, and reports are in
+`out/rank-histogram-huffman-1m-l1-20261024/`. The varied-text result narrows
+the gap but does not yet surpass reference; other levels retain their own
+measured gaps. The historical matrices below are not a fresh all-level report
+for this change.
+
 For a separate host-specific comparison, configure another build directory with
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -march=native -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -DNDEBUG"`. Apply CPU targeting to
