@@ -793,6 +793,33 @@ not table-pointer or alignment layout. Raw data:
 `out/aligned-strategy-control/trusted-huf-*`, `fse-state-pointers-*`, and
 `aligned-fse-*`.
 
+### Sequence-writer and RLE-prescan controls (2026-10-24, rejected)
+
+Three further optimized GCC 13 level-1 controls kept exact compressed-frame
+parity. Doubling the sequence bit-writer's output growth chunk from 256 to
+512 bytes looked useful in short trials, but six balanced 16-GiB trials per
+256-KiB corpus changed varied throughput only from 3748.21 to 3751.33 MiB/s
+and scaled mixed from 2449.16 to 2453.18 MiB/s. Both differences are within
+run-to-run variation. Removing the zero-width branch from each generic bit
+append regressed six balanced 2-GiB trials: varied 3601.40 to 3474.43 MiB/s
+and scaled mixed 2390.57 to 2268.02 MiB/s. Neither change was retained.
+
+An early all-RLE scan of fast-strategy sequence codes avoided histogram work
+on 256-KiB scaled mixed data. A six-pair 16-GiB confirmation of the initial
+variant rose from 2402.61 to 2453.22 MiB/s (+2.11%). A separate diagnostic
+showed why: two of its 2,048-symbol code streams are entirely RLE. The
+256-KiB varied streams have about 880 codes and the 64-KiB scaled-mixed
+streams about 1,283, so a 1,500-code gate excludes both. Nevertheless, even
+moving the scan into a non-inlined helper changed GCC's surrounding code
+generation enough to regress six balanced 2-GiB trials on those controls:
+256-KiB varied fell from 3665.97 to 3535.93 MiB/s and 64-KiB scaled mixed
+from 1813.08 to 1801.21 MiB/s. The same helper improved 256-KiB scaled mixed
+from 2428.41 to 2482.68 MiB/s. That tradeoff is not a general improvement,
+so production retains the original writer and histogram path. A future RLE
+optimization needs to preserve the non-RLE code path's generated layout.
+Raw data: `out/aligned-strategy-control/bit-chunk-512-confirm-*`,
+`branchless-bit-append-*`, and `rle-prescan-*`.
+
 ### Huffman scratch-buffer controls (2026-10-24, rejected)
 
 The current level-1 profile still attributes about 2.8% of samples to
