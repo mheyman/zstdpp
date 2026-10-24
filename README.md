@@ -697,6 +697,32 @@ The matching reference worker used 4.526 billion instructions and 511.5 million
 branches in the same 50-frame counter run, leaving about a 10.4% instruction gap
 and a much larger retired-branch gap in the remaining collector/path lifecycle.
 
+### Ranked repeat-Huffman codes (2026-10-24)
+
+The repeat-tree writer previously searched the entire symbol alphabet once
+per code length to assign canonical codes. It now counts each length once,
+computes the starting code for each rank, and assigns codes in one more
+symbol pass. This removes the nested scan identified in the level-1 source
+profile without changing emitted frames. All ten GCC tests, including
+all-level byte parity and reciprocal decoding, pass.
+
+Optimized GCC 13 C++ and reference workers ran on CPU 2 in six balanced
+16-GiB trials per 256-KiB corpus. The table uses throughput from median
+elapsed time and median peak RSS; code is the complete optimized worker
+binary. Candidate and saved-baseline frames matched reference in every
+trial, and the C++ worker reported no allocations after warmup.
+
+| Workload | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 256 KiB varied compression 1 | 3663.74 | 4055.30 | 90.34% | 4.38 | 4.39 | 99.69% | 126.55 | 628.16 | 20.15% |
+| 256 KiB scaled-mixed compression 1 | 2427.09 | 2441.58 | 99.41% | 4.47 | 4.52 | 98.96% | 126.55 | 628.16 | 20.15% |
+
+Against the matched pre-change C++ worker, median throughput rose from
+3621.19 to 3663.74 MiB/s (+1.18%) on varied text and from 2411.01 to
+2427.09 MiB/s (+0.67%) on scaled mixed. The remaining varied-text gap
+means this is incremental progress, not completion of the all-level goal.
+Raw data: `out/aligned-strategy-control/ranked-repeat-confirm-*`.
+
 ### Entropy follow-up: profiler and rejected variants (2026-10-24)
 
 A fresh CPU-cycle profile of the optimized generic GCC 13 workers on 256-KiB

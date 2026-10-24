@@ -6196,23 +6196,29 @@ namespace sph::zstd::detail
             }
             else
             {
+                // Canonical codes start at the table position for each length.
+                // Count ranks first rather than rescanning all symbols per weight.
+                std::array<std::size_t, 12> rank_counts{};
+                std::array<std::size_t, 12> rank_codes{};
+                for (std::size_t symbol{}; symbol <= workspace.huffman_repeat_maximum_symbol; ++symbol)
+                    ++rank_counts[workspace.huffman_repeat_lengths[symbol]];
                 for (unsigned weight{1}; weight <= workspace.huffman_repeat_log; ++weight)
                 {
                     auto const code_length{workspace.huffman_repeat_log + 1U - weight};
-                    auto const run_length{std::size_t{1} << (weight - 1U)};
-                    for (std::size_t symbol{}; symbol <= workspace.huffman_repeat_maximum_symbol; ++symbol)
-                    {
-                        if (workspace.huffman_repeat_lengths[symbol] != code_length)
-                            continue;
-                        auto const code{huffman_code{
-                            static_cast<std::uint16_t>(repeat_table_position >>
-                                (workspace.huffman_repeat_log - code_length)),
-                            static_cast<std::uint8_t>(code_length)}};
-                        repeat_codes[symbol] = code;
-                        workspace.huffman_repeat_codes[symbol] = code;
-                        workspace.huffman_repeat_code_lengths[symbol] = code.number_bits;
-                        repeat_table_position += run_length;
-                    }
+                    rank_codes[code_length] = repeat_table_position >>
+                        (workspace.huffman_repeat_log - code_length);
+                    repeat_table_position += rank_counts[code_length] << (weight - 1U);
+                }
+                for (std::size_t symbol{}; symbol <= workspace.huffman_repeat_maximum_symbol; ++symbol)
+                {
+                    auto const code_length{workspace.huffman_repeat_lengths[symbol]};
+                    if (code_length == 0U)
+                        continue;
+                    auto const code{huffman_code{static_cast<std::uint16_t>(rank_codes[code_length]++),
+                        static_cast<std::uint8_t>(code_length)}};
+                    repeat_codes[symbol] = code;
+                    workspace.huffman_repeat_codes[symbol] = code;
+                    workspace.huffman_repeat_code_lengths[symbol] = code.number_bits;
                 }
             }
             if (repeat_table_position == (std::size_t{1} << workspace.huffman_repeat_log))
