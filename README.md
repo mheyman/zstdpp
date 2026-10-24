@@ -820,6 +820,23 @@ optimization needs to preserve the non-RLE code path's generated layout.
 Raw data: `out/aligned-strategy-control/bit-chunk-512-confirm-*`,
 `branchless-bit-append-*`, and `rle-prescan-*`.
 
+Follow-up controls confirmed that merely moving the RLE test does not solve
+the varied/small-input tradeoff. Putting an all-RLE shortcut inside the
+dominant-symbol histogram improved 256-KiB scaled mixed from 2415.96 to
+2456.76 MiB/s in six 16-GiB three-way trials, but varied fell from 3686.64
+to 3658.72 and 64-KiB scaled mixed from 1812.86 to 1786.70. A single
+histogram for code streams below 1,500 symbols also regressed the 64-KiB
+control (1808.40 to 1755.42 MiB/s in six 2-GiB pairs). Neither was retained.
+
+A fresh optimized 64-KiB scaled-mixed profile sampled about 40.58 billion
+cycles. Four-way histogram increments occupied roughly 14% of sampled cycles;
+FSE bit extraction and state-table loads occupied about 10%. Preparing the
+three FSE transitions before loading their next states kept identical frames
+but lost 2–4% across 256-KiB varied, 256-KiB scaled mixed, and 64-KiB scaled
+mixed controls. The existing interleaving is faster. Raw data:
+`out/aligned-strategy-control/rle-histogram-confirm-*`, `hist-1500-*`,
+`fse-deferred-load-*`, and `/tmp/zstdpp-current-64-l1.perf` in WSL.
+
 ### Huffman scratch-buffer controls (2026-10-24, rejected)
 
 The current level-1 profile still attributes about 2.8% of samples to
