@@ -122,6 +122,17 @@ int main(int argc, char** argv)
                   << " tables_ns=" << entropy.tables_ns << " bits_ns=" << entropy.bits_ns
                   << " blocks=" << entropy.blocks << " sequences=" << entropy.sequences
                   << " literal_bytes=" << entropy.literal_bytes << '\n';
+        std::cerr << "Huffman phases histogram_ns=" << entropy.huffman_histogram_ns
+                  << " tree_ns=" << entropy.huffman_tree_ns
+                  << " weights_ns=" << entropy.huffman_weights_ns
+                  << " selection_ns=" << entropy.huffman_selection_ns
+                  << " streams_ns=" << entropy.huffman_streams_ns
+                  << " new_blocks=" << entropy.huffman_new_blocks
+                  << " repeat_blocks=" << entropy.huffman_repeat_blocks
+                  << " discarded_weights=" << entropy.huffman_discarded_weights
+                  << " histogram_reject_blocks=" << entropy.huffman_histogram_reject_blocks
+                  << " histogram_reject_bytes=" << entropy.huffman_histogram_reject_bytes
+                  << " sample_eligible_blocks=" << entropy.huffman_sample_eligible_blocks << '\n';
 #endif
         sph::zstd::eval::write_binary(argv[2], output);
         sph::zstd::eval::write_result(argv[4], {

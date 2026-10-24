@@ -36,6 +36,11 @@ namespace sph::zstd::detail
     struct entropy_phase_trace
     {
         std::uint64_t gather_ns{}, literals_ns{}, tables_ns{}, bits_ns{};
+        std::uint64_t huffman_histogram_ns{}, huffman_tree_ns{}, huffman_weights_ns{};
+        std::uint64_t huffman_selection_ns{}, huffman_streams_ns{};
+        std::uint64_t huffman_new_blocks{}, huffman_repeat_blocks{}, huffman_discarded_weights{};
+        std::uint64_t huffman_histogram_reject_blocks{}, huffman_histogram_reject_bytes{};
+        std::uint64_t huffman_sample_eligible_blocks{};
         std::uint64_t blocks{}, sequences{}, literal_bytes{};
     };
     inline entropy_phase_trace entropy_trace{};
@@ -5145,6 +5150,11 @@ namespace sph::zstd::detail
         // ZSTD_minGain compares the Huffman payload, excluding its header,
         // with the uncompressed literal count (not the raw-section size).
         auto const minimum_literal_gain{(literal_size >> LiteralGainLog) + 2U};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        if (literal_size >= 40960U &&
+            (parsed.sequences.empty() || literal_size / parsed.sequences.size() >= 20U))
+            ++entropy_trace.huffman_sample_eligible_blocks;
+#endif
         // Rank construction benefits the fast path without parser-time literal
         // gathering. Keep other strategies' measured code generation unchanged.
         bool skip_huffman{};
@@ -5892,6 +5902,9 @@ namespace sph::zstd::detail
         {
             return false;
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        auto huffman_phase_start{std::chrono::steady_clock::now()};
+#endif
         // Small fast-strategy literal blocks may be cheaper with one histogram
         // than with four histograms and their reduction pass.
         auto const& frequencies{count_symbols<RankCanonical ? 8192U : 1500U>(
@@ -5910,8 +5923,17 @@ namespace sph::zstd::detail
         }
         if (distinct_symbols < 2U || largest_frequency <= (literals.size() >> 7U) + 4U)
         {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            entropy_trace.huffman_histogram_ns += entropy_trace_elapsed(huffman_phase_start);
+            ++entropy_trace.huffman_histogram_reject_blocks;
+            entropy_trace.huffman_histogram_reject_bytes += literals.size();
+#endif
             return false;
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.huffman_histogram_ns += entropy_trace_elapsed(huffman_phase_start);
+        huffman_phase_start = std::chrono::steady_clock::now();
+#endif
 
         std::array<std::uint8_t, 256> lengths{};
         unsigned table_log{};
@@ -5964,6 +5986,10 @@ namespace sph::zstd::detail
             workspace.huffman_tree_valid = true;
             workspace.huffman_tree_optimal_depth = optimal_depth;
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.huffman_tree_ns += entropy_trace_elapsed(huffman_phase_start);
+        huffman_phase_start = std::chrono::steady_clock::now();
+#endif
 
         std::array<std::uint8_t, 256> weights{};
         std::array<huffman_code, 256> codes{};
@@ -6145,6 +6171,10 @@ namespace sph::zstd::detail
         }
 
         auto const four_streams{literals.size() >= 256U};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.huffman_weights_ns += entropy_trace_elapsed(huffman_phase_start);
+        huffman_phase_start = std::chrono::steady_clock::now();
+#endif
         bool prefer_repeat{};
         std::size_t predicted_new_body{};
         if (SelectBeforeEmit && repeat_symbols_valid && !repeat_tree)
@@ -6207,6 +6237,11 @@ namespace sph::zstd::detail
                 old_c_size < literals.size() && repeat_size < new_size;
             predicted_new_body = new_size;
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.huffman_selection_ns += entropy_trace_elapsed(huffman_phase_start);
+        huffman_phase_start = std::chrono::steady_clock::now();
+        if (prefer_repeat && !repeat_tree) ++entropy_trace.huffman_discarded_weights;
+#endif
         if constexpr (DeferredCodes)
         {
             if (!prefer_repeat && !assign_codes()) return false;
@@ -6356,6 +6391,9 @@ namespace sph::zstd::detail
                 }
             }
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.huffman_streams_ns += entropy_trace_elapsed(huffman_phase_start);
+#endif
 
         auto const regenerated_size{literals.size()};
         auto const compressed_size{body.size()};
@@ -6400,6 +6438,10 @@ namespace sph::zstd::detail
             workspace.huffman_repeat_log = table_log;
             workspace.huffman_repeat_valid = true;
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        if (emit_repeat) ++entropy_trace.huffman_repeat_blocks;
+        else ++entropy_trace.huffman_new_blocks;
+#endif
         return true;
     }
 
