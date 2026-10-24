@@ -10,7 +10,11 @@ foreach(level IN LISTS SPH_ZSTDPP_EVAL_LEVELS)
 endforeach()
 list(REMOVE_DUPLICATES SPH_ZSTDPP_EVAL_LEVELS)
 list(JOIN SPH_ZSTDPP_EVAL_LEVELS "," SPH_ZSTDPP_EVAL_LEVELS_CPP)
-set(SPH_ZSTDPP_EVAL_CORPUS_SIZE 1048576)
+set(SPH_ZSTDPP_EVAL_CORPUS_SIZE 1048576 CACHE STRING
+    "Input size in bytes for the templated evaluation workers")
+if(NOT SPH_ZSTDPP_EVAL_CORPUS_SIZE MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "SPH_ZSTDPP_EVAL_CORPUS_SIZE must be a positive integer")
+endif()
 set(SPH_ZSTDPP_EVAL_RUNTIME_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 
 function(sph_zstdpp_add_eval_worker target source)
@@ -94,6 +98,26 @@ set_target_properties(zstdpp_eval PROPERTIES
 )
 sph_zstdpp_enable_strict_warnings(zstdpp_eval)
 add_dependencies(zstdpp_eval ${eval_workers})
+
+add_executable(zstdpp_pair pair_controller.cpp)
+target_compile_features(zstdpp_pair PRIVATE cxx_std_23)
+target_include_directories(zstdpp_pair PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(zstdpp_pair PRIVATE
+    SPH_EVAL_BINARY_DIR="${CMAKE_BINARY_DIR}"
+    SPH_EVAL_CORPUS_SIZE=${SPH_ZSTDPP_EVAL_CORPUS_SIZE}
+)
+set_target_properties(zstdpp_pair PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${SPH_ZSTDPP_EVAL_RUNTIME_DIRECTORY}"
+)
+sph_zstdpp_enable_strict_warnings(zstdpp_pair)
+add_dependencies(zstdpp_pair ${eval_workers})
+if(BUILD_TESTING AND CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+    list(GET SPH_ZSTDPP_EVAL_LEVELS 0 SPH_ZSTDPP_EVAL_SMOKE_LEVEL)
+    add_test(NAME paired_benchmark_smoke
+        COMMAND $<TARGET_FILE:zstdpp_pair> --level ${SPH_ZSTDPP_EVAL_SMOKE_LEVEL}
+            --iterations 1 --trials 2)
+    set_tests_properties(paired_benchmark_smoke PROPERTIES LABELS eval)
+endif()
 
 add_custom_target(run_eval
     COMMAND zstdpp_eval

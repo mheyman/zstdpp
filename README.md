@@ -141,6 +141,35 @@ measurement is retained in `trials.csv` and per-trial worker CSVs; `metrics.csv`
 contains the aggregates. The variability table includes throughput ranges and
 paired win counts. Use a fresh output directory for each evaluation.
 
+For a quick, single-level comparison on a chosen input, build the native
+`zstdpp_pair` target and run it from the repository root. For example, on
+Windows with the Release preset:
+
+```powershell
+cmake --build --preset msvc-release-eval --target zstdpp_pair
+.\out\build\msvc-release-eval\eval\bin\zstdpp_pair.exe --level 3 `
+  --input .\out\build\msvc-release-eval\eval\results\corpus.bin `
+  --iterations 1000 --trials 6
+```
+
+On WSL, use the corresponding executable in `out/build/gcc13-release-eval/eval/bin/`.
+The tool alternates optimized C++ and reference compression workers, compares
+the actual encoded bytes after **every** trial, and checks that both decoders
+recover the original input. A mismatch stops the run without a summary.
+It creates a fresh output directory with `SUMMARY.md`, `trials.csv`, the
+input snapshot, and each encoded frame; it does not change this README.
+The summary includes throughput, peak memory, and worker code size for both
+implementations. `--output DIR` selects an empty results directory. Without
+`--input`, the tool generates the deterministic mixed corpus.
+
+Because the C++ worker specializes its pledged source size, the input must
+have exactly `SPH_ZSTDPP_EVAL_CORPUS_SIZE` bytes (1 MiB by default). To test
+another size, configure a separate Release build with, for example,
+`-DSPH_ZSTDPP_EVAL_CORPUS_SIZE=262144`, then build `zstdpp_pair`. The selected
+level must also be in `SPH_ZSTDPP_EVAL_LEVELS`. This is a size-specific
+comparison of the same optimized workers used by the full evaluator, not a
+runtime-size generic compressor benchmark.
+
 ### WSL Linux builds and profiling
 
 Run these commands from the repository root inside WSL. Select both compilers explicitly;
