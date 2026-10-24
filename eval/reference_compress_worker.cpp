@@ -9,6 +9,11 @@
 #include <stdexcept>
 #include <vector>
 
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+#include <windows.h>
+extern "C" unsigned long long sph_zstdpp_reference_parse_ticks;
+#endif
+
 #ifndef SPH_EVAL_LEVEL
 #error "SPH_EVAL_LEVEL must be defined"
 #endif
@@ -53,6 +58,14 @@ int main(int argc, char** argv)
         }
         auto const end{sph::zstd::eval::clock::now()};
         ZSTD_freeCCtx(context);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        LARGE_INTEGER clock_frequency{};
+        if (!QueryPerformanceFrequency(&clock_frequency))
+            throw std::runtime_error{"cannot read performance-counter frequency"};
+        std::cerr << "reference parser ns=" << static_cast<std::uint64_t>(
+            sph_zstdpp_reference_parse_ticks * 1000000000ULL /
+            static_cast<unsigned long long>(clock_frequency.QuadPart)) << '\n';
+#endif
 #ifdef SPH_ZSTDPP_TRACE_BT
         std::cerr << "binary-tree visits unsorted=" << sph_zstdpp_bt_unsorted_visits
                   << " main=" << sph_zstdpp_bt_main_visits

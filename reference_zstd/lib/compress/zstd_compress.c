@@ -11,6 +11,10 @@
 /*-*************************************
 *  Dependencies
 ***************************************/
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+#include <windows.h>
+unsigned long long sph_zstdpp_reference_parse_ticks;
+#endif
 #include "../common/allocations.h"  /* ZSTD_customMalloc, ZSTD_customCalloc, ZSTD_customFree */
 #include "../common/zstd_deps.h"  /* INT_MAX, ZSTD_memset, ZSTD_memcpy */
 #include "../common/mem.h"
@@ -3444,7 +3448,17 @@ static size_t ZSTD_buildSeqStore(ZSTD_CCtx* zc, const void* src, size_t srcSize)
                     zc->appliedParams.useRowMatchFinder,
                     dictMode);
             ms->ldmSeqStore = NULL;
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+            {   LARGE_INTEGER parse_start;
+                LARGE_INTEGER parse_end;
+                QueryPerformanceCounter(&parse_start);
+                lastLLSize = blockCompressor(ms, &zc->seqStore, zc->blockState.nextCBlock->rep, src, srcSize);
+                QueryPerformanceCounter(&parse_end);
+                sph_zstdpp_reference_parse_ticks += (unsigned long long)(parse_end.QuadPart - parse_start.QuadPart);
+            }
+#else
             lastLLSize = blockCompressor(ms, &zc->seqStore, zc->blockState.nextCBlock->rep, src, srcSize);
+#endif
         }
         {   const BYTE* const lastLiterals = (const BYTE*)src + srcSize - lastLLSize;
             ZSTD_storeLastLiterals(&zc->seqStore, lastLiterals, lastLLSize);
