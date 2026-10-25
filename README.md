@@ -239,19 +239,44 @@ On the tested Ryzen 7 5700G, GCC 13.3 resolves `-march=native` and
 to C++ and reference zstd. On identical 1-MiB varied-text input, six alternating
 paired trials at each level emitted byte-identical frames; both decoders
 recovered the input from both encodings. Levels 8 and 9 used 500 frames per
-trial, and level 18 used 60. The numbers are specific to this host, corpus,
+trial, and levels 16 through 18 used 60. The numbers are specific to this host, corpus,
 compiler, and source-size specialization; other levels and corpora can differ.
 
 | Native GCC 13 / varied text, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Compress L8 | 173.38 | 171.41 | 101.15 | 9.95 | 10.87 | 91.55 | 126.62 | 639.85 | 19.79 |
 | Compress L9 | 183.77 | 181.14 | 101.45 | 14.95 | 15.87 | 94.20 | 126.62 | 639.85 | 19.79 |
+| Compress L16 | 8.88 | 8.65 | 102.70 | 21.22 | 21.74 | 97.61 | 149.06 | 639.85 | 23.30 |
+| Compress L17 | 8.49 | 8.47 | 100.24 | 21.22 | 21.75 | 97.55 | 149.06 | 639.85 | 23.30 |
 | Compress L18 | 5.99 | 5.81 | 103.04 | 21.72 | 22.24 | 97.64 | 149.05 | 639.85 | 23.29 |
 
 The portable-build benchmark tables below are unchanged. In particular, these
-three native-build leads do not prove that the template implementation is faster
-at every level. Raw reports: `out/zen3-sixlevel-20261025/pair-l8-varied/`,
-`pair-l9-varied/`, and `pair-l18-varied/` under the same directory.
+five native-build leads do not prove that the template implementation is faster
+at every level. GCC 13's SLP/inlining of the level-16/17 binary-tree match
+collector was slower on this host; a specialization-scoped wrapper avoids that
+code generation without changing higher levels. Six alternating direct
+baseline/candidate pairs won at both levels (median C++ gains about 8.2% at
+L16 and 8.0% at L17); the paired evaluator then checked exact compressed bytes
+and reciprocal decoding. The rebuilt L18 and L19 worker binaries matched their
+pre-change SHA-256 hashes. Raw paired reports: `out/zen3-sixlevel-20261025/`
+(`pair-l8-varied/`, `pair-l9-varied/`, `pair-l18-varied/`) and
+`out/native-all22-20261025/` (`pair-l16-varied/`, `pair-l17-varied/`).
+
+The deterministic 1-MiB mixed-input control also passed exact bytes and
+reciprocal decoding (three alternating 60-frame trials):
+
+| Native GCC 13 / mixed, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Compress L16 | 95.00 | 87.44 | 108.65 | 21.47 | 21.86 | 98.20 | 149.06 | 639.85 | 23.30 |
+| Compress L17 | 92.70 | 87.49 | 105.95 | 21.84 | 21.89 | 99.80 | 149.06 | 639.85 | 23.30 |
+
+These mixed figures are relative to the reference, **not** a claim that the
+new wrapper improves mixed-input C++ throughput. Six short direct
+baseline/candidate timings were highly variable. Equal-work 1,000-frame
+`perf stat` controls consistently showed more retired C++ instructions with
+the wrapper (+10.31% at L16, +8.93% at L17), while cycles varied. This is a
+remaining optimization target. Control reports are in
+`out/native-all22-20261025/pair-l{16,17}-mixed/` and `mixed-counter-l*`.
 
 ### MSVC fixed-width padded-literal copy (2026-10-25)
 

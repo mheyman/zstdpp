@@ -2581,6 +2581,19 @@ namespace sph::zstd::detail
             std::array<std::uint32_t, 3> const& repeats, bool no_literals,
             std::size_t sufficient_length) -> std::span<binary_tree_match_candidate const>
         {
+            // GCC 13's Zen 3 SLP/inlining of these two optimal matchers costs
+            // more than the separate call. Leave the deeper tree parsers on
+            // their original vectorized path.
+            if constexpr (LazyDepth == 2U && BinaryTree && WindowLog == 20U &&
+                HashLog == 21U && ChainLog == 21U && SearchLog == 5U &&
+                (MinimumMatch == 4U || MinimumMatch == 5U) && !RowMatch &&
+                CacheAdjacentInsertion)
+            {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__AVX2__)
+                return collect_optimal_candidates_no_slp(input, position, block_end,
+                    workspace, repeats, no_literals, sufficient_length);
+#endif
+            }
             std::size_t count{};
             if (optimal_minimum_match() == 3U)
                 (void)find_best_binary_tree_match<true, true>(input, position, block_end,
@@ -2592,6 +2605,25 @@ namespace sph::zstd::detail
         }
 
     private:
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__AVX2__)
+        template <typename Workspace>
+        [[nodiscard]] __attribute__((optimize("no-tree-slp-vectorize")))
+        auto collect_optimal_candidates_no_slp(std::span<std::uint8_t const> input,
+            std::size_t position, std::size_t block_end, Workspace& workspace,
+            std::array<std::uint32_t, 3> const& repeats, bool no_literals,
+            std::size_t sufficient_length) -> std::span<binary_tree_match_candidate const>
+        {
+            std::size_t count{};
+            if (optimal_minimum_match() == 3U)
+                (void)find_best_binary_tree_match<true, true>(input, position, block_end,
+                    workspace.optimal.matches, &count, &repeats, no_literals, sufficient_length);
+            else
+                (void)find_best_binary_tree_match<true, false, true>(input, position, block_end,
+                    workspace.optimal.matches, &count, &repeats, no_literals, sufficient_length);
+            return std::span<binary_tree_match_candidate const>{workspace.optimal.matches}.first(count);
+        }
+#endif
+
         void ensure_index_headroom(std::size_t block_end)
         {
             constexpr auto maximum{std::numeric_limits<std::uint32_t>::max()};
