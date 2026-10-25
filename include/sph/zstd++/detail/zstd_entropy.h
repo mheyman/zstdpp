@@ -136,6 +136,21 @@ namespace sph::zstd::detail
             return static_cast<std::uint32_t>((window_ >> (first_bit - window_start_)) & mask) << missing;
         }
 
+        // For a caller that has already guaranteed at least count bits remain.
+        [[nodiscard]] auto peek_fast_trusted(unsigned count) noexcept -> std::uint32_t
+        {
+            auto const first_bit{remaining_bits_ - count};
+            if (first_bit < window_start_)
+                reload_window();
+            return static_cast<std::uint32_t>(
+                (window_ >> (first_bit - window_start_)) & masks_[count]);
+        }
+
+        void consume_fast_trusted(unsigned count) noexcept
+        {
+            remaining_bits_ -= count;
+        }
+
         [[nodiscard]] auto peek(unsigned count, bool permit_overread = false) -> std::uint32_t
         {
             auto const saved_remaining{remaining_bits_};
@@ -814,14 +829,63 @@ namespace sph::zstd::detail
         {
             throw entropy_error{"invalid Zstandard Huffman output segments"};
         }
-        std::size_t source_offset{6};
-        for (std::size_t stream{}; stream < 4U; ++stream)
+        if (!table.valid || table.size == 0U)
+            throw entropy_error{"Zstandard Huffman repeat mode has no previous table"};
+
+        auto const encoded{source.subspan(6U)};
+        reverse_bit_reader bits0{encoded.first(lengths[0])};
+        reverse_bit_reader bits1{encoded.subspan(lengths[0], lengths[1])};
+        reverse_bit_reader bits2{encoded.subspan(lengths[0] + lengths[1], lengths[2])};
+        reverse_bit_reader bits3{encoded.subspan(first_three, lengths[3])};
+        auto* const out0{output.data()};
+        auto* const out1{output.data() + output_offsets[1]};
+        auto* const out2{output.data() + output_offsets[2]};
+        auto* const out3{output.data() + output_offsets[3]};
+        auto const* const entries{table.entries.data()};
+        auto const table_bits{table.table_log};
+        auto const group_bits{5U * table_bits};
+        auto const last_size{output_offsets[4] - output_offsets[3]};
+        auto decode_one = [entries, table_bits](reverse_bit_reader& bits, std::uint8_t* out) {
+            auto const entry{entries[bits.peek_fast_trusted(table_bits)]};
+            bits.consume_fast_trusted(entry.number_bits);
+            *out = entry.symbol;
+        };
+        std::size_t produced{};
+        // Five symbols consume at most five table_bits from each independent stream.
+        // The checked tail handles the end marker and any remaining short group.
+        while (produced + 5U <= last_size &&
+            bits0.remaining() >= group_bits && bits1.remaining() >= group_bits &&
+            bits2.remaining() >= group_bits && bits3.remaining() >= group_bits)
         {
-            decode_huffman_stream(
-                output.subspan(output_offsets[stream],
-                    output_offsets[stream + 1U] - output_offsets[stream]),
-                source.subspan(source_offset, lengths[stream]), table);
-            source_offset += lengths[stream];
+            for (unsigned symbol{}; symbol < 5U; ++symbol)
+            {
+                decode_one(bits0, out0 + produced + symbol);
+                decode_one(bits1, out1 + produced + symbol);
+                decode_one(bits2, out2 + produced + symbol);
+                decode_one(bits3, out3 + produced + symbol);
+            }
+            produced += 5U;
         }
+
+        auto decode_tail = [&table, entries](std::span<std::uint8_t> destination,
+            reverse_bit_reader& bits) {
+            for (auto& byte : destination)
+            {
+                auto const index{bits.peek_fast(table.table_log)};
+#ifndef SPH_ZSTDPP_TRUSTED_EVAL
+                if (index >= table.size)
+                    throw entropy_error{"invalid Zstandard Huffman code"};
+#endif
+                auto const entry{entries[index]};
+                static_cast<void>(bits.read_fast(entry.number_bits));
+                byte = entry.symbol;
+            }
+            if (!bits.at_end())
+                throw entropy_error{"Zstandard Huffman stream has trailing bits"};
+        };
+        decode_tail(output.subspan(output_offsets[0] + produced, segment_size - produced), bits0);
+        decode_tail(output.subspan(output_offsets[1] + produced, segment_size - produced), bits1);
+        decode_tail(output.subspan(output_offsets[2] + produced, segment_size - produced), bits2);
+        decode_tail(output.subspan(output_offsets[3] + produced, last_size - produced), bits3);
     }
 }

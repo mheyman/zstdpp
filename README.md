@@ -225,6 +225,41 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Interleaved four-stream Huffman decoding (2026-10-25)
+
+On four-stream literal blocks, the decoder now processes five symbols from
+each independent stream per group. One bounds check per group guarantees
+enough bits for the unchecked table lookups and bit consumption; the existing
+checked logic handles each stream's short tail and validates its end marker.
+Single-stream blocks retain their previous decoder. This follows the
+reference decoder's independent-stream scheduling while preserving exact
+output and corruption checks.
+
+Six alternating, CPU-pinned optimized GCC 13 direct baseline/candidate pairs
+won 6/6 on 1-MiB varied text (+37.10% median C++ throughput) and split 3/6
+on the genuine mixed corpus (+0.43% median, effectively neutral). Six
+alternating optimized MSVC pairs won 6/6 on varied text (+37.16% median) and
+4/6 on mixed (+0.21% median, also neutral). Workers verified decoded bytes
+and their no-post-warmup-allocation guards; GCC's 12-test suite, MSVC unit
+and all-level parity tests, and GCC address/undefined-behavior sanitizer
+unit tests passed.
+
+Fresh optimized C++/reference reports below use six alternating 10,000-frame
+trials per row with the same reference-produced frame for both decoders.
+Throughput uses median elapsed time, memory median peak resident set, and
+code size the complete worker executable. Varied-text decoding still trails
+reference, so the all-level performance goal remains open.
+
+| Compiler / corpus / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MSVC / varied text, 1 MiB / decompress L3 | 6121.89 | 8935.85 | 68.51 | 6.32 | 6.32 | 99.91 | 142.00 | 221.00 | 64.25 |
+| MSVC / mixed, 1 MiB / decompress L3 | 5797.15 | 5616.41 | 103.22 | 6.56 | 6.55 | 100.09 | 142.00 | 221.00 | 64.25 |
+| GCC 13 / varied text, 1 MiB / decompress L3 | 8028.57 | 10022.47 | 80.11 | 13.04 | 13.04 | 100.00 | 102.22 | 202.89 | 50.38 |
+| GCC 13 / mixed, 1 MiB / decompress L3 | 8442.82 | 7321.96 | 115.31 | 12.94 | 12.94 | 100.00 | 102.22 | 202.89 | 50.38 |
+
+Raw pairs and the clean committed-source GCC baseline:
+`out/huf-fourstream-20261025/`.
+
 ### Decode FSE tables without initializing unused entries (2026-10-25)
 
 The decompressor's FSE table builder previously default-initialized a
