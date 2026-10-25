@@ -448,7 +448,7 @@ namespace sph::zstd::detail
             }
         }
 
-        template <unsigned RowLog>
+        template <unsigned RowLog, bool RowRelativeTag = false>
         [[nodiscard]] auto insert_fixed(std::uint32_t hash, std::uint32_t index) noexcept -> std::uint32_t
         {
             static_assert(RowLog >= 4U && RowLog <= 6U);
@@ -460,7 +460,10 @@ namespace sph::zstd::detail
             if (next == 0U)
                 next = row_mask;
             *tags = static_cast<std::uint8_t>(next);
-            tag_table_[row + next] = static_cast<std::uint8_t>(hash);
+            if constexpr (RowRelativeTag)
+                tags[next] = static_cast<std::uint8_t>(hash);
+            else
+                tag_table_[row + next] = static_cast<std::uint8_t>(hash);
             hash_table_[row + next] = index;
             return next;
         }
@@ -2013,7 +2016,8 @@ namespace sph::zstd::detail
             });
         }
 
-        template <unsigned MinimumMatch, unsigned RowLog, bool BatchLocal = false>
+        template <unsigned MinimumMatch, unsigned RowLog, bool BatchLocal = false,
+            bool RowRelativeTag = false>
         auto find(std::span<std::uint8_t const> input, std::uint32_t current,
             std::uint32_t low_position, unsigned hash_bits, unsigned attempts,
             bool skipping, std::span<std::uint32_t> candidates) noexcept -> std::size_t
@@ -2029,7 +2033,7 @@ namespace sph::zstd::detail
                     while (next < end)
                     {
                         auto const value{cache.next(next, hasher)};
-                        (void)table.insert_fixed<RowLog>(value, frame_base + next + 1U);
+                        (void)table.insert_fixed<RowLog, RowRelativeTag>(value, frame_base + next + 1U);
                         ++next;
                     }
                 }
@@ -2111,7 +2115,7 @@ namespace sph::zstd::detail
                 candidates[index] -= frame_base + 1U;
                 prefetch(input.data() + candidates[index]);
             }
-            (void)table.insert_fixed<RowLog>(value, frame_base + current + 1U);
+            (void)table.insert_fixed<RowLog, RowRelativeTag>(value, frame_base + current + 1U);
             next = current + 1U;
             return count;
         }
@@ -2615,8 +2619,11 @@ namespace sph::zstd::detail
                 auto const low{current > window ? current - window : 0U};
                 // Candidate collection initializes exactly the returned prefix.
                 std::array<std::uint32_t, 64> candidates;
+                // Row-relative tag writes help depth-2 16/32-entry rows; the
+                // measured depth-1 and 64-entry paths retain their original layout.
                 auto const count{row_state_.template find<row_mls, row_log,
-                    (LazyDepth == 0U || LazyDepth == 1U)>(input,
+                    (LazyDepth == 0U || LazyDepth == 1U),
+                    (LazyDepth == 2U && row_log <= 5U && row_mls == 5U)>(input,
                     current, low, HashLog - row_log + 8U,
                     std::uint32_t{1} << std::min(SearchLog, row_log), lazy_skipping, candidates)};
                 match_result best;

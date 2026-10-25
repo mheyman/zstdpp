@@ -225,7 +225,38 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
-### Current varied-text cross-level spot check (2026-10-25)
+### Depth-2 row-relative tag store (2026-10-25)
+
+The level-8–10 row matcher now writes a selected tag through its already-computed
+row pointer. The prior vector-indexed store made GCC 13 reload the tag-table
+base after writing the row head. This is gated to the depth-2, five-byte hash
+path with 16- or 32-entry rows; rebuilt levels 7, 11, and 12 remain binary-identical
+to their pre-change workers. The frame format and match decisions are unchanged.
+
+Six alternating, CPU-2-pinned direct baseline/candidate confirmations on the
+same 1-MiB varied-text input improved C++ throughput by 1.55% at level 8
+(5/6 wins), 1.34% at level 9 (4/6), and 1.46% at level 10 (6/6). Separate
+mixed-input controls changed by -0.17%, +0.75%, and -0.10% at levels 8, 9,
+and 10 respectively, all small relative to timing variation. GCC 13 Release
+and MSVC Debug acceptance suites passed. The paired
+reports below used six alternating trials per row, 300 frames for varied text
+and 1,000 for mixed. Every encoded frame matched the optimized reference,
+and each decoder recovered both encodings. The remaining level-8/9 varied
+deficits and the separate level-2 deficit keep the all-level goal open.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 / varied text, 1 MiB | 181.95 | 187.99 | 96.79 | 10.00 | 10.88 | 91.97 | 122.83 | 628.16 | 19.55 |
+| 9 / varied text, 1 MiB | 168.95 | 171.56 | 98.48 | 15.01 | 15.85 | 94.68 | 122.83 | 628.16 | 19.55 |
+| 10 / varied text, 1 MiB | 127.71 | 127.22 | 100.38 | 15.01 | 15.86 | 94.61 | 122.84 | 628.16 | 19.55 |
+| 8 / mixed, 1 MiB | 1418.69 | 1181.84 | 120.04 | 10.26 | 11.01 | 93.15 | 122.83 | 628.16 | 19.55 |
+| 9 / mixed, 1 MiB | 1179.13 | 986.86 | 119.48 | 15.24 | 16.03 | 95.04 | 122.83 | 628.16 | 19.55 |
+| 10 / mixed, 1 MiB | 1151.03 | 970.97 | 118.54 | 15.26 | 16.03 | 95.16 | 122.84 | 628.16 | 19.55 |
+
+Raw paired reports: `out/row-relative-tag-l9-20261025/pair-l{8,9,10}-{varied,mixed}/`.
+The prior spot check below is retained as a historical pre-change measurement.
+
+### Prior varied-text cross-level spot check (2026-10-25)
 
 Fresh optimized GCC 13 Release workers and the same 1-MiB varied-text input
 were compared in six alternating trials per level. Every frame matched the
