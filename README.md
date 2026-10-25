@@ -7980,3 +7980,33 @@ The paired reports and exact old/new worker trials are under
 level-9 worker also compiled and passed paired byte-parity/cross-decode checks.
 Other levels and corpora still need optimization; this does not establish the
 all-level performance goal.
+
+### MSVC level-15 long-match counting (2026-10-25)
+
+AMD uProf's symbolized Release profiles identified binary-tree match counting
+as a level-15 hot spot. On MSVC x64 (and SSE2-capable x86), the C++ match
+counter compares 16 bytes at a time for long matches, then handles a remaining
+8-byte word and the 4/2/1 tail. Other compilers retain the original scalar
+implementation. Six alternating
+3,000-frame before/after trials with byte-identical frames improved 1-MiB
+repeated-text compression by a median 14.56% and structured-text compression
+by 12.21%; all six pairs improved on each corpus. A zero-heavy corpus changed
+by -0.76% median, so this is a long-match-specific gain, not a universal one.
+
+Current optimized MSVC Release paired level-15 results use six alternating
+1,000-frame trials per 1-MiB input. Every trial produced the same compressed
+bytes as reference zstd, and both decoders recovered both encodings. Memory is
+median peak RSS and code is worker executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB repeated text / 15 | 1223.52 | 1227.72 | 99.66% | 21.66 | 22.28 | 97.23% | 116.00 | 382.00 | 30.37% |
+| 1-MiB structured text / 15 | 833.92 | 730.85 | 114.10% | 21.67 | 22.34 | 97.03% | 116.00 | 382.00 | 30.37% |
+| 1-MiB mixed input / 15 | 672.41 | 535.68 | 125.52% | 21.98 | 22.46 | 97.88% | 116.00 | 382.00 | 30.37% |
+
+Paired reports are in `out/uprof-l15-simd-pair-{repeated,structured,mixed}-20261025/`;
+the seven-level optimized MSVC cross-decode evaluation is in
+`out/uprof-l15-simd-full-eval-20261025/`. The existing 22-level GCC table above
+is unchanged. Repeated-text throughput is now near reference parity, but levels
+1, 8, and 9 still trail reference on the MSVC mixed-input evaluation; the
+all-level performance goal remains open.

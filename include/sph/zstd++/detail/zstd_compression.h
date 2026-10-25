@@ -835,6 +835,35 @@ namespace sph::zstd::detail
                 }
                 position += sizeof(std::uint64_t);
                 match_position += sizeof(std::uint64_t);
+#if defined(_MSC_VER) && (defined(_M_X64) || (defined(_M_IX86) && _M_IX86_FP >= 2))
+                while (static_cast<std::size_t>(end - position) >= 16U)
+                {
+                    auto const left{_mm_loadu_si128(reinterpret_cast<__m128i const*>(position))};
+                    auto const right{_mm_loadu_si128(reinterpret_cast<__m128i const*>(match_position))};
+                    auto const equal{static_cast<unsigned>(
+                        _mm_movemask_epi8(_mm_cmpeq_epi8(left, right)))};
+                    if (equal != 0xFFFFU)
+                        return static_cast<std::size_t>(position - start) +
+                            static_cast<std::size_t>(std::countr_zero(~equal));
+                    position += 16U;
+                    match_position += 16U;
+                }
+                while (position < word_limit)
+                {
+                    // The vector loop may leave 8–15 bytes; the 4/2/1 tail
+                    // below cannot account for a complete remaining word.
+                    difference = load_native_u64(position) ^ load_native_u64(match_position);
+                    if (difference != 0U)
+                    {
+                        if constexpr (std::endian::native == std::endian::big)
+                            difference = std::byteswap(difference);
+                        return static_cast<std::size_t>(position - start) +
+                            static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
+                    }
+                    position += sizeof(std::uint64_t);
+                    match_position += sizeof(std::uint64_t);
+                }
+#else
                 while (position + 2U * sizeof(std::uint64_t) <= word_limit)
                 {
                     difference = load_native_u64(position) ^ load_native_u64(match_position);
@@ -874,6 +903,7 @@ namespace sph::zstd::detail
                     return static_cast<std::size_t>(position - start) +
                         static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
                 }
+#endif
             }
         }
         else

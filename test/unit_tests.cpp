@@ -1281,6 +1281,9 @@ namespace
                     check(sph::zstd::detail::count_matching_bytes(
                         begin, match, begin + length) == mismatch,
                         "match counter finds the first mismatch at every alignment and tail length");
+                    check(sph::zstd::detail::count_matching_bytes<true>(
+                        begin, match, begin + length) == mismatch,
+                        "binary-tree match counter finds every mismatch and complete tail");
                     if (mismatch < length) right[prefix + mismatch] ^= 1U;
                 }
             }
