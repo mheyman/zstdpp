@@ -247,6 +247,30 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### GCC 13 two-chunk long-match counting for short level 2 (2026-10-25)
+
+The GCC 13 level-2 match counter now processes two 16-byte SSE2 chunks per
+long-match loop iteration after its existing two scalar-word checks. The change
+is limited to the compile-time `18/14/14/5` preset and adds no allocations.
+Six CPU-2-pinned, same-directory old/new pairs matched compressed bytes on
+each corpus: varied text won 6/6 (median +4.95%), balanced won 5/6
+(median +1.76%), and mixed split 3/6 (median -0.09%, neutral). The optimized
+GCC suite passed 11/11 tests; a sanitizer-backed oracle checked 2,109,456
+length/alignment/mismatch cases. The symbolized and ordinary Release workers
+have identical optimized `.text`. The paired evaluator verified byte-exact
+reference frames and both decoders reading both encodings.
+
+Fresh six-trial GCC 13 Release reports give all nine comparison metrics.
+Varied level-2 compression remains below reference; balanced is near parity.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 / varied text, 256 KiB | 3307.67 | 3559.83 | 92.92 | 4.32 | 4.46 | 96.85 | 132.16 | 628.16 | 21.04 |
+| 2 / balanced, 256 KiB | 2095.44 | 2103.31 | 99.63 | 4.56 | 4.47 | 102.01 | 132.16 | 628.16 | 21.04 |
+| 2 / mixed, 256 KiB | 25647.22 | 9593.79 | 267.33 | 4.33 | 4.51 | 96.06 | 132.16 | 628.16 | 21.04 |
+
+Raw paired reports and direct controls are under `out/l2-unroll32-20261025/`.
+
 ### GCC 13 delayed SIMD counting for short level 2 (2026-10-25)
 
 The 256-KiB level-2 double-fast parser now compares the first two match words
