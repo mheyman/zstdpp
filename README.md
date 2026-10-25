@@ -247,6 +247,37 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### GCC 13 delayed SIMD counting for short level 2 (2026-10-25)
+
+The 256-KiB level-2 double-fast parser now compares the first two match words
+with scalar loads and uses 16-byte SSE2 comparisons only for longer matches.
+This is scoped to GCC 13's compile-time `18/14/14/5` preset; other compilers
+and presets retain their prior match counter. It uses no new allocation.
+The existing 8-byte-first SIMD experiment regressed short-match-heavy balanced
+input; measuring this preset's match lengths showed why a later handoff matters.
+
+Six CPU-2-pinned, same-directory, 40,000-frame old/new pairs on varied text
+matched bytes and won all six, with a +4.50% median throughput change.
+Balanced input split 3/6 (-0.36% median); genuine mixed input won 2/6
+(-0.71% median), within the variation of an identical-binary mixed control.
+Neither control is claimed as a speedup. A sanitizer-backed counter oracle
+passed 2,109,456 length/alignment/mismatch cases. The optimized GCC suite
+passed all 11 tests, and the sanitizer suite passed all 10. The paired
+evaluator confirmed exact reference frames and both decoders reading both
+encodings on all three corpora.
+
+The following six-trial GCC 13 Release reports include all nine comparison
+metrics. Varied and balanced level-2 compression still trail the reference.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 / varied text, 256 KiB | 3267.99 | 3590.22 | 91.02 | 4.39 | 4.49 | 97.82 | 132.16 | 628.16 | 21.04 |
+| 2 / balanced, 256 KiB | 2058.87 | 2104.86 | 97.81 | 4.58 | 4.45 | 102.90 | 132.16 | 628.16 | 21.04 |
+| 2 / mixed, 256 KiB | 26247.58 | 9724.64 | 269.91 | 4.32 | 4.48 | 96.51 | 132.16 | 628.16 | 21.04 |
+
+Raw paired reports and direct controls are under
+`out/l2-simd-after16-20261025/`.
+
 ### MSVC varied-sequence decode (2026-10-25)
 
 The level-3 varied-text frame repeatedly emits three literals followed by a
