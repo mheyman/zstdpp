@@ -1186,8 +1186,33 @@ namespace sph::zstd
                 }
                 auto const* const sequence_literal_data{literal_data + literal_offset};
                 literal_offset += literal_length;
-                append_sequence<LiteralsPadded, trusted_input, MediumMatchCopy>(output, sequence_literal_data,
-                    literal_length, match_offset, match_length);
+#if defined(_MSC_VER)
+                if constexpr (!LiteralsPadded && !MediumMatchCopy)
+                {
+                    if (literal_length == 1U && match_length == 15U && match_offset >= copy_slack &&
+                        output.remaining_capacity() > 16U)
+                    {
+                        // A common small-block sequence is one literal followed by
+                        // a nonoverlapping 15-byte match. One fixed copy writes an
+                        // extra byte, so require one byte of output capacity slack.
+                        auto const previous_size{output.size()};
+                        if constexpr (!trusted_input)
+                        {
+                            if (match_offset > previous_size + 1U)
+                                throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
+                        }
+                        auto* const destination{output.append_uninitialized_reserved(16U).data()};
+                        destination[0] = *sequence_literal_data;
+                        std::memcpy(destination + 1U, destination + 1U - match_offset, copy_slack);
+                    }
+                    else
+                        append_sequence<LiteralsPadded, trusted_input, MediumMatchCopy>(output,
+                            sequence_literal_data, literal_length, match_offset, match_length);
+                }
+                else
+#endif
+                    append_sequence<LiteralsPadded, trusted_input, MediumMatchCopy>(output,
+                        sequence_literal_data, literal_length, match_offset, match_length);
 
                 if (sequence_index + 1U != sequence_count) [[likely]]
                 {

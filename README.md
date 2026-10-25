@@ -247,6 +247,37 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### MSVC short-sequence decode (2026-10-25)
+
+The mixed level-3 frame contains many sequences with one literal and a
+15-byte nonoverlapping match. The non-padded MSVC decoder now handles that
+bounded shape in the sequence loop with one fixed-width copy. It still checks
+the match offset and falls back to the normal path when there is not an extra
+writable byte of output capacity. Other decoder specializations and
+non-MSVC builds retain their previous path.
+
+Six alternating, unprofiled 10,000-frame old/new MSVC Release pairs improved
+mixed-input C++ decompression from 5587.59 to 7910.06 MiB/s median (+41.57%,
+6/6 wins); varied input changed from 7531.14 to 7613.81 MiB/s (+1.10%, 5/6
+wins). Every worker checked the exact output and rejected ordinary allocations
+after warm-up. The optimized MSVC suite passed 12/12 tests, and the paired
+evaluator confirmed byte-identical compression and both decoders recovering
+both encodings on both 1-MiB corpora.
+
+Both implementations below use the same MSVC 19.51 Release `/O2 /DNDEBUG /Z7`
+build; the C++ evaluation worker also uses `/Ob3`. Values are medians of six
+alternating, unprofiled 10,000-frame C++/reference runs on the same reference
+frame. Percentages use unrounded measurements.
+
+| MSVC / decode L3, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Varied text | 7591.31 | 8803.47 | 86.23 | 6.34 | 6.34 | 99.88 | 228.50 | 311.00 | 73.47 |
+| Mixed | 7900.72 | 5734.64 | 137.77 | 6.60 | 6.57 | 100.45 | 228.50 | 311.00 | 73.47 |
+
+The varied decoder still trails reference, and the all-level goal remains open.
+Raw old/new, C++/reference, and reciprocal-decoding reports are under
+`out/msvc-short-sequence-{old-new,final-pairs}-20261025/`.
+
 ### MSVC packed four-stream Huffman bulk decode (2026-10-25)
 
 The reference's fast Huffman loop keeps four packed 64-bit stream states and
