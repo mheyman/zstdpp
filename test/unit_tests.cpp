@@ -1284,6 +1284,11 @@ namespace
                     check(sph::zstd::detail::count_matching_bytes<true>(
                         begin, match, begin + length) == mismatch,
                         "binary-tree match counter finds every mismatch and complete tail");
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__SSE2__)
+                    check(sph::zstd::detail::count_matching_bytes_after_two_words(
+                        begin, match, begin + length) == mismatch,
+                        "delayed SIMD match counter finds every mismatch and complete tail");
+#endif
                     if (mismatch < length) right[prefix + mismatch] ^= 1U;
                 }
             }

@@ -996,6 +996,42 @@ namespace sph::zstd::detail
             input.data() + match_position + initial, input.data() + end);
     }
 
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__SSE2__)
+    // Keep short matches on the scalar path. The selected short double-fast
+    // preset has many long matches on varied text but mostly short ones on
+    // balanced input, so enter the SIMD loop only after two matching words.
+    [[nodiscard]] inline auto count_matching_bytes_after_two_words(
+        std::uint8_t const* position, std::uint8_t const* match_position,
+        std::uint8_t const* end) noexcept -> std::size_t
+    {
+        auto const* const start{position};
+        if (static_cast<std::size_t>(end - position) < 16U)
+            return count_matching_bytes(position, match_position, end);
+        auto difference{load_native_u64(position) ^ load_native_u64(match_position)};
+        if (difference != 0U)
+            return static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
+        difference = load_native_u64(position + 8U) ^ load_native_u64(match_position + 8U);
+        if (difference != 0U)
+            return 8U + static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
+        position += 16U;
+        match_position += 16U;
+        while (static_cast<std::size_t>(end - position) >= 16U)
+        {
+            auto const left{_mm_loadu_si128(reinterpret_cast<__m128i const*>(position))};
+            auto const right{_mm_loadu_si128(reinterpret_cast<__m128i const*>(match_position))};
+            auto const equal{static_cast<unsigned>(
+                _mm_movemask_epi8(_mm_cmpeq_epi8(left, right)))};
+            if (equal != 0xFFFFU)
+                return static_cast<std::size_t>(position - start) +
+                    static_cast<std::size_t>(std::countr_zero(~equal));
+            position += 16U;
+            match_position += 16U;
+        }
+        return static_cast<std::size_t>(position - start) +
+            count_matching_bytes(position, match_position, end);
+    }
+#endif
+
     struct match
     {
         std::size_t position{};
@@ -2051,6 +2087,12 @@ namespace sph::zstd::detail
             std::size_t position, std::size_t match_position, std::size_t end,
             std::size_t initial) -> std::size_t
         {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__SSE2__)
+            if constexpr (WindowLog == 18U && LongHashLog == 14U &&
+                ShortHashLog == 14U && MinimumMatch == 5U)
+                return initial + count_matching_bytes_after_two_words(
+                    input + position + initial, input + match_position + initial, input + end);
+#endif
             return initial + count_matching_bytes(input + position + initial,
                 input + match_position + initial, input + end);
         }
