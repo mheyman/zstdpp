@@ -225,6 +225,37 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### MSVC fixed-width padded-literal copy (2026-10-25)
+
+The reference decoder unconditionally copies a 16-byte literal chunk on its
+normal sequence path. Our padded-literal path still dispatched tiny literal
+lengths, including zero. Under MSVC it now copies the same fixed-width chunk
+when the literal source is padded and the destination has at least 16 bytes of
+spare capacity; longer runs copy their remainder, and tight caller-owned
+destinations retain exact-length copying. GCC keeps its prior path, and its
+rebuilt optimized `.text` is identical to the saved baseline.
+
+Six alternating optimized MSVC baseline/candidate pairs of 20,000 frames each
+improved 1-MiB varied-text level-3 decompression by 5.37% median (5/6 wins;
+one -12.16% timing outlier) and genuine mixed content by 1.89% median (6/6).
+Every worker checked decoded bytes and post-warmup allocations. GCC's 12
+tests, MSVC unit tests (including direct-output boundary and corruption
+checks), and MSVC all-level parity passed.
+
+Fresh optimized C++/reference reports use six alternating 10,000-frame trials
+per row, median elapsed time and peak resident memory, and complete executable
+size. GCC rows remain unchanged because its production code did not change.
+
+| Compiler / corpus / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MSVC / varied text, 1 MiB / decompress L3 | 6787.01 | 8847.64 | 76.71 | 6.31 | 6.32 | 99.85 | 142.50 | 221.00 | 64.48 |
+| MSVC / mixed, 1 MiB / decompress L3 | 5933.51 | 5620.05 | 105.58 | 6.56 | 6.55 | 100.15 | 142.50 | 221.00 | 64.48 |
+| GCC 13 / varied text, 1 MiB / decompress L3 | 8028.57 | 10022.47 | 80.11 | 13.04 | 13.04 | 100.00 | 102.22 | 202.89 | 50.38 |
+| GCC 13 / mixed, 1 MiB / decompress L3 | 8442.82 | 7321.96 | 115.31 | 12.94 | 12.94 | 100.00 | 102.22 | 202.89 | 50.38 |
+
+Raw paired reports and binaries: `out/sequence-state-20261025/`. Varied-text
+level-3 decompression remains below reference; the all-level goal is open.
+
 ### MSVC paired sequence-length extra-bit reads (2026-10-25)
 
 The decoder now reads adjacent match-length and literal-length extra bits in

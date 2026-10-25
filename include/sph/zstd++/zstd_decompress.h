@@ -966,10 +966,26 @@ namespace sph::zstd
             auto const can_overcopy{output.remaining_capacity() >= copy_slack};
             if constexpr (Padded)
             {
+#if defined(_MSC_VER)
+                if (can_overcopy)
+                {
+                    // Padded literals and at least 16 writable output bytes
+                    // permit the reference decoder's unconditional short copy.
+                    std::memcpy(destination.data(), literals, copy_slack);
+                    if (literal_length > copy_slack)
+                    {
+                        std::memcpy(destination.data() + copy_slack, literals + copy_slack,
+                            literal_length - copy_slack);
+                    }
+                }
+                else
+                    copy_literals<false>(destination.data(), literals, literal_length);
+#else
                 if (can_overcopy)
                     copy_literals<true>(destination.data(), literals, literal_length);
                 else
                     copy_literals<false>(destination.data(), literals, literal_length);
+#endif
             }
             else
                 copy_literals<false>(destination.data(), literals, literal_length);
