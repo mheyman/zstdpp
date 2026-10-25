@@ -10,8 +10,15 @@
 #include <vector>
 
 #ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+#ifdef _WIN32
 #include <windows.h>
+#endif
 extern "C" unsigned long long sph_zstdpp_reference_parse_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_split_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_encode_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_literals_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_tables_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_bits_ticks;
 #endif
 
 #ifndef SPH_EVAL_LEVEL
@@ -59,12 +66,28 @@ int main(int argc, char** argv)
         auto const end{sph::zstd::eval::clock::now()};
         ZSTD_freeCCtx(context);
 #ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+#ifdef _WIN32
         LARGE_INTEGER clock_frequency{};
         if (!QueryPerformanceFrequency(&clock_frequency))
             throw std::runtime_error{"cannot read performance-counter frequency"};
-        std::cerr << "reference parser ns=" << static_cast<std::uint64_t>(
-            sph_zstdpp_reference_parse_ticks * 1000000000ULL /
-            static_cast<unsigned long long>(clock_frequency.QuadPart)) << '\n';
+        auto const to_nanoseconds = [&](unsigned long long ticks) {
+            return static_cast<std::uint64_t>(ticks * 1000000000ULL /
+                static_cast<unsigned long long>(clock_frequency.QuadPart));
+        };
+        std::cerr << "reference parser ns=" << to_nanoseconds(sph_zstdpp_reference_parse_ticks)
+                  << " split_ns=" << to_nanoseconds(sph_zstdpp_reference_split_ticks)
+                  << " encode_ns=" << to_nanoseconds(sph_zstdpp_reference_encode_ticks)
+                  << " literals_ns=" << to_nanoseconds(sph_zstdpp_reference_literals_ticks)
+                  << " tables_ns=" << to_nanoseconds(sph_zstdpp_reference_tables_ticks)
+                  << " bits_ns=" << to_nanoseconds(sph_zstdpp_reference_bits_ticks) << '\n';
+#else
+        std::cerr << "reference parser ns=" << sph_zstdpp_reference_parse_ticks
+                  << " split_ns=" << sph_zstdpp_reference_split_ticks
+                  << " encode_ns=" << sph_zstdpp_reference_encode_ticks
+                  << " literals_ns=" << sph_zstdpp_reference_literals_ticks
+                  << " tables_ns=" << sph_zstdpp_reference_tables_ticks
+                  << " bits_ns=" << sph_zstdpp_reference_bits_ticks << '\n';
+#endif
 #endif
 #ifdef SPH_ZSTDPP_TRACE_BT
         std::cerr << "binary-tree visits unsorted=" << sph_zstdpp_bt_unsorted_visits

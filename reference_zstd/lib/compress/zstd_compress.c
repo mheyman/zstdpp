@@ -12,8 +12,30 @@
 *  Dependencies
 ***************************************/
 #ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <time.h>
+#endif
 unsigned long long sph_zstdpp_reference_parse_ticks;
+unsigned long long sph_zstdpp_reference_split_ticks;
+unsigned long long sph_zstdpp_reference_encode_ticks;
+unsigned long long sph_zstdpp_reference_literals_ticks;
+unsigned long long sph_zstdpp_reference_tables_ticks;
+unsigned long long sph_zstdpp_reference_bits_ticks;
+static unsigned long long sph_zstdpp_reference_trace_now(void)
+{
+#ifdef _WIN32
+    LARGE_INTEGER value;
+    QueryPerformanceCounter(&value);
+    return (unsigned long long)value.QuadPart;
+#else
+    struct timespec value;
+    clock_gettime(CLOCK_MONOTONIC, &value);
+    return (unsigned long long)value.tv_sec * 1000000000ULL +
+        (unsigned long long)value.tv_nsec;
+#endif
+}
 #endif
 #include "../common/allocations.h"  /* ZSTD_customMalloc, ZSTD_customCalloc, ZSTD_customFree */
 #include "../common/zstd_deps.h"  /* INT_MAX, ZSTD_memset, ZSTD_memcpy */
@@ -2953,6 +2975,9 @@ ZSTD_entropyCompressSeqStore_internal(
     {   size_t const numSequences = (size_t)(seqStorePtr->sequences - seqStorePtr->sequencesStart);
         /* Base suspicion of uncompressibility on ratio of literals to sequences */
         int const suspectUncompressible = (numSequences == 0) || (litSize / numSequences >= SUSPECT_UNCOMPRESSIBLE_LITERAL_RATIO);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        unsigned long long const literals_start = sph_zstdpp_reference_trace_now();
+#endif
 
         size_t const cSize = ZSTD_compressLiterals(
                                     op, dstCapacity,
@@ -2962,6 +2987,9 @@ ZSTD_entropyCompressSeqStore_internal(
                                     cctxParams->cParams.strategy,
                                     ZSTD_literalsCompressionIsDisabled(cctxParams),
                                     suspectUncompressible, bmi2);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        sph_zstdpp_reference_literals_ticks += sph_zstdpp_reference_trace_now() - literals_start;
+#endif
         FORWARD_IF_ERROR(cSize, "ZSTD_compressLiterals failed");
         assert(cSize <= dstCapacity);
         op += cSize;
@@ -2988,6 +3016,9 @@ ZSTD_entropyCompressSeqStore_internal(
         return (size_t)(op - ostart);
     }
     {   BYTE* const seqHead = op++;
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        unsigned long long const tables_start = sph_zstdpp_reference_trace_now();
+#endif
         /* build stats for sequences */
         const ZSTD_symbolEncodingTypeStats_t stats =
                 ZSTD_buildSequencesStatistics(seqStorePtr, nbSeq,
@@ -2995,6 +3026,9 @@ ZSTD_entropyCompressSeqStore_internal(
                                               op, oend,
                                               strategy, count,
                                               entropyWorkspace, entropyWkspSize);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        sph_zstdpp_reference_tables_ticks += sph_zstdpp_reference_trace_now() - tables_start;
+#endif
         FORWARD_IF_ERROR(stats.size, "ZSTD_buildSequencesStatistics failed!");
         *seqHead = (BYTE)((stats.LLtype<<6) + (stats.Offtype<<4) + (stats.MLtype<<2));
         lastCountSize = stats.lastCountSize;
@@ -3002,13 +3036,20 @@ ZSTD_entropyCompressSeqStore_internal(
         longOffsets = stats.longOffsets;
     }
 
-    {   size_t const bitstreamSize = ZSTD_encodeSequences(
+    {
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        unsigned long long const bits_start = sph_zstdpp_reference_trace_now();
+#endif
+        size_t const bitstreamSize = ZSTD_encodeSequences(
                                         op, (size_t)(oend - op),
                                         CTable_MatchLength, mlCodeTable,
                                         CTable_OffsetBits, ofCodeTable,
                                         CTable_LitLength, llCodeTable,
                                         sequences, nbSeq,
                                         longOffsets, bmi2);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        sph_zstdpp_reference_bits_ticks += sph_zstdpp_reference_trace_now() - bits_start;
+#endif
         FORWARD_IF_ERROR(bitstreamSize, "ZSTD_encodeSequences failed");
         op += bitstreamSize;
         assert(op <= oend);
@@ -3449,12 +3490,9 @@ static size_t ZSTD_buildSeqStore(ZSTD_CCtx* zc, const void* src, size_t srcSize)
                     dictMode);
             ms->ldmSeqStore = NULL;
 #ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
-            {   LARGE_INTEGER parse_start;
-                LARGE_INTEGER parse_end;
-                QueryPerformanceCounter(&parse_start);
+            {   unsigned long long const parse_start = sph_zstdpp_reference_trace_now();
                 lastLLSize = blockCompressor(ms, &zc->seqStore, zc->blockState.nextCBlock->rep, src, srcSize);
-                QueryPerformanceCounter(&parse_end);
-                sph_zstdpp_reference_parse_ticks += (unsigned long long)(parse_end.QuadPart - parse_start.QuadPart);
+                sph_zstdpp_reference_parse_ticks += sph_zstdpp_reference_trace_now() - parse_start;
             }
 #else
             lastLLSize = blockCompressor(ms, &zc->seqStore, zc->blockState.nextCBlock->rep, src, srcSize);
@@ -4321,7 +4359,13 @@ ZSTD_compressBlock_splitBlock_internal(ZSTD_CCtx* zc,
     U32* const partitions = zc->blockSplitCtx.partitions; /* size == ZSTD_MAX_NB_BLOCK_SPLITS */
     SeqStore_t* const nextSeqStore = &zc->blockSplitCtx.nextSeqStore;
     SeqStore_t* const currSeqStore = &zc->blockSplitCtx.currSeqStore;
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+    unsigned long long const split_start = sph_zstdpp_reference_trace_now();
+#endif
     size_t const numSplits = ZSTD_deriveBlockSplits(zc, partitions, nbSeq);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+    sph_zstdpp_reference_split_ticks += sph_zstdpp_reference_trace_now() - split_start;
+#endif
 
     /* If a block is split and some partitions are emitted as RLE/uncompressed, then repcode history
      * may become invalid. In order to reconcile potentially invalid repcodes, we keep track of two
@@ -4348,12 +4392,18 @@ ZSTD_compressBlock_splitBlock_internal(ZSTD_CCtx* zc,
                 (unsigned)zc->blockState.matchState.nextToUpdate);
 
     if (numSplits == 0) {
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        unsigned long long const encode_start = sph_zstdpp_reference_trace_now();
+#endif
         size_t cSizeSingleBlock =
             ZSTD_compressSeqStore_singleBlock(zc, &zc->seqStore,
                                             &dRep, &cRep,
                                             op, dstCapacity,
                                             ip, blockSize,
                                             lastBlock, 0 /* isPartition */);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        sph_zstdpp_reference_encode_ticks += sph_zstdpp_reference_trace_now() - encode_start;
+#endif
         FORWARD_IF_ERROR(cSizeSingleBlock, "Compressing single block from splitBlock_internal() failed!");
         DEBUGLOG(5, "ZSTD_compressBlock_splitBlock_internal: No splits");
         assert(zc->blockSizeMax <= ZSTD_BLOCKSIZE_MAX);
@@ -4377,11 +4427,18 @@ ZSTD_compressBlock_splitBlock_internal(ZSTD_CCtx* zc,
             ZSTD_deriveSeqStoreChunk(nextSeqStore, &zc->seqStore, partitions[i], partitions[i+1]);
         }
 
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        { unsigned long long const encode_start = sph_zstdpp_reference_trace_now();
+#endif
         cSizeChunk = ZSTD_compressSeqStore_singleBlock(zc, currSeqStore,
                                                       &dRep, &cRep,
                                                        op, dstCapacity,
                                                        ip, srcBytes,
                                                        lastBlockEntireSrc, 1 /* isPartition */);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+          sph_zstdpp_reference_encode_ticks += sph_zstdpp_reference_trace_now() - encode_start;
+        }
+#endif
         DEBUGLOG(5, "Estimated size: %zu vs %zu : actual size",
                     ZSTD_buildEntropyStatisticsAndEstimateSubBlockSize(currSeqStore, zc), cSizeChunk);
         FORWARD_IF_ERROR(cSizeChunk, "Compressing chunk failed!");
@@ -4462,6 +4519,9 @@ ZSTD_compressBlock_internal(ZSTD_CCtx* zc,
     }
 
     /* encode sequences and literals */
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+    { unsigned long long const encode_start = sph_zstdpp_reference_trace_now();
+#endif
     cSize = ZSTD_entropyCompressSeqStore(&zc->seqStore,
             &zc->blockState.prevCBlock->entropy, &zc->blockState.nextCBlock->entropy,
             &zc->appliedParams,
@@ -4469,6 +4529,10 @@ ZSTD_compressBlock_internal(ZSTD_CCtx* zc,
             srcSize,
             zc->tmpWorkspace, zc->tmpWkspSize /* statically allocated in resetCCtx */,
             zc->bmi2);
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+      sph_zstdpp_reference_encode_ticks += sph_zstdpp_reference_trace_now() - encode_start;
+    }
+#endif
 
     if (frame &&
         /* We don't want to emit our first block as a RLE even if it qualifies because
