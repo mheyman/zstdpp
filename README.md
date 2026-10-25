@@ -8034,3 +8034,33 @@ Raw paired reports are in `out/goal-l1-collect-pair-{mixed,varied}-20261025/`.
 The full MSVC acceptance executable and unit tests passed. The existing
 22-level GCC table remains unchanged. Level 1 still trails reference on both
 inputs, so the all-level performance goal remains open.
+
+### MSVC depth-2 row insertion inlining (2026-10-25)
+
+AMD uProf's optimized level-8 profiles identified the row insertion/search
+path as the largest C++ hot region. The MSVC depth-2 row specialization now
+asks the compiler to inline its hot insertion call; portable builds retain the
+previous call policy. Six alternating direct before/after trials produced
+identical compressed frames in every pair and improved median throughput by
+6.16% at level 8 and 10.67% at level 9 on 1-MiB mixed input (3,000 frames per
+trial). On 1-MiB varied text (1,000 frames per trial), medians improved by
+10.57% and 8.90%, respectively. All 24 paired trials were faster. An earlier
+fingerprint early-exit experiment was byte-exact but slower and was reverted.
+
+Fresh optimized MSVC Release `zstdpp_pair` reports use six alternating trials
+per row and validate exact reference frame bytes plus both decoders reading
+both encodings. Memory is median peak RSS; code is worker executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB mixed input / 8 | 1342.18 | 1422.06 | 94.38% | 11.00 | 11.46 | 95.93% | 116.50 | 382.00 | 30.50% |
+| 1-MiB mixed input / 9 | 1183.75 | 1223.60 | 96.74% | 16.02 | 16.46 | 97.29% | 116.50 | 382.00 | 30.50% |
+| 1-MiB varied text / 8 | 152.53 | 170.67 | 89.37% | 10.68 | 11.32 | 94.36% | 116.50 | 382.00 | 30.50% |
+| 1-MiB varied text / 9 | 149.25 | 159.54 | 93.55% | 15.68 | 16.33 | 96.03% | 116.50 | 382.00 | 30.50% |
+
+Raw reports are in `out/goal-l{8,9}-inline-pair-{mixed,varied}-20261025/`;
+direct old/new runs are in the corresponding `out/goal-l{8,9}-inline-{insert,varied}-20261025/`
+folders. MSVC and GCC 13 unit tests and full compression acceptance passed.
+The existing 22-level GCC table is unchanged. This compiler-specific change
+also applies to other depth-2 row presets, whose speed still needs separate
+measurement; levels 8 and 9 remain below reference on these corpora.

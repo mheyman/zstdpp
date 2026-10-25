@@ -2211,7 +2211,16 @@ namespace sph::zstd::detail
                     next = current - 32U;
                     cache.fill(next, current + 1U, hasher);
                 }
-                insert_until(current);
+#if defined(_MSC_VER)
+                if constexpr (RowRelativeTag)
+                {
+                    // MSVC's depth-2 row path benefits from keeping this
+                    // insertion loop in the searcher's hot call site.
+                    [[msvc::forceinline_calls]] insert_until(current);
+                }
+                else
+#endif
+                    insert_until(current);
                 value = cache.next(current, hasher);
             }
             salt.observe(value); // Only searches contribute reference salt entropy.
