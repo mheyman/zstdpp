@@ -128,6 +128,9 @@ int main()
     for (std::size_t i{}; i < input.size(); ++i) input[i] = static_cast<std::uint8_t>(text[i % text.size()]);
     for (std::size_t i{96U}; i < input.size(); i += 149U) input[i] = static_cast<std::uint8_t>((i / 149U) & 255U);
     using D = double_fast_match_state<19, 10, 10, 5>;
+#if defined(_MSC_VER)
+    using D3 = double_fast_match_state<20, 17, 16, 5>;
+#endif
     using D4 = double_fast_match_state<19, 10, 10, 4>;
     using DR = double_fast_match_state<19, 10, 10, 0>;
     using G = greedy_match_state<0, false, 19, 10, 10, 3, 4>;
@@ -151,6 +154,9 @@ int main()
         }
         if (pattern == 2U) std::ranges::fill(input, std::uint8_t{42U});
         check("double-fast", [] { return D{19, 10, 10, 5}; }, input);
+#if defined(_MSC_VER)
+        check("double-fast packed level 3", [] { return D3{20, 17, 16, 5}; }, input);
+#endif
         check("double-fast tags", [] { return D4{19, 10, 10, 4}; }, input);
         check("double-fast runtime", [] { return DR{19, 10, 10, 5}; }, input);
         check("hash-chain", [] { return G{19, 10, 10, 3, 4}; }, input);

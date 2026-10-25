@@ -376,6 +376,39 @@ namespace
         }
     }
 
+    void test_packed_double_fast_storage()
+    {
+#if defined(_MSC_VER)
+        using namespace sph::zstd::detail;
+        auto before{cache_aligned_allocation_count};
+        std::size_t overhead{};
+        {
+            packed_match_table packed_long, packed_short;
+            overhead = cache_aligned_allocation_count - before;
+        }
+        auto const expected{overhead + 2U};
+        before = cache_aligned_allocation_count;
+        auto const released{cache_aligned_deallocation_count};
+        {
+            double_fast_match_state<20U, 17U, 16U, 5U> state{20U, 17U, 16U, 5U};
+            check(cache_aligned_allocation_count == before + expected,
+                "packed double-fast allocates only two table buffers");
+            auto const input{make_input(8192U)};
+            parsed_block scratch;
+            scratch.sequences.reserve(input.size() / 3U);
+            for (unsigned frame{}; frame < 6U; ++frame)
+            {
+                scratch = state.parse(input, 0U, input.size(), std::move(scratch));
+                state.reset();
+            }
+            check(cache_aligned_allocation_count == before + expected,
+                "packed double-fast reuses both table buffers across resets");
+        }
+        check(cache_aligned_deallocation_count == released + expected,
+            "packed double-fast releases only its two table buffers");
+#endif
+    }
+
     void test_double_fast_reset_indices()
     {
         check_double_fast_reset_indices<10U, 4U>();
@@ -1957,6 +1990,21 @@ namespace
                 actual.trailing_literal_length == expected.trailing_literal_length,
                 "double-fast collected parser preserves cross-block match history");
         }
+#if defined(_MSC_VER)
+        using packed_state_type = sph::zstd::detail::double_fast_match_state<20U, 17U, 16U, 5U>;
+        packed_state_type packed_ordinary{20U, 17U, 16U, 5U};
+        packed_state_type packed_collecting{20U, 17U, 16U, 5U};
+        for (std::size_t begin{}; begin < input.size(); begin += 131072U)
+        {
+            auto const expected{packed_ordinary.parse(input, begin, 131072U)};
+            auto const actual{packed_collecting.parse_collecting(input, begin, 131072U, {},
+                std::nullopt, storage)};
+            check(actual.sequences == expected.sequences &&
+                actual.trailing_literal_position == expected.trailing_literal_position &&
+                actual.trailing_literal_length == expected.trailing_literal_length,
+                "packed double-fast collected parser shares cross-block match history");
+        }
+#endif
     }
 
     void test_fast_parser_direct_candidates()
@@ -2703,6 +2751,7 @@ int main()
         check_double_fast_tag_storage<0U>();
         check_double_fast_tag_storage<4U>();
         check_double_fast_tag_storage<5U>();
+        test_packed_double_fast_storage();
         test_double_fast_tag_transitions();
         test_reference_interoperability();
         check_custom_double_fast_frames<4U, false>();

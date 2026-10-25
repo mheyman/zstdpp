@@ -225,6 +225,41 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### MSVC level-3 packed match tables (2026-10-24)
+
+The MSVC level-3 double-fast parser now stores each 32-bit match index and its
+one-byte tag in a five-byte entry. This keeps the same combined table payload
+size as the previous separate arrays while making each probe use one address
+stream. The class selects two packed tables for this preset and the original
+four tables for other presets; it allocates no table storage after creation.
+The existing tag filter and match decisions are unchanged.
+
+Six CPU-pinned, alternating baseline/candidate pairs of 5,000 one-MiB frames
+from the final layout matched compressed bytes and improved C++ throughput on
+all six trials: +3.38% paired median on varied text and +5.25% on mixed input.
+An earlier 10,000-frame reversed-order confirmation of the two-table layout
+also won all six pairs on both corpora (+5.46% varied, +6.07% mixed). The
+optimized acceptance test and reciprocal decoding pass. Debug unit tests
+verify two packed table buffers, no new allocations across parsing/reset,
+literal-collecting equivalence, and near-limit index rebasing. A level-4
+mixed-input control was noisy and sometimes negative, but its parser object
+code is byte-identical to the pre-change worker; byte-identical executables at
+different filenames showed comparable timing variation. No level-4 speed
+change is claimed.
+
+Final optimized MSVC Release `zstdpp_pair` reports used six alternating
+4,000-frame trials per one-MiB corpus. Every compressed frame matched the
+reference, and both decoders recovered both encodings:
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 / varied text, 1 MiB | 2622.20 | 2818.60 | 93.03 | 7.10 | 7.07 | 100.44 | 118.50 | 382.00 | 31.02 |
+| 3 / mixed, 1 MiB | 1857.08 | 1717.54 | 108.12 | 7.37 | 7.19 | 102.50 | 118.50 | 382.00 | 31.02 |
+
+The varied-text gap remains. Raw paired reports are under
+`out/build/msvc-l3-grouped-final-20261024/eval/pair-results/` at runs
+`1792893873172995-0` (varied) and `1792893894065214-0` (mixed).
+
 ### MSVC level-3 double-fast tag guards (2026-10-24)
 
 AMD uProf branch sampling identified mispredicted tag/index guards in the

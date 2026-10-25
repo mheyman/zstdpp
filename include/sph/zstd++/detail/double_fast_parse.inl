@@ -1,6 +1,6 @@
-// This body is instantiated twice inside double_fast_match_state. The ordinary
-// instantiation preprocesses to its original tokens, preserving other levels'
-// generated parser code; the selected collection path adds literal writes.
+// The ordinary instantiations preserve other levels' parser code. The selected
+// MSVC level-3 instantiations use packed index/tag storage, and collection
+// variants add literal writes.
         template <bool UseTags, typename Block = parsed_block>
         [[nodiscard]] auto SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
@@ -64,10 +64,17 @@
             };
             auto const lowest_biased{frame_base + prefix_start + index_bias};
             auto const limit{block_end - hash_read_size};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE)
+            auto const long_table{packed_index_view{packed_long_table_.data()}};
+            auto const short_table{packed_index_view{packed_short_table_.data()}};
+            auto const long_tags{packed_tag_view{packed_long_table_.data()}};
+            auto const short_tags{packed_tag_view{packed_short_table_.data()}};
+#else
             auto* const long_table{long_table_.data()};
             auto* const short_table{short_table_.data()};
             auto* const long_tags{long_tags_.data()};
             auto* const short_tags{short_tags_.data()};
+#endif
             auto const* const input_data{input.data()};
             auto anchor{block_begin};
             auto position{block_begin + static_cast<std::size_t>(block_begin == prefix_start)};
@@ -90,7 +97,7 @@
                 }
 
                 auto long_hash_zero{long_hash(input_data + position)};
-                auto long_index_zero{long_table[long_hash_zero]};
+                auto long_index_zero{static_cast<std::uint32_t>(long_table[long_hash_zero])};
                 std::uint32_t current_biased{};
                 std::size_t match_length{};
                 std::size_t offset{};
@@ -102,7 +109,7 @@
                 do
                 {
                     auto const short_hash_zero{short_hash(input_data + position)};
-                    auto const short_index_zero{short_table[short_hash_zero]};
+                    auto const short_index_zero{static_cast<std::uint32_t>(short_table[short_hash_zero])};
                     auto const previous_long_tag{UseTags ? long_tags[long_hash_zero] : std::uint8_t{}};
                     auto const previous_short_tag{UseTags ? short_tags[short_hash_zero] : std::uint8_t{}};
                     current_biased = static_cast<std::uint32_t>(
@@ -142,7 +149,7 @@
                         break;
                     }
 
-                    auto const long_index_one{long_table[long_hash_one]};
+                    auto const long_index_one{static_cast<std::uint32_t>(long_table[long_hash_one])};
 #if defined(SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD)
                     if ((valid(short_index_zero, lowest_biased) &
                         (previous_short_tag == input[position])) &&

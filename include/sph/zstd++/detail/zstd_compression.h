@@ -118,6 +118,80 @@ namespace sph::zstd::detail
 
     using match_table = std::vector<std::uint32_t, cache_aligned_allocator<std::uint32_t>>;
     using row_tag_table = std::vector<std::uint8_t, cache_aligned_allocator<std::uint8_t>>;
+
+    struct packed_match_entry
+    {
+        std::array<std::uint8_t, 5> bytes{};
+    };
+    static_assert(sizeof(packed_match_entry) == 5U);
+
+    struct packed_index_view
+    {
+        packed_match_entry* entries{};
+
+        struct reference
+        {
+            packed_match_entry* entry{};
+
+            [[nodiscard]] operator std::uint32_t() const noexcept
+            {
+                std::uint32_t value{};
+                std::memcpy(&value, entry->bytes.data(), sizeof(value));
+                return value;
+            }
+
+            auto operator=(std::uint32_t value) noexcept -> reference&
+            {
+                std::memcpy(entry->bytes.data(), &value, sizeof(value));
+                return *this;
+            }
+
+            auto operator=(reference const& other) noexcept -> reference&
+            {
+                return *this = static_cast<std::uint32_t>(other);
+            }
+        };
+
+        [[nodiscard]] auto operator[](std::size_t index) const noexcept -> reference
+        {
+            return {entries + index};
+        }
+    };
+
+    struct packed_tag_view
+    {
+        packed_match_entry* entries{};
+
+        struct reference
+        {
+            packed_match_entry* entry{};
+
+            [[nodiscard]] operator std::uint8_t() const noexcept
+            {
+                return entry->bytes[4];
+            }
+
+            auto operator=(std::uint8_t value) noexcept -> reference&
+            {
+                entry->bytes[4] = value;
+                return *this;
+            }
+
+            auto operator=(reference const& other) noexcept -> reference&
+            {
+                return *this = static_cast<std::uint8_t>(other);
+            }
+        };
+
+        [[nodiscard]] auto operator[](std::size_t index) const noexcept -> reference
+        {
+            return {entries + index};
+        }
+    };
+
+    using packed_match_table = std::vector<packed_match_entry,
+        cache_aligned_allocator<packed_match_entry>>;
+    struct empty_match_table {};
     using symbol_counts = std::array<std::uint32_t, 256>;
     using symbol_count_workspace = std::array<symbol_counts, 4>;
 
@@ -1526,11 +1600,11 @@ namespace sph::zstd::detail
         double_fast_match_state(unsigned window_log, unsigned long_hash_log,
             unsigned short_hash_log, unsigned minimum_match)
             : window_log_{window_log}, long_hash_log_{long_hash_log}, short_hash_log_{short_hash_log},
-              minimum_match_{minimum_match},
-              long_table_(std::size_t{1} << match_parameter<LongHashLog>::resolve(long_hash_log)),
-              short_table_(std::size_t{1} << match_parameter<ShortHashLog>::resolve(short_hash_log)),
-              long_tags_(long_table_.size()), short_tags_(short_table_.size())
+              minimum_match_{minimum_match}
         {
+            auto const long_count{std::size_t{1} << match_parameter<LongHashLog>::resolve(long_hash_log)};
+            auto const short_count{std::size_t{1} << match_parameter<ShortHashLog>::resolve(short_hash_log)};
+            initialize_tables(long_count, short_count);
         }
 
         void reset()
@@ -1542,8 +1616,7 @@ namespace sph::zstd::detail
             if (next_base + window_size + index_bias >
                 std::numeric_limits<std::uint32_t>::max())
             {
-                std::ranges::fill(long_table_, 0U);
-                std::ranges::fill(short_table_, 0U);
+                clear_tables();
                 frame_index_base_ = 0U;
             }
             else
@@ -1569,12 +1642,18 @@ namespace sph::zstd::detail
                     std::move(result), known_rle);
             }
 #endif
-            return parse_impl<true>(input, block_begin, block_size, std::move(result), known_rle);
+#if defined(_MSC_VER)
+            if constexpr (packed_level3)
+                return parse_impl_masked<true>(input, block_begin, block_size,
+                    std::move(result), known_rle);
+            else
+#endif
+                return parse_impl<true>(input, block_begin, block_size, std::move(result), known_rle);
         }
 
 #if defined(_MSC_VER)
-        // Only the prepared, level-3 MSVC parser benefits from eager tag-guard
-        // evaluation. Keep the ordinary parser's generated path unchanged.
+        // Keep the prepared level-3 call on its proven eager tag-guard path.
+        // Other presets retain their ordinary parser implementation.
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
             prepared_parsed_block result, std::optional<bool> known_rle = std::nullopt)
@@ -1599,11 +1678,84 @@ namespace sph::zstd::detail
                 return parse_impl_collecting<false>(input, block_begin, block_size,
                     std::move(result), known_rle, literal_storage);
 #endif
-            return parse_impl_collecting<true>(input, block_begin, block_size,
-                std::move(result), known_rle, literal_storage);
+#if defined(_MSC_VER)
+            if constexpr (packed_level3)
+                return parse_impl_packed_collecting<true>(input, block_begin, block_size,
+                    std::move(result), known_rle, literal_storage);
+            else
+#endif
+                return parse_impl_collecting<true>(input, block_begin, block_size,
+                    std::move(result), known_rle, literal_storage);
         }
 
     private:
+#if defined(_MSC_VER)
+        static constexpr bool packed_level3{WindowLog == 20U && LongHashLog == 17U &&
+            ShortHashLog == 16U && MinimumMatch == 5U};
+#else
+        static constexpr bool packed_level3{false};
+#endif
+
+        template <bool Packed = packed_level3>
+        void initialize_tables(std::size_t long_count, std::size_t short_count)
+        {
+#if defined(_MSC_VER)
+            if constexpr (Packed)
+            {
+                packed_long_table_.resize(long_count);
+                packed_short_table_.resize(short_count);
+            }
+            else
+#endif
+            {
+                long_table_.resize(long_count);
+                short_table_.resize(short_count);
+                long_tags_.resize(long_count);
+                short_tags_.resize(short_count);
+            }
+        }
+
+        template <bool Packed = packed_level3>
+        void clear_tables()
+        {
+#if defined(_MSC_VER)
+            if constexpr (Packed)
+            {
+                std::ranges::fill(packed_long_table_, packed_match_entry{});
+                std::ranges::fill(packed_short_table_, packed_match_entry{});
+            }
+            else
+#endif
+            {
+                std::ranges::fill(long_table_, 0U);
+                std::ranges::fill(short_table_, 0U);
+            }
+        }
+
+        template <bool Packed = packed_level3>
+        void rebase_tables(std::uint32_t first_current)
+        {
+#if defined(_MSC_VER)
+            if constexpr (Packed)
+            {
+                for (auto* table : {&packed_long_table_, &packed_short_table_})
+                    for (auto& entry : *table)
+                    {
+                        std::uint32_t index{};
+                        std::memcpy(&index, entry.bytes.data(), sizeof(index));
+                        index = index >= first_current ? index - frame_index_base_ : 0U;
+                        std::memcpy(entry.bytes.data(), &index, sizeof(index));
+                    }
+            }
+            else
+#endif
+            {
+                for (auto* table : {&long_table_, &short_table_})
+                    for (auto& index : *table)
+                        index = index >= first_current ? index - frame_index_base_ : 0U;
+            }
+        }
+
 #define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl
 #define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 0
 #include "double_fast_parse.inl"
@@ -1613,9 +1765,19 @@ namespace sph::zstd::detail
 #if defined(_MSC_VER)
 #define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_masked
 #define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 0
+#define SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE 1
 #define SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD 1
 #include "double_fast_parse.inl"
 #undef SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD
+#undef SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE
+#undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
+#undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
+
+#define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_packed_collecting
+#define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 1
+#define SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE 1
+#include "double_fast_parse.inl"
+#undef SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE
 #undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
 #undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
 #endif
@@ -1638,9 +1800,7 @@ namespace sph::zstd::detail
             if (static_cast<std::uint64_t>(frame_index_base_) + block_end + index_bias <= maximum)
                 return;
             auto const first_current{frame_index_base_ + static_cast<std::uint32_t>(index_bias)};
-            for (auto* table : {&long_table_, &short_table_})
-                for (auto& index : *table)
-                    index = index >= first_current ? index - frame_index_base_ : 0U;
+            rebase_tables(first_current);
             frame_index_base_ = 0U;
         }
 
@@ -1763,13 +1923,20 @@ namespace sph::zstd::detail
         unsigned long_hash_log_{};
         unsigned short_hash_log_{};
         unsigned minimum_match_{};
-        match_table long_table_;
-        match_table short_table_;
-        row_tag_table long_tags_;
-        row_tag_table short_tags_;
+        using index_storage = std::conditional_t<packed_level3, empty_match_table, match_table>;
+        using tag_storage = std::conditional_t<packed_level3, empty_match_table, row_tag_table>;
+        using packed_storage = std::conditional_t<packed_level3, packed_match_table, empty_match_table>;
+        [[no_unique_address]] index_storage long_table_;
+        [[no_unique_address]] index_storage short_table_;
+        [[no_unique_address]] tag_storage long_tags_;
+        [[no_unique_address]] tag_storage short_tags_;
         std::uint32_t frame_index_base_{};
         std::uint32_t frame_extent_{};
         std::array<std::size_t, 3> repeat_offsets_{1U, 4U, 8U};
+#if defined(_MSC_VER)
+        [[no_unique_address]] packed_storage packed_long_table_;
+        [[no_unique_address]] packed_storage packed_short_table_;
+#endif
     };
 
     template <bool Enabled>
