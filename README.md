@@ -225,6 +225,26 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Current varied-text cross-level spot check (2026-10-25)
+
+Fresh optimized GCC 13 Release workers and the same 1-MiB varied-text input
+were compared in six alternating trials per level. Every frame matched the
+reference bytes, and both decoders recovered both encodings. These are a
+measurement refresh, not a new implementation speedup: levels 5 and 6 now
+exceed reference on this input, level 9 still trails, and level 16 is only
+narrowly ahead in short 20-frame trials. The separate 256-KiB level-2 gap
+below also remains open; this spot check does not prove all-level performance.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 5 / varied text, 1 MiB | 331.80 | 245.95 | 134.91 | 7.51 | 8.39 | 89.46 | 127.41 | 628.16 | 20.28 |
+| 6 / varied text, 1 MiB | 327.73 | 299.70 | 109.35 | 7.50 | 8.37 | 89.57 | 122.83 | 628.16 | 19.55 |
+| 9 / varied text, 1 MiB | 167.48 | 175.47 | 95.45 | 15.01 | 15.87 | 94.55 | 122.83 | 628.16 | 19.55 |
+| 16 / varied text, 1 MiB | 9.06 | 8.88 | 101.98 | 21.21 | 21.75 | 97.53 | 140.67 | 628.16 | 22.39 |
+
+Raw paired reports: `out/current-l{5,6,9,16}-varied-20261025/`.
+Levels 5, 6, and 9 used 300 iterations per trial; level 16 used 20.
+
 ### GCC 13 short level-2 Huffman code assignment (2026-10-25)
 
 The collected-literal, 256-KiB level-2 preset now assigns canonical Huffman
