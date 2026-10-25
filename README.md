@@ -244,13 +244,14 @@ compiler, and source-size specialization; other levels and corpora can differ.
 
 | Native GCC 13 / varied text, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Compress L2 | 3385.65 | 3581.36 | 94.54 | 5.26 | 6.01 | 87.52 | 131.40 | 639.85 | 20.54 |
 | Compress L8 | 173.38 | 171.41 | 101.15 | 9.95 | 10.87 | 91.55 | 126.62 | 639.85 | 19.79 |
 | Compress L9 | 183.77 | 181.14 | 101.45 | 14.95 | 15.87 | 94.20 | 126.62 | 639.85 | 19.79 |
 | Compress L16 | 8.88 | 8.65 | 102.70 | 21.22 | 21.74 | 97.61 | 149.06 | 639.85 | 23.30 |
 | Compress L17 | 8.49 | 8.47 | 100.24 | 21.22 | 21.75 | 97.55 | 149.06 | 639.85 | 23.30 |
 | Compress L18 | 5.99 | 5.81 | 103.04 | 21.72 | 22.24 | 97.64 | 149.05 | 639.85 | 23.29 |
 
-The portable-build benchmark tables below are unchanged. In particular, these
+The portable-build benchmark tables below are unchanged. In particular, the
 five native-build leads do not prove that the template implementation is faster
 at every level. GCC 13's SLP/inlining of the level-16/17 binary-tree match
 collector was slower on this host; a specialization-scoped wrapper avoids that
@@ -262,16 +263,32 @@ pre-change SHA-256 hashes. Raw paired reports: `out/zen3-sixlevel-20261025/`
 (`pair-l8-varied/`, `pair-l9-varied/`, `pair-l18-varied/`) and
 `out/native-all22-20261025/` (`pair-l16-varied/`, `pair-l17-varied/`).
 
+The level-2 row is a separate 10,000-frame, six-trial paired run. GCC 13 now
+selects the existing block-density sequence-writer dispatch for its pledged
+1-MiB fast specialization. Six direct 10,000-frame baseline/candidate varied
+pairs all won (median +1.0% C++ throughput); an independent six-pair
+20,000-frame confirmation won five (median +0.52%). The longer mixed-input
+control was inconclusive (three wins, median -0.55%), so no mixed-input
+improvement over the old C++ worker is claimed. Equal-work `perf stat` runs
+reduced varied instructions by about 0.3% and cycles by 0.7–1.3%; mixed
+instructions were essentially unchanged. Exact compressed bytes, reciprocal
+decoding, GCC unit tests and all-level compression parity passed. The
+neighboring level-9 optimized `.text` was SHA-256-identical to a clean HEAD
+build. Raw comparisons and paired reports are in `out/native-all22-20261025/`
+(`adaptive-wide-l2-1m-*` and `adaptive-wide-pair-l2-*`).
+
 The deterministic 1-MiB mixed-input control also passed exact bytes and
-reciprocal decoding (three alternating 60-frame trials):
+reciprocal decoding. Level 2 used six alternating 10,000-frame trials;
+levels 16 and 17 used three alternating 60-frame trials:
 
 | Native GCC 13 / mixed, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Compress L2 | 2808.75 | 2629.13 | 106.83 | 5.61 | 6.18 | 90.68 | 131.40 | 639.85 | 20.54 |
 | Compress L16 | 95.00 | 87.44 | 108.65 | 21.47 | 21.86 | 98.20 | 149.06 | 639.85 | 23.30 |
 | Compress L17 | 92.70 | 87.49 | 105.95 | 21.84 | 21.89 | 99.80 | 149.06 | 639.85 | 23.30 |
 
-These mixed figures are relative to the reference, **not** a claim that the
-new wrapper improves mixed-input C++ throughput. Six short direct
+The level-16/17 mixed figures are relative to the reference, **not** a claim
+that their new wrapper improves mixed-input C++ throughput. Six short direct
 baseline/candidate timings were highly variable. Equal-work 1,000-frame
 `perf stat` controls consistently showed more retired C++ instructions with
 the wrapper (+10.31% at L16, +8.93% at L17), while cycles varied. This is a

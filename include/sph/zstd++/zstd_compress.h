@@ -673,18 +673,26 @@ namespace sph::zstd
                                 Parameters.compression_level == 3 &&
                                 effective_parameters_.pledged_source_size <= 65536U))
                             // Level 2 chooses grouped or scalar sequence
-                            // writes once per block, leaving table and
-                            // Huffman policy unchanged.
+                            // writes once per block. The measured 1-MiB fast
+                            // specialization benefits from the same density
+                            // dispatch as short double-fast frames; table and
+                            // Huffman policy remain unchanged.
                             , (effective_parameters_.strategy == compression_strategy::double_fast &&
                                Parameters.compression_level == 2 &&
                                effective_parameters_.pledged_source_size != 0U &&
-                               effective_parameters_.pledged_source_size <= 262144U)
+                               effective_parameters_.pledged_source_size <= 262144U) ||
+                              (effective_parameters_.strategy == compression_strategy::fast &&
+                               Parameters.compression_level == 2 &&
+                               effective_parameters_.pledged_source_size == 1048576U)
                             // Dense-sequence blocks use the wider grouped
                             // writer; sparse blocks keep the scalar writer.
                             , (effective_parameters_.strategy == compression_strategy::double_fast &&
                                Parameters.compression_level == 2 &&
                                effective_parameters_.pledged_source_size != 0U &&
-                               effective_parameters_.pledged_source_size <= 262144U)
+                               effective_parameters_.pledged_source_size <= 262144U) ||
+                              (effective_parameters_.strategy == compression_strategy::fast &&
+                               Parameters.compression_level == 2 &&
+                               effective_parameters_.pledged_source_size == 1048576U)
 #else
 #if defined(_MSC_VER)
                             // On the measured level-3 double-fast path, emit
