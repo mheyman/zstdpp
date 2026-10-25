@@ -122,6 +122,18 @@ int main(int argc, char** argv)
                   << " tables_ns=" << entropy.tables_ns << " bits_ns=" << entropy.bits_ns
                   << " blocks=" << entropy.blocks << " sequences=" << entropy.sequences
                   << " literal_bytes=" << entropy.literal_bytes << '\n';
+        for (unsigned table{}; table < 3U; ++table)
+        {
+            std::cerr << "sequence table " << table
+                      << " select_ns=" << entropy.sequence_table_select_ns[table];
+            for (unsigned mode{}; mode < 4U; ++mode)
+                std::cerr << " mode" << mode << '=' << entropy.sequence_table_mode_counts[table][mode];
+            std::cerr << '\n';
+        }
+        std::cerr << "sequence table phases histogram_ns=" << entropy.sequence_histogram_ns
+                  << " normalize_ns=" << entropy.sequence_normalize_ns
+                  << " build_ns=" << entropy.sequence_build_ns
+                  << " history_copy_ns=" << entropy.sequence_history_copy_ns << '\n';
         std::cerr << "Huffman phases histogram_ns=" << entropy.huffman_histogram_ns
                   << " tree_ns=" << entropy.huffman_tree_ns
                   << " weights_ns=" << entropy.huffman_weights_ns

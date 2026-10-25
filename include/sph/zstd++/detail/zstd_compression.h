@@ -37,6 +37,10 @@ namespace sph::zstd::detail
     struct entropy_phase_trace
     {
         std::uint64_t gather_ns{}, literals_ns{}, tables_ns{}, bits_ns{};
+        std::array<std::uint64_t, 3> sequence_table_select_ns{};
+        std::array<std::array<std::uint64_t, 4>, 3> sequence_table_mode_counts{};
+        std::uint64_t sequence_histogram_ns{}, sequence_normalize_ns{};
+        std::uint64_t sequence_build_ns{}, sequence_history_copy_ns{};
         std::uint64_t huffman_histogram_ns{}, huffman_tree_ns{}, huffman_weights_ns{};
         std::uint64_t huffman_selection_ns{}, huffman_streams_ns{}, huffman_emit_ns{};
         std::uint64_t huffman_codeprep_ns{}, huffman_body_ns{};
@@ -5123,6 +5127,9 @@ namespace sph::zstd::detail
         symbol_count_workspace& histogram_workspace,
         sequence_table_history& history) -> selected_sequence_table
     {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        auto sequence_stage_start{std::chrono::steady_clock::now()};
+#endif
         description.clear();
         auto const& counts{DominantPrefix ? count_symbols_dominant_prefix(codes, histogram_workspace) :
             count_symbols<128U, AlphabetSize>(codes, histogram_workspace)};
@@ -5136,6 +5143,9 @@ namespace sph::zstd::detail
         }
         auto const most_frequent{*std::max_element(
             counts.begin(), counts.begin() + static_cast<std::ptrdiff_t>(maximum_symbol + 1U))};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.sequence_histogram_ns += entropy_trace_elapsed(sequence_stage_start);
+#endif
         if (most_frequent == codes.size())
         {
             history.valid = false;
@@ -5165,6 +5175,9 @@ namespace sph::zstd::detail
         auto adjusted_size{codes.size()};
         if (counts[codes.back()] > 1U)
         {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            sequence_stage_start = std::chrono::steady_clock::now();
+#endif
             auto adjusted_counts{counts};
             --adjusted_counts[codes.back()];
             --adjusted_size;
@@ -5172,6 +5185,9 @@ namespace sph::zstd::detail
             auto const normalized{normalize_counts(adjusted_counts, adjusted_size, maximum_symbol,
                 table_log, adjusted_size >= 2048U)};
             write_normalized_counts(normalized, description);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            entropy_trace.sequence_normalize_ns += entropy_trace_elapsed(sequence_stage_start);
+#endif
             if constexpr (CarefulSelection)
             {
                 auto const basic_cost{cross_entropy_cost(default_counts, default_log,
@@ -5195,16 +5211,32 @@ namespace sph::zstd::detail
                     return {sequence_table_mode::repeat, &history.table};
                 }
             }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            sequence_stage_start = std::chrono::steady_clock::now();
+#endif
             workspace_table = build_fse_compression_table(normalized);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            entropy_trace.sequence_build_ns += entropy_trace_elapsed(sequence_stage_start);
+            sequence_stage_start = std::chrono::steady_clock::now();
+#endif
             history.counts = normalized;
             history.table = workspace_table;
             history.valid = true;
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            entropy_trace.sequence_history_copy_ns += entropy_trace_elapsed(sequence_stage_start);
+#endif
             return {sequence_table_mode::compressed, &workspace_table};
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        sequence_stage_start = std::chrono::steady_clock::now();
+#endif
         auto const table_log{optimal_fse_table_log(maximum_log, codes.size(), maximum_symbol)};
         auto const normalized{normalize_counts(counts, adjusted_size, maximum_symbol,
             table_log, adjusted_size >= 2048U)};
         write_normalized_counts(normalized, description);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.sequence_normalize_ns += entropy_trace_elapsed(sequence_stage_start);
+#endif
         if constexpr (CarefulSelection)
         {
             auto const basic_cost{cross_entropy_cost(default_counts, default_log,
@@ -5228,10 +5260,20 @@ namespace sph::zstd::detail
                 return {sequence_table_mode::repeat, &history.table};
             }
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        sequence_stage_start = std::chrono::steady_clock::now();
+#endif
         workspace_table = build_fse_compression_table(normalized);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.sequence_build_ns += entropy_trace_elapsed(sequence_stage_start);
+        sequence_stage_start = std::chrono::steady_clock::now();
+#endif
         history.counts = normalized;
         history.table = workspace_table;
         history.valid = true;
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.sequence_history_copy_ns += entropy_trace_elapsed(sequence_stage_start);
+#endif
         return {sequence_table_mode::compressed, &workspace_table};
     }
 
@@ -5437,11 +5479,19 @@ namespace sph::zstd::detail
         entropy_trace.literals_ns += entropy_trace_elapsed(entropy_phase_start);
         entropy_phase_start = std::chrono::steady_clock::now();
 #endif
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        auto sequence_table_start{std::chrono::steady_clock::now()};
+#endif
         auto const literal_table{select_sequence_table<CarefulSelection, GroupFse,
             CarefulSelection ? 256U : literal_length_base.size()>(literal_code_bytes,
             literal_length_default_norm, 6U, 9U, true, workspace.table_descriptions[0],
             workspace.sequence_tables[0], workspace.histogram_workspace,
             workspace.sequence_histories[0])};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.sequence_table_select_ns[0] += entropy_trace_elapsed(sequence_table_start);
+        ++entropy_trace.sequence_table_mode_counts[0][static_cast<unsigned>(literal_table.mode)];
+        sequence_table_start = std::chrono::steady_clock::now();
+#endif
         auto const offset_table{select_sequence_table<CarefulSelection, GroupFse,
             CarefulSelection ? 256U : offset_base.size()>(offset_code_bytes,
             offset_default_norm, 5U, 8U,
@@ -5451,11 +5501,20 @@ namespace sph::zstd::detail
             GroupFse || *std::max_element(offset_code_bytes.begin(), offset_code_bytes.end()) <= 28U,
             workspace.table_descriptions[1], workspace.sequence_tables[1],
             workspace.histogram_workspace, workspace.sequence_histories[1])};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.sequence_table_select_ns[1] += entropy_trace_elapsed(sequence_table_start);
+        ++entropy_trace.sequence_table_mode_counts[1][static_cast<unsigned>(offset_table.mode)];
+        sequence_table_start = std::chrono::steady_clock::now();
+#endif
         auto const match_length_table{select_sequence_table<CarefulSelection, GroupFse,
             CarefulSelection ? 256U : match_length_base.size()>(match_code_bytes,
             match_length_default_norm, 6U, 9U, true, workspace.table_descriptions[2],
             workspace.sequence_tables[2], workspace.histogram_workspace,
             workspace.sequence_histories[2])};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.sequence_table_select_ns[2] += entropy_trace_elapsed(sequence_table_start);
+        ++entropy_trace.sequence_table_mode_counts[2][static_cast<unsigned>(match_length_table.mode)];
+#endif
 
         append_sequence_count(output, parsed.sequences.size());
         output.push_back(static_cast<std::uint8_t>(
