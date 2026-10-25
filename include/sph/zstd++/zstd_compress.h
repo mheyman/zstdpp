@@ -59,10 +59,20 @@ namespace sph::zstd
         static constexpr bool collect_double_fast_literals_{false};
 #endif
 #if defined(_MSC_VER)
+        static constexpr bool compact_double_fast_index_tags_{
+            effective_parameters_.strategy == compression_strategy::double_fast &&
+            effective_parameters_.window_log == 20U &&
+            effective_parameters_.hash_log == 17U &&
+            effective_parameters_.chain_log == 16U &&
+            effective_parameters_.minimum_match == 5U &&
+            Parameters.compression_level == 3 &&
+            effective_parameters_.pledged_source_size != unknown_content_size &&
+            effective_parameters_.pledged_source_size <= 1048576U};
         static constexpr bool prepared_double_fast_sequences_{
             effective_parameters_.strategy == compression_strategy::double_fast &&
             Parameters.compression_level == 3};
 #else
+        static constexpr bool compact_double_fast_index_tags_{false};
         static constexpr bool prepared_double_fast_sequences_{false};
 #endif
 
@@ -75,7 +85,7 @@ namespace sph::zstd
                 effective_parameters_.strategy == compression_strategy::double_fast,
                 detail::double_fast_match_state<effective_parameters_.window_log,
                     effective_parameters_.hash_log, effective_parameters_.chain_log,
-                    effective_parameters_.minimum_match>,
+                    effective_parameters_.minimum_match, compact_double_fast_index_tags_>,
                 std::conditional_t<
                     effective_parameters_.strategy == compression_strategy::greedy ||
                     effective_parameters_.strategy == compression_strategy::lazy ||

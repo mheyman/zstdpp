@@ -26,6 +26,43 @@ namespace sph::zstd::detail
         template <typename State>
         static auto base(State const& state) -> std::uint32_t { return state.frame_index_base_; }
 
+#if defined(_MSC_VER)
+        static void check_compact_epoch(double_fast_match_state<20, 17, 16, 5, true>& state)
+        {
+            constexpr std::uint32_t origin{0x00F00000U};
+            seed(state, origin);
+            state.compact_long_table_[0] = (0x5AU << 24U) | (origin + 2U);
+            state.compact_short_table_[0] = (0xA5U << 24U) | (origin + 3U);
+            state.compact_long_table_[1] = (0x71U << 24U) | (origin - 1U);
+            auto const allocations{cache_aligned_allocation_count};
+            state.ensure_index_headroom(2U * 1024U * 1024U);
+            if (state.frame_index_base_ != 0U ||
+                state.compact_long_table_[0] != ((0x5AU << 24U) | 2U) ||
+                state.compact_short_table_[0] != ((0xA5U << 24U) | 3U) ||
+                state.compact_long_table_[1] != (0x71U << 24U) ||
+                cache_aligned_allocation_count != allocations)
+                throw std::runtime_error{"compact epoch rebasing changed index, tag or allocation"};
+            state.frame_extent_ = 1024U * 1024U;
+            bool cleared{};
+            for (unsigned frame{}; frame < 16U; ++frame)
+            {
+                state.reset();
+                if (state.frame_index_base_ > 0x00FFFFFFU ||
+                    cache_aligned_allocation_count != allocations)
+                    throw std::runtime_error{"compact reset exceeded index or allocated"};
+                if (state.frame_index_base_ == 0U)
+                {
+                    cleared = true;
+                    if (state.compact_long_table_[0] != 0U ||
+                        state.compact_short_table_[0] != 0U)
+                        throw std::runtime_error{"compact reset did not clear stale entries"};
+                }
+                state.frame_extent_ = 1024U * 1024U;
+            }
+            if (!cleared) throw std::runtime_error{"compact reset never rolled over"};
+        }
+#endif
+
         template <typename State>
         static void check_ring(State& state, std::uint32_t origin)
         {
@@ -130,6 +167,7 @@ int main()
     using D = double_fast_match_state<19, 10, 10, 5>;
 #if defined(_MSC_VER)
     using D3 = double_fast_match_state<20, 17, 16, 5>;
+    using D3C = double_fast_match_state<20, 17, 16, 5, true>;
 #endif
     using D4 = double_fast_match_state<19, 10, 10, 4>;
     using DR = double_fast_match_state<19, 10, 10, 0>;
@@ -156,6 +194,8 @@ int main()
         check("double-fast", [] { return D{19, 10, 10, 5}; }, input);
 #if defined(_MSC_VER)
         check("double-fast packed level 3", [] { return D3{20, 17, 16, 5}; }, input);
+        D3C compact{20, 17, 16, 5};
+        index_epoch_test_access::check_compact_epoch(compact);
 #endif
         check("double-fast tags", [] { return D4{19, 10, 10, 4}; }, input);
         check("double-fast runtime", [] { return DR{19, 10, 10, 5}; }, input);

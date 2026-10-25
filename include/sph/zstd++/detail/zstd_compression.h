@@ -198,6 +198,8 @@ namespace sph::zstd::detail
 
     using packed_match_table = std::vector<packed_match_entry,
         cache_aligned_allocator<packed_match_entry>>;
+    using compact_match_table = std::vector<std::uint32_t,
+        cache_aligned_allocator<std::uint32_t>>;
     struct empty_match_table {};
     using symbol_counts = std::array<std::uint32_t, 256>;
     using symbol_count_workspace = std::array<symbol_counts, 4>;
@@ -1605,7 +1607,8 @@ namespace sph::zstd::detail
 
     /** Persistent no-dictionary state for reference zstd's `double_fast` parser. */
     template <unsigned WindowLog = 0U, unsigned LongHashLog = 0U,
-        unsigned ShortHashLog = 0U, unsigned MinimumMatch = 0U>
+        unsigned ShortHashLog = 0U, unsigned MinimumMatch = 0U,
+        bool CompactIndexTag = false>
     class double_fast_match_state
     {
         friend struct index_epoch_test_access;
@@ -1627,7 +1630,7 @@ namespace sph::zstd::detail
             auto const next_base{static_cast<std::uint64_t>(frame_index_base_) +
                 frame_extent_ + index_bias + window_size};
             if (next_base + window_size + index_bias >
-                std::numeric_limits<std::uint32_t>::max())
+                (compact_level3 ? 0x00FFFFFFU : std::numeric_limits<std::uint32_t>::max()))
             {
                 clear_tables();
                 frame_index_base_ = 0U;
@@ -1656,7 +1659,10 @@ namespace sph::zstd::detail
             }
 #endif
 #if defined(_MSC_VER)
-            if constexpr (packed_level3)
+            if constexpr (compact_level3)
+                return parse_impl_compact<true>(input, block_begin, block_size,
+                    std::move(result), known_rle);
+            else if constexpr (packed_level3)
                 return parse_impl_masked<true>(input, block_begin, block_size,
                     std::move(result), known_rle);
             else
@@ -1672,8 +1678,10 @@ namespace sph::zstd::detail
             prepared_parsed_block result, std::optional<bool> known_rle = std::nullopt)
             -> prepared_parsed_block
         {
-            if constexpr (WindowLog == 20U && LongHashLog == 17U &&
-                ShortHashLog == 16U && MinimumMatch == 5U)
+            if constexpr (compact_level3)
+                return parse_impl_compact<true>(input, block_begin, block_size,
+                    std::move(result), known_rle);
+            else if constexpr (packed_level3)
                 return parse_impl_masked<true>(input, block_begin, block_size,
                     std::move(result), known_rle);
             else
@@ -1692,7 +1700,10 @@ namespace sph::zstd::detail
                     std::move(result), known_rle, literal_storage);
 #endif
 #if defined(_MSC_VER)
-            if constexpr (packed_level3)
+            if constexpr (compact_level3)
+                return parse_impl_compact_collecting<true>(input, block_begin, block_size,
+                    std::move(result), known_rle, literal_storage);
+            else if constexpr (packed_level3)
                 return parse_impl_packed_collecting<true>(input, block_begin, block_size,
                     std::move(result), known_rle, literal_storage);
             else
@@ -1704,16 +1715,24 @@ namespace sph::zstd::detail
     private:
 #if defined(_MSC_VER)
         static constexpr bool packed_level3{WindowLog == 20U && LongHashLog == 17U &&
-            ShortHashLog == 16U && MinimumMatch == 5U};
+            ShortHashLog == 16U && MinimumMatch == 5U && !CompactIndexTag};
+        static constexpr bool compact_level3{WindowLog == 20U && LongHashLog == 17U &&
+            ShortHashLog == 16U && MinimumMatch == 5U && CompactIndexTag};
 #else
         static constexpr bool packed_level3{false};
+        static constexpr bool compact_level3{false};
 #endif
 
         template <bool Packed = packed_level3>
         void initialize_tables(std::size_t long_count, std::size_t short_count)
         {
 #if defined(_MSC_VER)
-            if constexpr (Packed)
+            if constexpr (compact_level3)
+            {
+                compact_long_table_.resize(long_count);
+                compact_short_table_.resize(short_count);
+            }
+            else if constexpr (Packed)
             {
                 packed_long_table_.resize(long_count);
                 packed_short_table_.resize(short_count);
@@ -1732,7 +1751,12 @@ namespace sph::zstd::detail
         void clear_tables()
         {
 #if defined(_MSC_VER)
-            if constexpr (Packed)
+            if constexpr (compact_level3)
+            {
+                std::ranges::fill(compact_long_table_, 0U);
+                std::ranges::fill(compact_short_table_, 0U);
+            }
+            else if constexpr (Packed)
             {
                 std::ranges::fill(packed_long_table_, packed_match_entry{});
                 std::ranges::fill(packed_short_table_, packed_match_entry{});
@@ -1749,7 +1773,18 @@ namespace sph::zstd::detail
         void rebase_tables(std::uint32_t first_current)
         {
 #if defined(_MSC_VER)
-            if constexpr (Packed)
+            if constexpr (compact_level3)
+            {
+                for (auto* table : {&compact_long_table_, &compact_short_table_})
+                    for (auto& entry : *table)
+                    {
+                        auto const old_index{entry & 0x00FFFFFFU};
+                        auto const index{old_index >= first_current ?
+                            old_index - frame_index_base_ : 0U};
+                        entry = (entry & 0xFF000000U) | index;
+                    }
+            }
+            else if constexpr (Packed)
             {
                 for (auto* table : {&packed_long_table_, &packed_short_table_})
                     for (auto& entry : *table)
@@ -1786,6 +1821,24 @@ namespace sph::zstd::detail
 #undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
 #undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
 
+#define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_compact
+#define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 0
+#define SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE 1
+#define SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD 1
+#include "double_fast_parse.inl"
+#undef SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD
+#undef SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE
+#undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
+#undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
+
+#define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_compact_collecting
+#define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 1
+#define SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE 1
+#include "double_fast_parse.inl"
+#undef SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE
+#undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
+#undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
+
 #define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_packed_collecting
 #define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 1
 #define SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE 1
@@ -1807,7 +1860,8 @@ namespace sph::zstd::detail
 
         void ensure_index_headroom(std::size_t block_end)
         {
-            constexpr auto maximum{std::numeric_limits<std::uint32_t>::max()};
+            constexpr auto maximum{compact_level3 ? 0x00FFFFFFU :
+                std::numeric_limits<std::uint32_t>::max()};
             if (block_end > maximum - index_bias)
                 throw entropy_error{"double-fast frame exceeds the 32-bit index range"};
             if (static_cast<std::uint64_t>(frame_index_base_) + block_end + index_bias <= maximum)
@@ -1936,9 +1990,12 @@ namespace sph::zstd::detail
         unsigned long_hash_log_{};
         unsigned short_hash_log_{};
         unsigned minimum_match_{};
-        using index_storage = std::conditional_t<packed_level3, empty_match_table, match_table>;
-        using tag_storage = std::conditional_t<packed_level3, empty_match_table, row_tag_table>;
+        using index_storage = std::conditional_t<packed_level3 || compact_level3,
+            empty_match_table, match_table>;
+        using tag_storage = std::conditional_t<packed_level3 || compact_level3,
+            empty_match_table, row_tag_table>;
         using packed_storage = std::conditional_t<packed_level3, packed_match_table, empty_match_table>;
+        using compact_storage = std::conditional_t<compact_level3, compact_match_table, empty_match_table>;
         [[no_unique_address]] index_storage long_table_;
         [[no_unique_address]] index_storage short_table_;
         [[no_unique_address]] tag_storage long_tags_;
@@ -1949,6 +2006,8 @@ namespace sph::zstd::detail
 #if defined(_MSC_VER)
         [[no_unique_address]] packed_storage packed_long_table_;
         [[no_unique_address]] packed_storage packed_short_table_;
+        [[no_unique_address]] compact_storage compact_long_table_;
+        [[no_unique_address]] compact_storage compact_short_table_;
 #endif
     };
 

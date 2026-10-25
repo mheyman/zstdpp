@@ -1,5 +1,5 @@
 // The ordinary instantiations preserve other levels' parser code. The selected
-// MSVC level-3 instantiations use packed index/tag storage, and collection
+// MSVC level-3 instantiations use packed or compact index/tag storage, and collection
 // variants add literal writes.
         template <bool UseTags, typename Block = parsed_block>
         [[nodiscard]] auto SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME(std::span<std::uint8_t const> input,
@@ -64,7 +64,19 @@
             };
             auto const lowest_biased{frame_base + prefix_start + index_bias};
             auto const limit{block_end - hash_read_size};
-#if defined(SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE)
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+            auto* const long_table{compact_long_table_.data()};
+            auto* const short_table{compact_short_table_.data()};
+            auto const pack_entry{[](std::uint32_t index, std::uint8_t tag) -> std::uint32_t {
+                return index | (static_cast<std::uint32_t>(tag) << 24U);
+            }};
+            auto const entry_index{[](std::uint32_t entry) -> std::uint32_t {
+                return entry & 0x00FFFFFFU;
+            }};
+            auto const entry_tag{[](std::uint32_t entry) -> std::uint8_t {
+                return static_cast<std::uint8_t>(entry >> 24U);
+            }};
+#elif defined(SPH_ZSTDPP_DOUBLE_FAST_PACKED_TABLE)
             auto const long_table{packed_index_view{packed_long_table_.data()}};
             auto const short_table{packed_index_view{packed_short_table_.data()}};
             auto const long_tags{packed_tag_view{packed_long_table_.data()}};
@@ -97,7 +109,12 @@
                 }
 
                 auto long_hash_zero{long_hash(input_data + position)};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                auto long_entry_zero{long_table[long_hash_zero]};
+                auto long_index_zero{entry_index(long_entry_zero)};
+#else
                 auto long_index_zero{static_cast<std::uint32_t>(long_table[long_hash_zero])};
+#endif
                 std::uint32_t current_biased{};
                 std::size_t match_length{};
                 std::size_t offset{};
@@ -109,15 +126,27 @@
                 do
                 {
                     auto const short_hash_zero{short_hash(input_data + position)};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                    auto const short_entry_zero{short_table[short_hash_zero]};
+                    auto const short_index_zero{entry_index(short_entry_zero)};
+                    auto const previous_long_tag{entry_tag(long_entry_zero)};
+                    auto const previous_short_tag{entry_tag(short_entry_zero)};
+#else
                     auto const short_index_zero{static_cast<std::uint32_t>(short_table[short_hash_zero])};
                     auto const previous_long_tag{UseTags ? long_tags[long_hash_zero] : std::uint8_t{}};
                     auto const previous_short_tag{UseTags ? short_tags[short_hash_zero] : std::uint8_t{}};
+#endif
                     current_biased = static_cast<std::uint32_t>(
                         frame_base + position + index_bias);
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                    long_table[long_hash_zero] = short_table[short_hash_zero] =
+                        pack_entry(current_biased, input[position]);
+#else
                     long_table[long_hash_zero] = current_biased;
                     short_table[short_hash_zero] = current_biased;
                     if constexpr (UseTags)
                         long_tags[long_hash_zero] = short_tags[short_hash_zero] = input[position];
+#endif
 
                     if (repeat_one != 0U && equal_four(input_data + position + 1U,
                         input_data + position + 1U - repeat_one))
@@ -149,7 +178,12 @@
                         break;
                     }
 
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                    auto const long_entry_one{long_table[long_hash_one]};
+                    auto const long_index_one{entry_index(long_entry_one)};
+#else
                     auto const long_index_one{static_cast<std::uint32_t>(long_table[long_hash_one])};
+#endif
 #if defined(SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD)
                     if ((valid(short_index_zero, lowest_biased) &
                         (previous_short_tag == input[position])) &&
@@ -164,10 +198,18 @@
                         offset = position - match_position;
 #if defined(SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD)
                         if (((long_index_one > lowest_biased) &
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                            (entry_tag(long_entry_one) == input[next_position])) &&
+#else
                             (long_tags[long_hash_one] == input[next_position])) &&
+#endif
 #else
                         if (long_index_one > lowest_biased &&
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                            (!UseTags || entry_tag(long_entry_one) == input[next_position]) &&
+#else
                             (!UseTags || long_tags[long_hash_one] == input[next_position]) &&
+#endif
 #endif
                             equal_eight(input_data + next_position, input_data + local_position(long_index_one)))
                         {
@@ -196,6 +238,9 @@
                     next_position += step;
                     long_hash_zero = long_hash_one;
                     long_index_zero = long_index_one;
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                    long_entry_zero = long_entry_one;
+#endif
                 }
                 while (next_position <= limit);
 
@@ -210,9 +255,14 @@
                     repeat_one = offset;
                     if (step < 4U)
                     {
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                        long_table[long_hash_one] = pack_entry(static_cast<std::uint32_t>(
+                            frame_base + next_position + index_bias), input[next_position]);
+#else
                         long_table[long_hash_one] = static_cast<std::uint32_t>(
                             frame_base + next_position + index_bias);
                         if constexpr (UseTags) long_tags[long_hash_one] = input[next_position];
+#endif
                     }
                 }
 #if SPH_ZSTDPP_DOUBLE_FAST_COLLECT
@@ -228,21 +278,36 @@
                     auto const insertion_position{local_position(current_biased) + 2U};
                     auto const insertion_long_hash{long_hash(input_data + insertion_position)};
                     auto const insertion_short_hash{short_hash(input_data + insertion_position)};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                    long_table[insertion_long_hash] = short_table[insertion_short_hash] =
+                        pack_entry(current_biased + 2U, input[insertion_position]);
+#else
                     long_table[insertion_long_hash] = short_table[insertion_short_hash] =
                         current_biased + 2U;
                     if constexpr (UseTags)
                         long_tags[insertion_long_hash] = short_tags[insertion_short_hash] =
                             input[insertion_position];
+#endif
                     auto const position_long_hash{long_hash(input_data + position - 2U)};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                    long_table[position_long_hash] = pack_entry(static_cast<std::uint32_t>(
+                        frame_base + position - 2U + index_bias), input[position - 2U]);
+#else
                     long_table[position_long_hash] =
                         static_cast<std::uint32_t>(
                             frame_base + position - 2U + index_bias);
                     if constexpr (UseTags) long_tags[position_long_hash] = input[position - 2U];
+#endif
                     auto const position_short_hash{short_hash(input_data + position - 1U)};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                    short_table[position_short_hash] = pack_entry(static_cast<std::uint32_t>(
+                        frame_base + position - 1U + index_bias), input[position - 1U]);
+#else
                     short_table[position_short_hash] =
                         static_cast<std::uint32_t>(
                             frame_base + position - 1U + index_bias);
                     if constexpr (UseTags) short_tags[position_short_hash] = input[position - 1U];
+#endif
 
                     while (position <= limit && repeat_two != 0U &&
                         equal_four(input_data + position, input_data + position - repeat_two))
@@ -252,10 +317,16 @@
                         std::swap(repeat_one, repeat_two);
                         auto const repeat_long_hash{long_hash(input_data + position)};
                         auto const repeat_short_hash{short_hash(input_data + position)};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_COMPACT_TABLE)
+                        short_table[repeat_short_hash] = long_table[repeat_long_hash] =
+                            pack_entry(static_cast<std::uint32_t>(
+                                frame_base + position + index_bias), input[position]);
+#else
                         short_table[repeat_short_hash] = long_table[repeat_long_hash] =
                             static_cast<std::uint32_t>(frame_base + position + index_bias);
                         if constexpr (UseTags)
                             short_tags[repeat_short_hash] = long_tags[repeat_long_hash] = input[position];
+#endif
                         result.sequences.push_back(parsed_sequence{
                             0U, repeat_length, repeat_one, 1U});
                         position += repeat_length;

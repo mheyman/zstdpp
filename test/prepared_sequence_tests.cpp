@@ -59,19 +59,30 @@ namespace
         using namespace sph::zstd::detail;
         double_fast_match_state<20U, 17U, 16U, 5U> original{20U, 17U, 16U, 5U};
         double_fast_match_state<20U, 17U, 16U, 5U> prepared{20U, 17U, 16U, 5U};
+        [[maybe_unused]] auto const compact_allocations_before{cache_aligned_allocation_count};
+        double_fast_match_state<20U, 17U, 16U, 5U, true> compact{20U, 17U, 16U, 5U};
+#if defined(_MSC_VER)
+        require(cache_aligned_allocation_count - compact_allocations_before == 2U);
+#endif
         parsed_block original_block;
         prepared_parsed_block prepared_block;
+        prepared_parsed_block compact_block;
         constexpr std::size_t block_size{131072U};
         constexpr std::size_t maximum_sequences{block_size / 3U + 1U};
         original_block.sequences.reserve(maximum_sequences);
         prepared_block.sequences.reserve(maximum_sequences);
+        compact_block.sequences.reserve(maximum_sequences);
         auto const* storage{prepared_block.sequences.data()};
+        auto const* compact_storage{compact_block.sequences.data()};
         compression_workspace original_workspace;
         compression_workspace prepared_workspace;
+        compression_workspace compact_workspace;
         original_workspace.reserve(block_size, maximum_sequences);
         prepared_workspace.reserve(block_size, maximum_sequences);
+        compact_workspace.reserve(block_size, maximum_sequences);
         std::vector<std::uint8_t> original_frame;
         std::vector<std::uint8_t> prepared_frame;
+        std::vector<std::uint8_t> compact_frame;
         std::size_t checked{};
         for (auto size : {8U, 9U, 16U, 1024U, 65536U, 131072U, 262144U})
         {
@@ -80,25 +91,39 @@ namespace
                 auto const input{make_input(size, pattern)};
                 original.reset();
                 prepared.reset();
+                compact.reset();
                 original_workspace.reset_entropy_history();
                 prepared_workspace.reset_entropy_history();
+                compact_workspace.reset_entropy_history();
                 for (std::size_t begin{}; begin < input.size(); begin += block_size)
                 {
                     auto const length{std::min(block_size, input.size() - begin)};
                     original_block = original.parse(input, begin, length, std::move(original_block));
                     prepared_block = prepared.parse(input, begin, length, std::move(prepared_block));
+                    compact_block = compact.parse(input, begin, length, std::move(compact_block));
                     require(original_block.sequences.size() == prepared_block.sequences.size());
+                    require(prepared_block.sequences.size() == compact_block.sequences.size());
                     require(original_block.input_begin == prepared_block.input_begin &&
                         original_block.trailing_literal_position == prepared_block.trailing_literal_position &&
                         original_block.trailing_literal_length == prepared_block.trailing_literal_length);
+                    require(prepared_block.input_begin == compact_block.input_begin &&
+                        prepared_block.trailing_literal_position == compact_block.trailing_literal_position &&
+                        prepared_block.trailing_literal_length == compact_block.trailing_literal_length);
                     for (std::size_t index{}; index < original_block.sequences.size(); ++index)
+                    {
                         require(original_block.sequences[index] == prepared_block.sequences[index]);
+                        require(prepared_block.sequences[index] == compact_block.sequences[index]);
+                    }
                     encode_sequences_block<false, false>(input, original_block,
                         original_workspace, original_frame);
                     encode_sequences_block<false, false>(input, prepared_block,
                         prepared_workspace, prepared_frame);
+                    encode_sequences_block<false, false>(input, compact_block,
+                        compact_workspace, compact_frame);
                     require(original_frame == prepared_frame);
+                    require(prepared_frame == compact_frame);
                     require(prepared_block.sequences.data() == storage);
+                    require(compact_block.sequences.data() == compact_storage);
                     ++checked;
                 }
             }

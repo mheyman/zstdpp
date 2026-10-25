@@ -225,6 +225,36 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Bounded level-3 compact match tables (2026-10-25)
+
+For MSVC level 3 with its standard double-fast parameters and a known pledged
+input size of at most 1 MiB, the long and short match tables now store a
+24-bit biased index and an 8-bit input tag in one aligned 32-bit entry. The
+previous representation used five bytes per entry. Only the two compact
+tables are allocated at construction; larger or unknown input sizes retain
+the prior representation. Frame-index rebasing and reset handle the smaller
+index range without changing match decisions or compressed bytes.
+
+Seven alternating, same-directory, 5,000-frame comparisons against the
+previous optimized C++ level-3 worker won 7/7 on both 1-MiB inputs. The median
+paired throughput gains were 1.93% on varied text and 7.76% on the mixed
+corpus; these are workload-specific results. Focused block, allocation, and
+index-rollover tests passed, as did optimized all-level compression acceptance.
+
+The following fresh MSVC `/O2 /Ob3 /Z7` paired reports compare the optimized
+C++ worker with an equivalently optimized reference worker. Each row uses six
+alternating 3,000-frame trials; every frame matched byte-for-byte, and both
+decoders recovered both encodings. The varied-text level-3 throughput is
+still below reference, so the broader performance goal remains open.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 / varied text, 1 MiB | 2697.27 | 2787.54 | 96.76 | 6.97 | 7.16 | 97.38 | 405.00 | 591.00 | 68.53 |
+| 3 / mixed, 1 MiB | 2023.34 | 1771.44 | 114.22 | 7.24 | 7.27 | 99.60 | 405.00 | 591.00 | 68.53 |
+
+Raw reports: `out/compact4-final-layout-pair-{varied,mixed}-20261025/` and
+`out/uprof-compact4-final-layout-{varied,mixed}-clean-pairs-20261025/`.
+
 ### Depth-2 row-head wrap without a branch (2026-10-25)
 
 The depth-2 row matcher used a conditional branch to wrap the selected slot
