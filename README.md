@@ -7948,3 +7948,35 @@ worker metrics, and the comparison script are in `out/lazy1-256k-compare/`.
 GCC 13 optimized and ASan/UBSan tests passed, as did the MSVC Debug
 compression acceptance executable. Level-7 balanced 256-KiB throughput still
 trails reference; the full all-level goal remains open.
+
+### Fused row-match candidate preparation (GCC 13, 2026-10-25)
+
+The row matcher now converts a matching slot to its frame position and prefetches
+that position while collecting candidates, as the reference matcher does, rather
+than making a second pass over the collected list. Six alternating, CPU2-pinned
+2,000-frame comparisons with the saved pre-change level-9 worker produced
+byte-identical frames and improved varied-text throughput in all six pairs
+(median +5.71%). Six 5,000-frame mixed-input pairs were byte-identical but
+split three wins and three losses (median -0.08%); no mixed-input improvement
+is claimed.
+
+Fresh optimized GCC 13 Release paired results below use the same 1-MiB input
+and build configuration for C++ and reference. Each trial matched compressed
+bytes exactly, and both decoders recovered both encodings. Level 9 uses six
+alternating trials of 2,000 varied or 5,000 mixed frames; the level-8 screen
+uses four trials of 500 varied frames. Memory is median peak RSS; code is
+worker executable size. The level-8 row is a short current-state screen, not
+a matched old/new improvement claim.
+
+| Operation / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB varied-text compression 8 | 179.86 | 182.50 | 98.56% | 9.92 | 10.88 | 91.24% | 122.84 | 628.16 | 19.56% |
+| 1-MiB varied-text compression 9 | 181.48 | 176.59 | 102.77% | 15.01 | 15.87 | 94.56% | 122.84 | 628.16 | 19.56% |
+| 1-MiB mixed compression 9 | 1206.97 | 988.22 | 122.14% | 15.22 | 16.03 | 94.98% | 122.84 | 628.16 | 19.56% |
+
+The paired reports and exact old/new worker trials are under
+`out/l9-fused-row-candidates-20261025/`. The optimized GCC 13 suite passed
+12/12 tests, including all-level compression parity. An optimized MSVC
+level-9 worker also compiled and passed paired byte-parity/cross-decode checks.
+Other levels and corpora still need optimization; this does not establish the
+all-level performance goal.

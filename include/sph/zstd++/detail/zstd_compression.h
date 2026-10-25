@@ -487,10 +487,11 @@ namespace sph::zstd::detail
             }
         }
 
-        template <unsigned RowLog>
+        template <unsigned RowLog, bool PrepareCandidates = false>
         [[nodiscard]] auto collect_candidates_fixed(std::uint32_t hash,
             std::uint32_t low_limit, std::uint32_t attempt_limit,
-            std::span<std::uint32_t> candidates) const noexcept -> std::size_t
+            std::span<std::uint32_t> candidates, std::uint32_t origin = 0U,
+            std::uint8_t const* input_base = nullptr) const noexcept -> std::size_t
         {
             static_assert(RowLog >= 4U && RowLog <= 6U);
             auto constexpr row_entries{std::uint32_t{1} << RowLog};
@@ -520,7 +521,19 @@ namespace sph::zstd::detail
                 if (index < low_limit)
                     break;
                 if (count < candidates.size())
-                    candidates[count++] = index;
+                {
+                    if constexpr (PrepareCandidates)
+                    {
+                        auto const position{index - origin};
+                        candidates[count++] = position;
+#if defined(__GNUC__) || defined(__clang__)
+                        __builtin_prefetch(input_base + position, 0, 3);
+#elif defined(_M_X64) || defined(_M_IX86)
+                        _mm_prefetch(reinterpret_cast<char const*>(input_base + position), _MM_HINT_T0);
+#endif
+                    }
+                    else candidates[count++] = index;
+                }
             }
             return count;
         }
@@ -2172,13 +2185,9 @@ namespace sph::zstd::detail
                 value = cache.next(current, hasher);
             }
             salt.observe(value); // Only searches contribute reference salt entropy.
-            auto const count{table.collect_candidates_fixed<RowLog>(value,
-                frame_base + low_position + 1U, attempts, candidates)};
-            for (std::size_t index{}; index < count; ++index)
-            {
-                candidates[index] -= frame_base + 1U;
-                prefetch(input.data() + candidates[index]);
-            }
+            auto const count{table.collect_candidates_fixed<RowLog, true>(value,
+                frame_base + low_position + 1U, attempts, candidates,
+                frame_base + 1U, input.data())};
             (void)table.insert_fixed<RowLog, RowRelativeTag>(value, frame_base + current + 1U);
             next = current + 1U;
             return count;
