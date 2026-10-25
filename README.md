@@ -247,12 +247,40 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### MSVC bounded medium-match decode (2026-10-25)
+
+AMD uProf identified C-runtime copying in the optimized MSVC level-3 decoder.
+The same 2–8 KiB compressed-block specialization described below now applies
+to MSVC as well as GCC 13. On six alternating 10,000-frame old/new MSVC pairs,
+the candidate won 6/6 varied-text trials (median +2.76%) and 5/6 mixed trials
+(median +2.39%). Each run verified the exact decoded bytes and no allocations
+after warm-up. The optimized MSVC suite passed 12/12 tests, including compression
+parity and the paired-benchmark smoke test. A separate Debug-build run passed
+10/11; its unrelated `prepared_sequence_tests` process remained idle for several
+minutes, also when run alone, and was stopped. The new decoder worker is 9 KiB
+larger than the old one.
+
+Both C++ and reference were built with MSVC 19.51 Release `/O2 /DNDEBUG /Z7`;
+the C++ evaluation worker also uses `/Ob3`. The `/Z7` option provides debug
+information, not a Debug-code build. The table comes from six alternating,
+unprofiled 10,000-frame
+C++/reference trials of the same exact reference frame per corpus:
+
+| MSVC / decode L3, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Varied text | 7034.56 | 8805.66 | 79.89 | 6.34 | 6.34 | 100.00 | 226.00 | 311.00 | 72.67 |
+| Mixed | 5264.55 | 5070.54 | 103.83 | 6.60 | 6.57 | 100.51 | 226.00 | 311.00 | 72.67 |
+
+These are independent-worker median rates, not the paired candidate/old
+speedups above. The varied-text decoder still trails reference. Raw trials are
+in `out/msvc-medium-copy-trial-20261025/`.
+
 ### GCC 13 bounded medium-match decode (2026-10-25)
 
 GCC 13's level-3 decoder spent substantial time in the C library's match-copy
 routine. A separate decode specialization copies nonoverlapping 64–256-byte
 matches in fixed 32-byte chunks when the compressed block is 2–8 KiB; other
-blocks and compilers keep their existing path. Six alternating, CPU-pinned,
+blocks and non-MSVC compilers keep their existing path. Six alternating, CPU-pinned,
 20,000-frame old/new trials improved the C++ varied-text decoder in all six
 pairs (median +19.6%). A six-pair 40,000-frame mixed control was slightly slower
 (median about -1%), so this is a scoped varied-text improvement, not a general

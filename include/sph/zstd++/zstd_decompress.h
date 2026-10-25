@@ -647,7 +647,7 @@ namespace sph::zstd
             try
             {
                 auto literals{decode_literals(block)};
-                // On GCC 13, medium-sized compressed blocks benefit from a separate
+                // On GCC 13 and MSVC, medium-sized compressed blocks benefit from a
                 // decoder with fixed-width copies for nonoverlapping matches.
                 auto const decoded{decode_sequences(block.subspan(literals.sequence_offset), literals.bytes,
                     literals.padded, block.size() >= 2048U && block.size() <= 8192U)};
@@ -1220,7 +1220,7 @@ namespace sph::zstd
             bool literals_padded,
             bool medium_match_copy = false) -> std::span<std::uint8_t const>
         {
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+#if (defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13) || defined(_MSC_VER)
             if (medium_match_copy)
             {
                 if (literals_padded)
