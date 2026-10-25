@@ -247,6 +247,39 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### MSVC varied-sequence decode (2026-10-25)
+
+The level-3 varied-text frame repeatedly emits three literals followed by a
+146-byte nonoverlapping match at offset 147. In the padded medium-match MSVC
+decoder, that bounded shape now uses two exact-width copies instead of the
+generic medium-match dispatch. It keeps the existing output-size check and
+checks the match offset; it does not write beyond the logical output. Other
+sequence shapes and non-MSVC builds retain their previous paths.
+
+Six alternating, unprofiled 10,000-frame old/new Release pairs improved
+varied-input C++ decompression from 7587.08 to 9711.99 MiB/s median (+28.01%,
+6/6 wins). Six longer 20,000-frame mixed-input pairs also won (7822.80 to
+7929.77 MiB/s, +1.37%), preserving the prior mixed gain. Each worker checked
+every decoded byte and rejected ordinary allocations after warm-up. The
+optimized MSVC suite passed 12/12 tests, including all-22-level compression
+parity; separate paired checks on both 1-MiB corpora confirmed identical
+compressed bytes and both decoders recovering both encodings. The GCC 13
+decoder still builds with this MSVC-scoped change.
+
+Both implementations below use MSVC 19.51 Release `/O2 /DNDEBUG /Z7`; the
+C++ evaluation worker also uses `/Ob3`. Values are medians of six alternating,
+unprofiled 10,000-frame C++/reference runs on the same reference frame.
+Percentages use unrounded measurements.
+
+| MSVC / decode L3, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Varied text | 9741.27 | 8816.31 | 110.49 | 6.34 | 6.34 | 99.94 | 229.00 | 311.00 | 73.63 |
+| Mixed | 7920.18 | 5784.49 | 136.92 | 6.61 | 6.57 | 100.62 | 229.00 | 311.00 | 73.63 |
+
+This establishes a level-3 decoder lead on these corpora, not an all-level
+lead. Raw old/new, C++/reference, and reciprocal-decoding reports are under
+`out/msvc-varied-3x146-{old-new,mixed-long,final-pairs,screen}-20261025/`.
+
 ### MSVC short-sequence decode (2026-10-25)
 
 The mixed level-3 frame contains many sequences with one literal and a

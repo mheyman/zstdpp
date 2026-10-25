@@ -1187,7 +1187,28 @@ namespace sph::zstd
                 auto const* const sequence_literal_data{literal_data + literal_offset};
                 literal_offset += literal_length;
 #if defined(_MSC_VER)
-                if constexpr (!LiteralsPadded && !MediumMatchCopy)
+                if constexpr (LiteralsPadded && MediumMatchCopy)
+                {
+                    if (literal_length == 3U && match_length == 146U && match_offset >= 146U)
+                    {
+                        // The common varied-text sequence has three literals and
+                        // a nonoverlapping 146-byte match. Fixed-width copies avoid
+                        // the generic medium-match dispatch without overcopying.
+                        auto const previous_size{output.size()};
+                        if constexpr (!trusted_input)
+                        {
+                            if (match_offset > previous_size + 3U)
+                                throw detail::entropy_error{"Zstandard match offset exceeds the retained history window"};
+                        }
+                        auto* const destination{output.append_uninitialized_reserved(149U).data()};
+                        std::memcpy(destination, sequence_literal_data, 3U);
+                        std::memcpy(destination + 3U, destination + 3U - match_offset, 146U);
+                    }
+                    else
+                        append_sequence<LiteralsPadded, trusted_input, MediumMatchCopy>(output,
+                            sequence_literal_data, literal_length, match_offset, match_length);
+                }
+                else if constexpr (!LiteralsPadded && !MediumMatchCopy)
                 {
                     if (literal_length == 1U && match_length == 15U && match_offset >= copy_slack &&
                         output.remaining_capacity() > 16U)
