@@ -2618,6 +2618,35 @@ namespace
         check_distance(19U, 1U << 18U, false);
     }
 
+    void test_reverse_bit_reader_trusted_window()
+    {
+        for (std::size_t length{1U}; length <= 32U; ++length)
+        {
+            for (unsigned marker{}; marker < 8U; ++marker)
+            {
+                std::array<std::uint8_t, 32> bytes{};
+                for (std::size_t index{}; index < length; ++index)
+                    bytes[index] = static_cast<std::uint8_t>((index * 73U + marker * 19U) & 0xffU);
+                bytes[length - 1U] = static_cast<std::uint8_t>(1U << marker);
+                auto const source{std::span<std::uint8_t const>{bytes}.first(length)};
+                sph::zstd::detail::reverse_bit_reader fast{source};
+                sph::zstd::detail::reverse_bit_reader checked{source};
+                unsigned step{};
+                while (checked.remaining() != 0U)
+                {
+                    auto const count{static_cast<unsigned>(std::min<std::size_t>(
+                        1U + ((step * 7U + marker) % 12U), checked.remaining()))};
+                    auto const expected{checked.read(count)};
+                    auto const actual{fast.peek_fast_trusted(count)};
+                    fast.consume_fast_trusted(count);
+                    check(actual == expected, "trusted reverse bit window matches checked reads");
+                    ++step;
+                }
+                check(fast.at_end() && checked.at_end(), "trusted reverse bit window ends exactly");
+            }
+        }
+    }
+
     void test_direct_output_bounds()
     {
         std::vector<std::uint8_t> input(8192U);
@@ -2871,6 +2900,7 @@ int main()
         test_invalid_match_history();
         test_concatenated_and_skippable_frames();
         test_error_reporting();
+        test_reverse_bit_reader_trusted_window();
         test_direct_output_bounds();
         test_fast_parser_literal_gathering();
         test_double_fast_parser_literal_gathering();

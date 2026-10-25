@@ -141,7 +141,15 @@ namespace sph::zstd::detail
         {
             auto const first_bit{remaining_bits_ - count};
             if (first_bit < window_start_)
+            {
+                // MSVC benefits from the bounded seven-byte load in the bulk
+                // four-stream path; GCC's original reload is already faster.
+#if defined(_MSC_VER)
+                reload_window<true>();
+#else
                 reload_window();
+#endif
+            }
             return static_cast<std::uint32_t>(
                 (window_ >> (first_bit - window_start_)) & masks_[count]);
         }
@@ -180,6 +188,7 @@ namespace sph::zstd::detail
             return result;
         }();
 
+        template <bool FastSeven = false>
         void reload_window() noexcept
         {
             constexpr std::size_t window_capacity{56U};
@@ -196,6 +205,20 @@ namespace sph::zstd::detail
                 if constexpr (std::endian::native == std::endian::big)
                 {
                     packed = std::byteswap(packed);
+                }
+            }
+            else if constexpr (FastSeven)
+            {
+                if (byte_count == 7U)
+                {
+                    std::memcpy(&packed, bytes_.data() + first_byte, 7U);
+                    if constexpr (std::endian::native == std::endian::big)
+                        packed = std::byteswap(packed);
+                }
+                else
+                {
+                    for (unsigned index{}; index < byte_count; ++index)
+                        packed |= static_cast<std::uint64_t>(bytes_[first_byte + index]) << (index * 8U);
                 }
             }
             else
