@@ -1572,6 +1572,24 @@ namespace sph::zstd::detail
             return parse_impl<true>(input, block_begin, block_size, std::move(result), known_rle);
         }
 
+#if defined(_MSC_VER)
+        // Only the prepared, level-3 MSVC parser benefits from eager tag-guard
+        // evaluation. Keep the ordinary parser's generated path unchanged.
+        [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
+            std::size_t block_begin, std::size_t block_size,
+            prepared_parsed_block result, std::optional<bool> known_rle = std::nullopt)
+            -> prepared_parsed_block
+        {
+            if constexpr (WindowLog == 20U && LongHashLog == 17U &&
+                ShortHashLog == 16U && MinimumMatch == 5U)
+                return parse_impl_masked<true>(input, block_begin, block_size,
+                    std::move(result), known_rle);
+            else
+                return parse_impl<true>(input, block_begin, block_size,
+                    std::move(result), known_rle);
+        }
+#endif
+
         [[nodiscard]] auto parse_collecting(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size, parsed_block result,
             std::optional<bool> known_rle, std::span<std::uint8_t> literal_storage) -> parsed_block
@@ -1591,6 +1609,16 @@ namespace sph::zstd::detail
 #include "double_fast_parse.inl"
 #undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
 #undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
+
+#if defined(_MSC_VER)
+#define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_masked
+#define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 0
+#define SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD 1
+#include "double_fast_parse.inl"
+#undef SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD
+#undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
+#undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
+#endif
 
 #define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_collecting
 #define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 1

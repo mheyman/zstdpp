@@ -225,6 +225,36 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### MSVC level-3 double-fast tag guards (2026-10-24)
+
+AMD uProf branch sampling identified mispredicted tag/index guards in the
+optimized level-3 double-fast parser. A prepared-block overload now selects a
+bitwise-combined guard only for the MSVC level-3 preset; other parser calls
+retain their original path. Six alternating direct baseline/candidate pairs
+with 5,000 one-MiB frames each matched compressed bytes and favored the new
+parser on all six trials: +5.38% paired median on varied text and +4.25% on
+mixed input. A same-directory binary control confirmed +6.02% (six wins) on
+varied text. Level 4 was within noise (+0.27% median), and an apparent level-5
+CPU-pinned regression also occurred with an identical copy of the baseline
+executable at the candidate path; comparing the two builds from the same
+directory was neutral (-0.04% median). These controls do not establish a
+level-5 speed change. The optimized compression acceptance test passed,
+including exact reference frames and reciprocal decoding.
+
+Final optimized MSVC Release `zstdpp_pair` reports, six alternating 3,000-frame
+trials per one-MiB corpus, verified exact reference bytes and both decoders on
+both encodings:
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 / varied text, 1 MiB | 2480.67 | 2836.48 | 87.46 | 7.11 | 7.08 | 100.44 | 119.00 | 382.00 | 31.15 |
+| 3 / mixed, 1 MiB | 1746.71 | 1703.68 | 102.53 | 7.39 | 7.21 | 102.47 | 119.00 | 382.00 | 31.15 |
+
+The varied-text gap remains; the mixed-input lead is a six-trial snapshot, not
+a universal result. Raw paired reports are under
+`out/build/msvc-l3-grouped-final-20261024/eval/pair-results/` at runs
+`1792891269989603-0` (varied) and `1792891245758891-0` (mixed).
+
 ### MSVC level-3 grouped sequence writes (2026-10-24)
 
 The MSVC level-3 double-fast path now emits each OF/ML/LL FSE state-bit group

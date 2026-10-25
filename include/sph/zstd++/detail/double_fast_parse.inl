@@ -125,8 +125,13 @@
                     }
 
                     long_hash_one = long_hash(input_data + next_position);
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD)
+                    if ((valid(long_index_zero, lowest_biased) &
+                        (previous_long_tag == input[position])) &&
+#else
                     if (valid(long_index_zero, lowest_biased) &&
                         (!UseTags || previous_long_tag == input[position]) &&
+#endif
                         equal_eight(input_data + position, input_data + local_position(long_index_zero)))
                     {
                         match_position = local_position(long_index_zero);
@@ -138,15 +143,25 @@
                     }
 
                     auto const long_index_one{long_table[long_hash_one]};
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD)
+                    if ((valid(short_index_zero, lowest_biased) &
+                        (previous_short_tag == input[position])) &&
+#else
                     if (valid(short_index_zero, lowest_biased) &&
                         (!UseTags || previous_short_tag == input[position]) &&
+#endif
                         equal_four(input_data + position, input_data + local_position(short_index_zero)))
                     {
                         match_position = local_position(short_index_zero);
                         match_length = count_match(input_data, position, match_position, block_end, 4U);
                         offset = position - match_position;
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_MASKED_TAG_GUARD)
+                        if (((long_index_one > lowest_biased) &
+                            (long_tags[long_hash_one] == input[next_position])) &&
+#else
                         if (long_index_one > lowest_biased &&
                             (!UseTags || long_tags[long_hash_one] == input[next_position]) &&
+#endif
                             equal_eight(input_data + next_position, input_data + local_position(long_index_one)))
                         {
                             auto const next_match_position{local_position(long_index_one)};
