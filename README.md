@@ -225,6 +225,38 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### MSVC paired sequence-length extra-bit reads (2026-10-25)
+
+The decoder now reads adjacent match-length and literal-length extra bits in
+one bounded read under MSVC, then splits the value in their original bit order.
+When both widths are zero, it skips the read entirely. This zero-width guard
+matters: an unconditional paired-read trial improved varied text but slowed
+mixed content. GCC retains its original two reads; its restored optimized
+machine-code section is identical to the saved baseline after a trial showed
+a varied-text regression.
+
+Six alternating optimized MSVC baseline/candidate pairs of 20,000 frames each
+improved 1-MiB varied-text level-3 decompression by 3.13% median (5/6 wins;
+one -12.48% timing outlier) and genuine mixed content by 1.03% median (6/6).
+Every worker checked decoded bytes and post-warmup allocations. A new oracle
+checks all 0–16-bit width pairs and bit order; GCC's 12 tests and MSVC unit
+and all-level parity tests pass.
+
+Fresh optimized C++/reference reports use six alternating 10,000-frame trials
+per row, median elapsed time and peak resident memory, and complete executable
+size. GCC throughput rows are unchanged from the prior two decoder changes.
+
+| Compiler / corpus / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| MSVC / varied text, 1 MiB / decompress L3 | 6518.10 | 8883.43 | 73.37 | 6.32 | 6.33 | 99.85 | 142.50 | 221.00 | 64.48 |
+| MSVC / mixed, 1 MiB / decompress L3 | 5833.00 | 5615.22 | 103.88 | 6.57 | 6.55 | 100.33 | 142.50 | 221.00 | 64.48 |
+| GCC 13 / varied text, 1 MiB / decompress L3 | 8028.57 | 10022.47 | 80.11 | 13.04 | 13.04 | 100.00 | 102.22 | 202.89 | 50.38 |
+| GCC 13 / mixed, 1 MiB / decompress L3 | 8442.82 | 7321.96 | 115.31 | 12.94 | 12.94 | 100.00 | 102.22 | 202.89 | 50.38 |
+
+Raw paired reports and saved binaries: `out/sequence-extras-20261025/`.
+Varied-text level-3 decompression still trails reference, so the all-level
+performance goal remains open.
+
 ### MSVC seven-byte Huffman bit-window reload (2026-10-25)
 
 The interleaved four-stream Huffman decoder now uses a fixed seven-byte copy

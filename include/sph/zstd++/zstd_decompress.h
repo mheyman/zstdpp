@@ -1121,16 +1121,29 @@ namespace sph::zstd
                     repeat0 = match_offset;
                 }
 
+#if defined(_MSC_VER)
+                // MSVC benefits from one bounded read for adjacent ML/LL extras.
+                // Preserve the zero-width fast path used by common sequences.
+                static_assert(detail::match_length_bits.back() +
+                    detail::literal_length_bits.back() <= 32U);
+                auto match_length{static_cast<std::size_t>(match_entry.base_value)};
+                auto literal_length{static_cast<std::size_t>(literal_entry.base_value)};
+                auto const literal_bits{literal_entry.additional_bits};
+                auto const combined_bits{static_cast<unsigned>(match_entry.additional_bits) + literal_bits};
+                if (combined_bits != 0U)
+                {
+                    auto const extra_bits{read_sequence_bits(combined_bits)};
+                    match_length += extra_bits >> literal_bits;
+                    literal_length += extra_bits & ((std::uint32_t{1} << literal_bits) - 1U);
+                }
+#else
                 auto match_length{static_cast<std::size_t>(match_entry.base_value)};
                 if (match_entry.additional_bits != 0U)
-                {
                     match_length += read_sequence_bits(match_entry.additional_bits);
-                }
                 auto literal_length{static_cast<std::size_t>(literal_entry.base_value)};
                 if (literal_entry.additional_bits != 0U)
-                {
                     literal_length += read_sequence_bits(literal_entry.additional_bits);
-                }
+#endif
                 if constexpr (!trusted_input)
                 {
                     auto const remaining_output{block_output_limit -

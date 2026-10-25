@@ -2647,6 +2647,31 @@ namespace
         }
     }
 
+    void test_sequence_length_extra_pairing()
+    {
+        for (unsigned match_bits{}; match_bits <= 16U; ++match_bits)
+        {
+            for (unsigned literal_bits{}; literal_bits <= 16U; ++literal_bits)
+            {
+                for (unsigned marker{}; marker < 8U; ++marker)
+                {
+                    std::array<std::uint8_t, 6> bytes{0xD3U, 0x5AU, 0xC7U, 0x91U, 0xE4U,
+                        static_cast<std::uint8_t>(1U << marker)};
+                    sph::zstd::detail::reverse_bit_reader scalar{bytes};
+                    sph::zstd::detail::reverse_bit_reader paired{bytes};
+                    auto const expected_match{scalar.read_fast(match_bits)};
+                    auto const expected_literal{scalar.read_fast(literal_bits)};
+                    auto const packed{paired.read_fast(match_bits + literal_bits)};
+                    auto const actual_match{packed >> literal_bits};
+                    auto const actual_literal{packed & ((std::uint32_t{1} << literal_bits) - 1U)};
+                    check(actual_match == expected_match && actual_literal == expected_literal &&
+                        scalar.remaining() == paired.remaining(),
+                        "paired sequence extras preserve ML/LL bit order and position");
+                }
+            }
+        }
+    }
+
     void test_direct_output_bounds()
     {
         std::vector<std::uint8_t> input(8192U);
@@ -2901,6 +2926,7 @@ int main()
         test_concatenated_and_skippable_frames();
         test_error_reporting();
         test_reverse_bit_reader_trusted_window();
+        test_sequence_length_extra_pairing();
         test_direct_output_bounds();
         test_fast_parser_literal_gathering();
         test_double_fast_parser_literal_gathering();
