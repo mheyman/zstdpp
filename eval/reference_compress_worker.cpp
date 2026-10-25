@@ -19,6 +19,10 @@ extern "C" unsigned long long sph_zstdpp_reference_encode_ticks;
 extern "C" unsigned long long sph_zstdpp_reference_literals_ticks;
 extern "C" unsigned long long sph_zstdpp_reference_tables_ticks;
 extern "C" unsigned long long sph_zstdpp_reference_bits_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_huf_hist_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_huf_tree_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_huf_weights_ticks;
+extern "C" unsigned long long sph_zstdpp_reference_huf_stream_ticks;
 #endif
 
 #ifndef SPH_EVAL_LEVEL
@@ -80,6 +84,10 @@ int main(int argc, char** argv)
                   << " literals_ns=" << to_nanoseconds(sph_zstdpp_reference_literals_ticks)
                   << " tables_ns=" << to_nanoseconds(sph_zstdpp_reference_tables_ticks)
                   << " bits_ns=" << to_nanoseconds(sph_zstdpp_reference_bits_ticks) << '\n';
+        std::cerr << "reference Huffman histogram_ns=" << to_nanoseconds(sph_zstdpp_reference_huf_hist_ticks)
+                  << " tree_ns=" << to_nanoseconds(sph_zstdpp_reference_huf_tree_ticks)
+                  << " weights_ns=" << to_nanoseconds(sph_zstdpp_reference_huf_weights_ticks)
+                  << " streams_ns=" << to_nanoseconds(sph_zstdpp_reference_huf_stream_ticks) << '\n';
 #else
         std::cerr << "reference parser ns=" << sph_zstdpp_reference_parse_ticks
                   << " split_ns=" << sph_zstdpp_reference_split_ticks
@@ -87,6 +95,10 @@ int main(int argc, char** argv)
                   << " literals_ns=" << sph_zstdpp_reference_literals_ticks
                   << " tables_ns=" << sph_zstdpp_reference_tables_ticks
                   << " bits_ns=" << sph_zstdpp_reference_bits_ticks << '\n';
+        std::cerr << "reference Huffman histogram_ns=" << sph_zstdpp_reference_huf_hist_ticks
+                  << " tree_ns=" << sph_zstdpp_reference_huf_tree_ticks
+                  << " weights_ns=" << sph_zstdpp_reference_huf_weights_ticks
+                  << " streams_ns=" << sph_zstdpp_reference_huf_stream_ticks << '\n';
 #endif
 #endif
 #ifdef SPH_ZSTDPP_TRACE_BT

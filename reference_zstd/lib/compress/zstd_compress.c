@@ -23,7 +23,7 @@ unsigned long long sph_zstdpp_reference_encode_ticks;
 unsigned long long sph_zstdpp_reference_literals_ticks;
 unsigned long long sph_zstdpp_reference_tables_ticks;
 unsigned long long sph_zstdpp_reference_bits_ticks;
-static unsigned long long sph_zstdpp_reference_trace_now(void)
+unsigned long long sph_zstdpp_reference_trace_now(void)
 {
 #ifdef _WIN32
     LARGE_INTEGER value;

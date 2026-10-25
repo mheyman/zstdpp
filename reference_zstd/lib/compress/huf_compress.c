@@ -33,6 +33,14 @@
 #include "../common/error_private.h"
 #include "../common/bits.h"       /* ZSTD_highbit32 */
 
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+extern unsigned long long sph_zstdpp_reference_trace_now(void);
+unsigned long long sph_zstdpp_reference_huf_hist_ticks;
+unsigned long long sph_zstdpp_reference_huf_tree_ticks;
+unsigned long long sph_zstdpp_reference_huf_weights_ticks;
+unsigned long long sph_zstdpp_reference_huf_stream_ticks;
+#endif
+
 
 /* **************************************************************
 *  Error Management
@@ -1239,6 +1247,22 @@ static size_t HUF_compressCTable_internal(
     return (size_t)(op-ostart);
 }
 
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+static size_t HUF_compressCTable_measured(
+                BYTE* const ostart, BYTE* op, BYTE* const oend,
+                const void* src, size_t srcSize,
+                HUF_nbStreams_e nbStreams, const HUF_CElt* CTable, const int flags)
+{
+    unsigned long long const start = sph_zstdpp_reference_trace_now();
+    size_t const result = HUF_compressCTable_internal(
+        ostart, op, oend, src, srcSize, nbStreams, CTable, flags);
+    sph_zstdpp_reference_huf_stream_ticks += sph_zstdpp_reference_trace_now() - start;
+    return result;
+}
+#else
+#define HUF_compressCTable_measured HUF_compressCTable_internal
+#endif
+
 typedef struct {
     unsigned count[HUF_SYMBOLVALUE_MAX + 1];
     HUF_CElt CTable[HUF_CTABLE_SIZE_ST(HUF_SYMBOLVALUE_MAX)];
@@ -1358,7 +1382,7 @@ HUF_compress_internal (void* dst, size_t dstSize,
 
     /* Heuristic : If old table is valid, use it for small inputs */
     if ((flags & HUF_flags_preferRepeat) && repeat && *repeat == HUF_repeat_valid) {
-        return HUF_compressCTable_internal(ostart, op, oend,
+        return HUF_compressCTable_measured(ostart, op, oend,
                                            src, srcSize,
                                            nbStreams, oldHufTable, flags);
     }
@@ -1380,10 +1404,17 @@ HUF_compress_internal (void* dst, size_t dstSize,
     }
 
     /* Scan input and build symbol stats */
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+    {   unsigned long long const start = sph_zstdpp_reference_trace_now();
+#endif
     {   CHECK_V_F(largest, HIST_count_wksp (table->count, &maxSymbolValue, (const BYTE*)src, srcSize, table->wksps.hist_wksp, sizeof(table->wksps.hist_wksp)) );
         if (largest == srcSize) { *ostart = ((const BYTE*)src)[0]; return 1; }   /* single symbol, rle */
         if (largest <= (srcSize >> 7)+4) return 0;   /* heuristic : probably not compressible enough */
     }
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        sph_zstdpp_reference_huf_hist_ticks += sph_zstdpp_reference_trace_now() - start;
+    }
+#endif
     DEBUGLOG(6, "histogram detail completed (%zu symbols)", showU32(table->count, maxSymbolValue+1));
 
     /* Check validity of previous table */
@@ -1394,12 +1425,15 @@ HUF_compress_internal (void* dst, size_t dstSize,
     }
     /* Heuristic : use existing table for small inputs */
     if ((flags & HUF_flags_preferRepeat) && repeat && *repeat != HUF_repeat_none) {
-        return HUF_compressCTable_internal(ostart, op, oend,
+        return HUF_compressCTable_measured(ostart, op, oend,
                                            src, srcSize,
                                            nbStreams, oldHufTable, flags);
     }
 
     /* Build Huffman Tree */
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+    {   unsigned long long const start = sph_zstdpp_reference_trace_now();
+#endif
     huffLog = HUF_optimalTableLog(huffLog, srcSize, maxSymbolValue, &table->wksps, sizeof(table->wksps), table->CTable, table->count, flags);
     {   size_t const maxBits = HUF_buildCTable_wksp(table->CTable, table->count,
                                             maxSymbolValue, huffLog,
@@ -1408,16 +1442,26 @@ HUF_compress_internal (void* dst, size_t dstSize,
         huffLog = (U32)maxBits;
         DEBUGLOG(6, "bit distribution completed (%zu symbols)", showCTableBits(table->CTable + 1, maxSymbolValue+1));
     }
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        sph_zstdpp_reference_huf_tree_ticks += sph_zstdpp_reference_trace_now() - start;
+    }
+#endif
 
     /* Write table description header */
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+    unsigned long long const weights_start = sph_zstdpp_reference_trace_now();
+#endif
     {   CHECK_V_F(hSize, HUF_writeCTable_wksp(op, dstSize, table->CTable, maxSymbolValue, huffLog,
                                               &table->wksps.writeCTable_wksp, sizeof(table->wksps.writeCTable_wksp)) );
+#ifdef SPH_ZSTDPP_TRACE_REFERENCE_PHASES
+        sph_zstdpp_reference_huf_weights_ticks += sph_zstdpp_reference_trace_now() - weights_start;
+#endif
         /* Check if using previous huffman table is beneficial */
         if (repeat && *repeat != HUF_repeat_none) {
             size_t const oldSize = HUF_estimateCompressedSize(oldHufTable, table->count, maxSymbolValue);
             size_t const newSize = HUF_estimateCompressedSize(table->CTable, table->count, maxSymbolValue);
             if (oldSize <= hSize + newSize || hSize + 12 >= srcSize) {
-                return HUF_compressCTable_internal(ostart, op, oend,
+                return HUF_compressCTable_measured(ostart, op, oend,
                                                    src, srcSize,
                                                    nbStreams, oldHufTable, flags);
         }   }
@@ -1429,7 +1473,7 @@ HUF_compress_internal (void* dst, size_t dstSize,
         if (oldHufTable)
             ZSTD_memcpy(oldHufTable, table->CTable, sizeof(table->CTable));  /* Save new table */
     }
-    return HUF_compressCTable_internal(ostart, op, oend,
+    return HUF_compressCTable_measured(ostart, op, oend,
                                        src, srcSize,
                                        nbStreams, table->CTable, flags);
 }
