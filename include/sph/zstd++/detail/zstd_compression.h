@@ -1015,6 +1015,25 @@ namespace sph::zstd::detail
             return 8U + static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
         position += 16U;
         match_position += 16U;
+        while (static_cast<std::size_t>(end - position) >= 32U)
+        {
+            auto const left_zero{_mm_loadu_si128(reinterpret_cast<__m128i const*>(position))};
+            auto const right_zero{_mm_loadu_si128(reinterpret_cast<__m128i const*>(match_position))};
+            auto const equal_zero{static_cast<unsigned>(
+                _mm_movemask_epi8(_mm_cmpeq_epi8(left_zero, right_zero)))};
+            if (equal_zero != 0xFFFFU)
+                return static_cast<std::size_t>(position - start) +
+                    static_cast<std::size_t>(std::countr_zero(~equal_zero));
+            auto const left_one{_mm_loadu_si128(reinterpret_cast<__m128i const*>(position + 16U))};
+            auto const right_one{_mm_loadu_si128(reinterpret_cast<__m128i const*>(match_position + 16U))};
+            auto const equal_one{static_cast<unsigned>(
+                _mm_movemask_epi8(_mm_cmpeq_epi8(left_one, right_one)))};
+            if (equal_one != 0xFFFFU)
+                return static_cast<std::size_t>(position - start) + 16U +
+                    static_cast<std::size_t>(std::countr_zero(~equal_one));
+            position += 32U;
+            match_position += 32U;
+        }
         while (static_cast<std::size_t>(end - position) >= 16U)
         {
             auto const left{_mm_loadu_si128(reinterpret_cast<__m128i const*>(position))};
