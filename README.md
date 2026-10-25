@@ -232,6 +232,50 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Windows AMD uProf profiling
+
+AMD uProf 5.3 can profile the optimized MSVC workers on this machine without
+installing it in WSL. Build both workers with Release optimization and matching
+PDBs (the `/O2 /Z7` build was used here), then run `AMDuProfCLI.exe profile
+--config hotspots -g --detail -o <results-dir> <worker.exe> <worker-args>` from
+PowerShell. The generated `report.csv` lists hot functions; for source and call
+paths, open the session in the uProf GUI. Profile the C++ and reference workers
+with the same frame and iteration count. A sandboxed process may report
+`Failed to load driver` even though the Windows installation is healthy; a
+normal user session outside that restriction completed successfully here.
+Sampling identifies targets, but unprofiled alternating Release runs determine
+throughput. The Windows profile sessions below are under
+`out/uprof-l3-{decode,ref}-compare-20261025/`.
+
+### GCC 13 bounded medium-match decode (2026-10-25)
+
+GCC 13's level-3 decoder spent substantial time in the C library's match-copy
+routine. A separate decode specialization copies nonoverlapping 64–256-byte
+matches in fixed 32-byte chunks when the compressed block is 2–8 KiB; other
+blocks and compilers keep their existing path. Six alternating, CPU-pinned,
+20,000-frame old/new trials improved the C++ varied-text decoder in all six
+pairs (median +19.6%). A six-pair 40,000-frame mixed control was slightly slower
+(median about -1%), so this is a scoped varied-text improvement, not a general
+mixed-input speedup. GCC 13 acceptance passed 11/11 tests, MSVC acceptance
+passed 12/12, and GCC ASan/UBSan passed 10/10.
+
+Both GCC 13 implementations were built with `-O3 -DNDEBUG -march=znver3
+-mtune=znver3`. The table reports six alternating 20,000-frame C++/reference
+decoder trials on the same exact 1-MiB reference frame. Each worker checked
+every decoded byte and rejected allocations after warm-up. The separate paired
+compression evaluator also confirmed byte-identical C++/reference frames and
+reciprocal decoding on both corpora; it does not time decompression.
+
+| Native GCC 13 / decode L3, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Varied text | 9611.26 | 10000.18 | 96.11 | 5.62 | 5.73 | 97.96 | 195.03 | 170.13 | 114.64 |
+| Mixed | 8756.39 | 6943.29 | 126.11 | 5.98 | 5.98 | 100.00 | 195.03 | 170.13 | 114.64 |
+
+These are median independent-worker rates, not paired speedup estimates. The
+varied-text decoder still trails reference, and the complete all-level goal
+remains open. Raw timings and byte checks are in
+`out/native-all22-20261025/l3-decode-vsref-{varied,mixed}/`.
+
 ### GCC 13 native-CPU compression comparison (2026-10-25)
 
 On the tested Ryzen 7 5700G, GCC 13.3 resolves `-march=native` and

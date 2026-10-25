@@ -647,8 +647,10 @@ namespace sph::zstd
             try
             {
                 auto literals{decode_literals(block)};
+                // On GCC 13, medium-sized compressed blocks benefit from a separate
+                // decoder with fixed-width copies for nonoverlapping matches.
                 auto const decoded{decode_sequences(block.subspan(literals.sequence_offset), literals.bytes,
-                    literals.padded)};
+                    literals.padded, block.size() >= 2048U && block.size() <= 8192U)};
                 deliver(decoded);
                 trim_history();
             }
@@ -931,6 +933,7 @@ namespace sph::zstd
             std::memcpy(destination, source, count);
         }
 
+        template <bool MediumMatchCopy = false>
         static void copy_match(
             std::uint8_t* destination,
             std::uint8_t const* source,
@@ -942,10 +945,20 @@ namespace sph::zstd
                 std::memcpy(destination, source, copy_slack);
                 return;
             }
+            if constexpr (MediumMatchCopy)
+            {
+                if (count >= 64U && count <= 256U && offset >= count)
+                {
+                    for (std::size_t position{}; position + 32U < count; position += 32U)
+                        std::memcpy(destination + position, source + position, 32U);
+                    std::memcpy(destination + count - 32U, source + count - 32U, 32U);
+                    return;
+                }
+            }
             copy_nonoverlapping(destination, source, count);
         }
 
-        template <bool Padded, bool Trusted>
+        template <bool Padded, bool Trusted, bool MediumMatchCopy = false>
         void append_sequence(
             byte_buffer& output,
             std::uint8_t const* literals,
@@ -1002,7 +1015,7 @@ namespace sph::zstd
             if (match_offset >= match_length)
             {
                 if (can_overcopy)
-                    copy_match(match_destination, output_data + source_position,
+                    copy_match<MediumMatchCopy>(match_destination, output_data + source_position,
                         match_length, match_offset);
                 else
                     copy_nonoverlapping(match_destination, output_data + source_position, match_length);
@@ -1018,7 +1031,7 @@ namespace sph::zstd
             }
         }
 
-        template <bool LiteralsPadded>
+        template <bool LiteralsPadded, bool MediumMatchCopy = false>
         [[nodiscard]] auto decode_sequences_impl(
             std::span<std::uint8_t const> source,
             std::span<std::uint8_t const> literals) -> std::span<std::uint8_t const>
@@ -1173,7 +1186,7 @@ namespace sph::zstd
                 }
                 auto const* const sequence_literal_data{literal_data + literal_offset};
                 literal_offset += literal_length;
-                append_sequence<LiteralsPadded, trusted_input>(output, sequence_literal_data,
+                append_sequence<LiteralsPadded, trusted_input, MediumMatchCopy>(output, sequence_literal_data,
                     literal_length, match_offset, match_length);
 
                 if (sequence_index + 1U != sequence_count) [[likely]]
@@ -1204,8 +1217,19 @@ namespace sph::zstd
         [[nodiscard]] auto decode_sequences(
             std::span<std::uint8_t const> source,
             std::span<std::uint8_t const> literals,
-            bool literals_padded) -> std::span<std::uint8_t const>
+            bool literals_padded,
+            bool medium_match_copy = false) -> std::span<std::uint8_t const>
         {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+            if (medium_match_copy)
+            {
+                if (literals_padded)
+                    return decode_sequences_impl<true, true>(source, literals);
+                return decode_sequences_impl<false, true>(source, literals);
+            }
+#else
+            (void)medium_match_copy;
+#endif
             if (literals_padded)
             {
                 return decode_sequences_impl<true>(source, literals);
