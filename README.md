@@ -247,6 +247,32 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### GCC 13 four-chunk long-match counting for short level 2 (2026-10-25)
+
+After the existing two scalar-word checks, the GCC 13 `18/14/14/5`
+level-2 counter now handles full 64-byte matches four SSE2 chunks at a
+time, with the 32-byte, 16-byte, and scalar paths handling shorter tails.
+No allocations or other compiler/preset paths changed. Six CPU-2-pinned,
+same-directory, byte-exact old/new pairs improved varied text in 5/6 runs
+(median +3.54%). Balanced text won 4/6 (median +1.51%, noisy). Mixed text
+had no consistent change: a 100,000-frame set gave -0.68% median, while a
+200,000-frame repeat gave +0.43% median. The sanitizer-backed counter oracle
+passed 2,109,456 length/alignment/mismatch cases and the optimized GCC suite
+passed all 11 tests. Ordinary Release and symbolized workers have identical
+optimized `.text`; both decoders read both exact-byte encodings.
+
+Fresh six-trial, CPU-2-pinned GCC 13 Release reports include all nine
+comparison metrics. Varied level 2 still trails reference; balanced is
+approximately even.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 / varied text, 256 KiB | 3388.02 | 3540.98 | 95.68 | 4.44 | 4.46 | 99.39 | 132.16 | 628.16 | 21.04 |
+| 2 / balanced, 256 KiB | 2107.06 | 2109.45 | 99.89 | 4.58 | 4.51 | 101.56 | 132.16 | 628.16 | 21.04 |
+| 2 / mixed, 256 KiB | 26050.27 | 9641.63 | 270.19 | 4.33 | 4.48 | 96.56 | 132.16 | 628.16 | 21.04 |
+
+Raw controls and paired reports are under `out/l2-unroll64-20261025/`.
+
 ### GCC 13 two-chunk long-match counting for short level 2 (2026-10-25)
 
 The GCC 13 level-2 match counter now processes two 16-byte SSE2 chunks per
