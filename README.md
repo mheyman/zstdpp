@@ -225,6 +225,34 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Once-per-table Huffman code validation at bounded level 3 (2026-10-25)
+
+The optimized MSVC level-3 path with a known pledged input of at most 1 MiB
+now validates the Huffman codes used by a literal block once, before emitting
+its streams, instead of checking the code width for every literal. Other
+compression paths retain the checked writer. Frame bytes and table-history
+decisions are unchanged, and this adds no allocation.
+
+Against the prior compact-table C++ worker, seven alternating direct pairs
+with the baseline run first favored the new worker in 6/7 trials on each
+corpus. On 1-MiB varied text (10,000 frames per trial), the median paired
+gain was about 0.8%; on the mixed corpus (5,000 frames), about 1.7%. These
+small gains are input- and host-specific. The Huffman-history unit test,
+optimized all-level MSVC acceptance, and GCC unit/parity tests passed.
+
+Fresh optimized MSVC `/O2 /Ob3 /Z7` C++/reference reports used six
+alternating 3,000-frame trials per row. Every frame matched byte-for-byte,
+and both decoders recovered both encodings. Varied-text level 3 still trails
+reference, so the all-level performance goal remains open.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 / varied text, 1 MiB | 2724.81 | 2798.79 | 97.36 | 6.98 | 7.15 | 97.62 | 404.50 | 591.00 | 68.44 |
+| 3 / mixed, 1 MiB | 1989.39 | 1767.48 | 112.56 | 7.26 | 7.29 | 99.60 | 404.50 | 591.00 | 68.44 |
+
+Raw reports: `out/hufvalidate-scoped-final-pair-{varied,mixed}-20261025/`
+and `out/uprof-huf-validate-scoped-l3-{varied-reverse-10000,mixed-reverse-pairs}-20261025/`.
+
 ### Bounded level-3 compact match tables (2026-10-25)
 
 For MSVC level 3 with its standard double-fast parameters and a known pledged

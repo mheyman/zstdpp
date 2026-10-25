@@ -696,6 +696,7 @@ namespace sph::zstd
                             , false, false, false, false, false
 #endif
 #endif
+                            , compact_double_fast_index_tags_
                             >(
                             input, parsed_, compression_workspace_, compressed);
 #ifdef SPH_ZSTDPP_TRACE_PHASES

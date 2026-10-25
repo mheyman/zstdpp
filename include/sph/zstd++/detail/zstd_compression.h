@@ -5355,7 +5355,8 @@ namespace sph::zstd::detail
 
     template <bool AlignedLiterals, bool SelectBeforeEmit = false, bool RankCanonical = false,
         bool DeferredCodes = false,
-        std::size_t HistogramThreshold = RankCanonical ? 8192U : 1500U>
+        std::size_t HistogramThreshold = RankCanonical ? 8192U : 1500U,
+        bool ValidateCodesOnce = false>
     [[nodiscard]] inline auto encode_huffman_literals(std::span<std::uint8_t const> literals,
         basic_compression_workspace<AlignedLiterals>& workspace, std::vector<std::uint8_t>& output,
         bool optimal_depth = false, std::size_t minimum_gain = 0U) -> bool;
@@ -5436,6 +5437,7 @@ namespace sph::zstd::detail
         bool DeferredCodes = false, bool WideSequenceBits = false,
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
+        bool ValidateCodesOnce = false,
         bool AlignedLiterals,
         typename ParsedView = parsed_block_view>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
@@ -5541,7 +5543,7 @@ namespace sph::zstd::detail
         // literals retain the existing 1500-byte threshold.
         if (!skip_huffman && encode_huffman_literals<AlignedLiterals, !CarefulSelection,
             GroupFse || (CollectedLiterals && !GroupFse), DeferredCodes,
-            GroupFse ? 8192U : 1500U>(literal_bytes, workspace, huffman_literals,
+            GroupFse ? 8192U : 1500U, ValidateCodesOnce>(literal_bytes, workspace, huffman_literals,
             OptimalHuffmanDepth, minimum_literal_gain))
         {
             output.swap(huffman_literals);
@@ -5745,6 +5747,7 @@ namespace sph::zstd::detail
         bool DeferredCodes = false, bool WideSequenceBits = false,
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
+        bool ValidateCodesOnce = false,
         bool AlignedLiterals>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         compact_parsed_block const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
@@ -5753,6 +5756,7 @@ namespace sph::zstd::detail
         encode_sequences_block<CarefulSelection, GroupFse, CollectedLiterals,
             OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, WideSequenceBits,
             PackedLengthBits, GroupedStateWrites, AdaptiveGroupedWrites, AdaptiveWideWrites,
+            ValidateCodesOnce,
             AlignedLiterals, compact_parsed_block_view>(
                 input, compact_parsed_block_view{parsed}, workspace, output);
     }
@@ -6233,6 +6237,7 @@ namespace sph::zstd::detail
             sizes[0], sizes[1], sizes[2], descriptions, true) + 3U;
     }
 
+    template <bool CheckCodes = true>
     inline void encode_huffman_stream(std::span<std::uint8_t const> input,
         std::array<huffman_code, 256> const& codes,
         std::vector<std::uint8_t>& output)
@@ -6249,10 +6254,9 @@ namespace sph::zstd::detail
         auto append_symbol = [&](std::size_t position)
         {
             auto const code{codes[input[position]]};
-            if (code.number_bits == 0U || code.number_bits > 11U)
-            {
-                throw entropy_error{"invalid Zstandard Huffman encoding code"};
-            }
+            if constexpr (CheckCodes)
+                if (code.number_bits == 0U || code.number_bits > 11U)
+                    throw entropy_error{"invalid Zstandard Huffman encoding code"};
             container |= static_cast<std::uint64_t>(code.value) << count;
             count += code.number_bits;
         };
@@ -6295,7 +6299,7 @@ namespace sph::zstd::detail
      * support the full byte alphabet; direct weights support symbols up to 128.
      */
     template <bool AlignedLiterals, bool SelectBeforeEmit, bool RankCanonical, bool DeferredCodes,
-        std::size_t HistogramThreshold>
+        std::size_t HistogramThreshold, bool ValidateCodesOnce>
     [[nodiscard]] inline auto encode_huffman_literals(std::span<std::uint8_t const> literals,
         basic_compression_workspace<AlignedLiterals>& workspace, std::vector<std::uint8_t>& output,
         bool optimal_depth, std::size_t minimum_gain) -> bool
@@ -6657,10 +6661,19 @@ namespace sph::zstd::detail
             entropy_trace.huffman_new_codeprep_ns += elapsed;
 #endif
         }
+        constexpr bool check_stream_codes{!ValidateCodesOnce};
+        auto const validate_stream_codes = [&]([[maybe_unused]] std::array<huffman_code, 256> const& selected) {
+            if constexpr (!check_stream_codes)
+                for (std::size_t symbol{}; symbol <= maximum_symbol; ++symbol)
+                    if (frequencies[symbol] != 0U &&
+                        (selected[symbol].number_bits == 0U || selected[symbol].number_bits > 11U))
+                        throw entropy_error{"invalid Zstandard Huffman encoding code"};
+        };
+        if (!prefer_repeat) validate_stream_codes(codes);
         if (!prefer_repeat && !four_streams)
         {
             auto& stream{workspace.huffman_streams[0]};
-            encode_huffman_stream(literals, codes, stream);
+            encode_huffman_stream<check_stream_codes>(literals, codes, stream);
 #ifdef SPH_ZSTDPP_TRACE_PHASES
             auto const body_start{std::chrono::steady_clock::now()};
 #endif
@@ -6677,7 +6690,7 @@ namespace sph::zstd::detail
             {
                 auto const begin{std::min(literals.size(), stream * segment_size)};
                 auto const end{std::min(literals.size(), (stream + 1U) * segment_size)};
-                encode_huffman_stream(literals.subspan(begin, end - begin), codes, streams[stream]);
+                encode_huffman_stream<check_stream_codes>(literals.subspan(begin, end - begin), codes, streams[stream]);
             }
             if (streams[0].size() > std::numeric_limits<std::uint16_t>::max() ||
                 streams[1].size() > std::numeric_limits<std::uint16_t>::max() ||
@@ -6750,6 +6763,7 @@ namespace sph::zstd::detail
             }
             if (repeat_table_position == (std::size_t{1} << workspace.huffman_repeat_log))
             {
+                validate_stream_codes(repeat_codes);
                 if (!cached_codes)
                 {
                     workspace.huffman_repeat_codes_maximum_symbol = workspace.huffman_repeat_maximum_symbol;
@@ -6766,7 +6780,7 @@ namespace sph::zstd::detail
                 if (!four_streams)
                 {
                     auto& stream{workspace.huffman_streams[0]};
-                    encode_huffman_stream(literals, repeat_codes, stream);
+                    encode_huffman_stream<check_stream_codes>(literals, repeat_codes, stream);
 #ifdef SPH_ZSTDPP_TRACE_PHASES
                     auto const body_start{std::chrono::steady_clock::now()};
 #endif
@@ -6783,7 +6797,7 @@ namespace sph::zstd::detail
                     {
                         auto const begin{std::min(literals.size(), stream * segment_size)};
                         auto const end{std::min(literals.size(), (stream + 1U) * segment_size)};
-                        encode_huffman_stream(literals.subspan(begin, end - begin), repeat_codes, streams[stream]);
+                        encode_huffman_stream<check_stream_codes>(literals.subspan(begin, end - begin), repeat_codes, streams[stream]);
                     }
                     if (streams[0].size() <= std::numeric_limits<std::uint16_t>::max() &&
                         streams[1].size() <= std::numeric_limits<std::uint16_t>::max() &&

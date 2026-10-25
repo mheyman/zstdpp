@@ -1767,6 +1767,44 @@ namespace
         }
     }
 
+    void test_huffman_code_validation_once()
+    {
+        using namespace sph::zstd::detail;
+        compression_workspace checked, validated;
+        checked.reserve(8192U, 8192U);
+        validated.reserve(8192U, 8192U);
+        unsigned random{0x42A51C3DU};
+        std::vector<std::uint8_t> input, original, candidate;
+        for (unsigned trial{}; trial < 1024U; ++trial)
+        {
+            if (trial % 23U == 0U)
+            {
+                checked.reset_entropy_history();
+                validated.reset_entropy_history();
+            }
+            auto const size{16U + (trial * 149U) % 4096U};
+            input.resize(size);
+            for (auto& byte : input)
+            {
+                random = random * 1664525U + 1013904223U;
+                auto const value{random >> 24U};
+                byte = static_cast<std::uint8_t>(trial % 5U == 0U ? value :
+                    (value < 160U ? trial % 13U : value % (3U + trial % 61U)));
+            }
+            auto const gain{trial % 7U == 0U ? size : 0U};
+            auto const old_result{encode_huffman_literals<false, true, false, true, 1500U, false>(
+                input, checked, original, false, gain)};
+            auto const new_result{encode_huffman_literals<false, true, false, true, 1500U, true>(
+                input, validated, candidate, false, gain)};
+            check(old_result == new_result && original == candidate &&
+                checked.huffman_repeat_valid == validated.huffman_repeat_valid &&
+                checked.huffman_repeat_lengths == validated.huffman_repeat_lengths &&
+                checked.huffman_repeat_codes_valid == validated.huffman_repeat_codes_valid &&
+                checked.huffman_repeat_code_lengths == validated.huffman_repeat_code_lengths,
+                "once-per-table Huffman code validation preserves output and history");
+        }
+    }
+
     void test_direct_huffman_stream()
     {
         // Packing oracle deliberately uses the old scalar writer. These codes
@@ -2796,6 +2834,7 @@ int main()
         test_canonical_huffman_ranks<false, true>();
         test_canonical_huffman_ranks<true, true>();
         test_canonical_huffman_history();
+        test_huffman_code_validation_once();
         test_direct_huffman_stream();
         test_huffman_writer_depth_policy();
         test_invalid_match_history();
