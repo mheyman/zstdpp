@@ -127,6 +127,7 @@ int main(int argc, char** argv)
                   << " weights_ns=" << entropy.huffman_weights_ns
                   << " selection_ns=" << entropy.huffman_selection_ns
                   << " streams_ns=" << entropy.huffman_streams_ns
+                  << " emit_ns=" << entropy.huffman_emit_ns
                   << " new_blocks=" << entropy.huffman_new_blocks
                   << " repeat_blocks=" << entropy.huffman_repeat_blocks
                   << " discarded_weights=" << entropy.huffman_discarded_weights

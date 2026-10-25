@@ -38,7 +38,7 @@ namespace sph::zstd::detail
     {
         std::uint64_t gather_ns{}, literals_ns{}, tables_ns{}, bits_ns{};
         std::uint64_t huffman_histogram_ns{}, huffman_tree_ns{}, huffman_weights_ns{};
-        std::uint64_t huffman_selection_ns{}, huffman_streams_ns{};
+        std::uint64_t huffman_selection_ns{}, huffman_streams_ns{}, huffman_emit_ns{};
         std::uint64_t huffman_new_blocks{}, huffman_repeat_blocks{}, huffman_discarded_weights{};
         std::uint64_t huffman_histogram_reject_blocks{}, huffman_histogram_reject_bytes{};
         std::uint64_t huffman_sample_eligible_blocks{};
@@ -6096,6 +6096,9 @@ namespace sph::zstd::detail
         std::array<huffman_code, 256> const& codes,
         std::vector<std::uint8_t>& output)
     {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        auto const huffman_emit_start{std::chrono::steady_clock::now()};
+#endif
         // Reserve eleven-bit codes plus padding for an overlapping word store.
         // compression_workspace preallocates this bound before processing.
         output.resize((input.size() * 11U + 7U) / 8U + 8U);
@@ -6141,6 +6144,9 @@ namespace sph::zstd::detail
             container >>= 8U;
         }
         output.resize(static_cast<std::size_t>(cursor - output.data()));
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        entropy_trace.huffman_emit_ns += entropy_trace_elapsed(huffman_emit_start);
+#endif
     }
 
     /**
