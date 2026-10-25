@@ -572,6 +572,16 @@ namespace sph::zstd
                             std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt,
                             compression_workspace_.literals);
                     else
+#elif defined(_MSC_VER)
+                    // For the measured level-1 specialization, gather the
+                    // literals while the fast parser already has their spans.
+                    if constexpr (effective_parameters_.strategy == compression_strategy::fast &&
+                        Parameters.compression_level == 1 &&
+                        effective_parameters_.minimum_match >= 7U)
+                        parsed_ = match_state_.template parse<true>(input, block_begin, bytes.size(),
+                            std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt,
+                            compression_workspace_.literals);
+                    else
 #endif
                     if constexpr (effective_parameters_.strategy >= compression_strategy::binary_tree_optimal)
                     {
@@ -646,7 +656,10 @@ namespace sph::zstd
                                effective_parameters_.minimum_match >= 7U) ||
                                collect_double_fast_literals_)
 #else
-                            , false, false
+                            , false
+                            , (effective_parameters_.strategy == compression_strategy::fast &&
+                               Parameters.compression_level == 1 &&
+                               effective_parameters_.minimum_match >= 7U)
 #endif
                             , (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra)
                             , (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra ?

@@ -8010,3 +8010,27 @@ the seven-level optimized MSVC cross-decode evaluation is in
 is unchanged. Repeated-text throughput is now near reference parity, but levels
 1, 8, and 9 still trail reference on the MSVC mixed-input evaluation; the
 all-level performance goal remains open.
+
+### MSVC level-1 parser-time literal collection (2026-10-25)
+
+The level-1 fast parser now gathers literals as it finds matches on MSVC,
+eliminating the encoder's later literal-gather pass for that specialization.
+The optimized reference and C++ workers still produce identical frame bytes.
+Six alternating 3,000-frame direct before/after pairs improved 1-MiB mixed
+compression by a median 2.38% (6/6 wins) and varied-text compression by 1.62%
+(5/6 wins). Separate trials of packed hash entries, grouped FSE bit writes,
+and grouped table selection were byte-exact but slower and were reverted.
+
+Current optimized MSVC Release paired results below use six alternating
+3,000-frame trials per input. Both decoders recovered both encodings in every
+trial. Memory is median peak RSS; code is worker executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB mixed input / 1 | 1855.37 | 2285.67 | 81.17% | 6.07 | 6.58 | 92.26% | 119.00 | 382.00 | 31.15% |
+| 1-MiB varied text / 1 | 3001.53 | 3403.21 | 88.20% | 5.76 | 6.42 | 89.68% | 119.00 | 382.00 | 31.15% |
+
+Raw paired reports are in `out/goal-l1-collect-pair-{mixed,varied}-20261025/`.
+The full MSVC acceptance executable and unit tests passed. The existing
+22-level GCC table remains unchanged. Level 1 still trails reference on both
+inputs, so the all-level performance goal remains open.
