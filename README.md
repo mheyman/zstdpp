@@ -247,6 +247,40 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### MSVC packed four-stream Huffman bulk decode (2026-10-25)
+
+The reference's fast Huffman loop keeps four packed 64-bit stream states and
+reloads them once per five decoded symbols. On MSVC x64, long Huffman literal
+sections now use a separate bounded version of that dataflow; sections below
+2 KiB retain the existing reader, and the existing checked tail completes
+each stream. The tested 1-MiB varied frame had eight 2,081–2,181-byte Huffman
+sections, while the mixed frame had only two 42-byte sections.
+
+Six alternating optimized MSVC old/new pairs of 10,000 varied-text frames all
+won (median C++ gain +7.17%). The mixed frame was slightly slower: six longer
+40,000-frame pairs won only one (median -0.65%). This is a scoped varied-text
+gain, not a mixed-input gain. Every timed worker checked exact output and no
+ordinary allocations after warm-up; the optimized MSVC suite passed 12/12
+tests, and separate checks recovered level-2 varied/mixed and level-5 varied
+reference frames. GCC 13's optimized level-3 decoder `.text` is byte-identical
+to its pre-change build.
+
+Both decoders use the same optimized MSVC 19.51 Release configuration described
+below. These are six alternating, unprofiled 10,000-frame C++/reference pairs
+per corpus; the old/new percentages above come from different paired runs.
+
+| MSVC / decode L3, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Varied text | 7553.92 | 8854.71 | 85.31 | 6.34 | 6.34 | 100.03 | 228.00 | 311.00 | 73.31 |
+| Mixed | 5550.56 | 5791.93 | 95.83 | 6.61 | 6.56 | 100.68 | 228.00 | 311.00 | 73.31 |
+
+The mixed reference rate was higher than in the earlier report. A fresh run
+of the saved old C++ binary against that same reference worker was also below
+reference (5,590.86 versus 5,771.89 MiB/s). The paired old/new measurement
+therefore better isolates the small change-specific mixed regression. Both
+corpora still have a reference gap in this fresh report; the all-level goal
+remains open. Raw trials are under `out/msvc-medium-copy-trial-20261025/`.
+
 ### MSVC bounded medium-match decode (2026-10-25)
 
 AMD uProf identified C-runtime copying in the optimized MSVC level-3 decoder.

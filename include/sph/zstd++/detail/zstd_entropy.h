@@ -816,6 +816,70 @@ namespace sph::zstd::detail
         }
     }
 
+#if defined(_MSC_VER) && defined(_M_X64)
+    [[nodiscard]] __declspec(noinline) inline auto decode_huffman_packed_bulk(
+        std::span<std::uint8_t const> encoded,
+        std::array<std::size_t, 4> const& lengths,
+        std::array<std::uint8_t*, 4> const& outputs,
+        std::size_t last_size,
+        huffman_entry const* entries,
+        unsigned table_bits,
+        std::array<reverse_bit_reader*, 4> const& readers) noexcept -> std::size_t
+    {
+        // Every active group has at least 64 unread bits in each stream. The
+        // last loaded byte therefore belongs to that stream, and five symbols
+        // consume at most 55 bits before the checked reader takes over.
+        auto load_group = [](std::uint8_t const* data, std::size_t remaining) noexcept {
+            auto const last_byte{(remaining - 1U) / 8U};
+            auto const first_byte{last_byte - 7U};
+            std::uint64_t bits{};
+            std::memcpy(&bits, data + first_byte, sizeof(bits));
+            if constexpr (std::endian::native == std::endian::big)
+                bits = std::byteswap(bits);
+            return bits << (64U - (remaining - first_byte * 8U));
+        };
+        auto decode_packed = [entries, table_bits](std::uint64_t& bits,
+            unsigned& consumed, std::uint8_t* out) noexcept {
+            auto const entry{entries[bits >> (64U - table_bits)]};
+            bits <<= entry.number_bits;
+            consumed += entry.number_bits;
+            *out = entry.symbol;
+        };
+        auto const* const input0{encoded.data()};
+        auto const* const input1{input0 + lengths[0]};
+        auto const* const input2{input1 + lengths[1]};
+        auto const* const input3{input2 + lengths[2]};
+        auto& bits0{*readers[0]};
+        auto& bits1{*readers[1]};
+        auto& bits2{*readers[2]};
+        auto& bits3{*readers[3]};
+        std::size_t produced{};
+        while (produced + 5U <= last_size &&
+            bits0.remaining() >= 64U && bits1.remaining() >= 64U &&
+            bits2.remaining() >= 64U && bits3.remaining() >= 64U)
+        {
+            auto window0{load_group(input0, bits0.remaining())};
+            auto window1{load_group(input1, bits1.remaining())};
+            auto window2{load_group(input2, bits2.remaining())};
+            auto window3{load_group(input3, bits3.remaining())};
+            unsigned used0{}, used1{}, used2{}, used3{};
+            for (unsigned symbol{}; symbol < 5U; ++symbol)
+            {
+                decode_packed(window0, used0, outputs[0] + produced + symbol);
+                decode_packed(window1, used1, outputs[1] + produced + symbol);
+                decode_packed(window2, used2, outputs[2] + produced + symbol);
+                decode_packed(window3, used3, outputs[3] + produced + symbol);
+            }
+            bits0.consume_fast_trusted(used0);
+            bits1.consume_fast_trusted(used1);
+            bits2.consume_fast_trusted(used2);
+            bits3.consume_fast_trusted(used3);
+            produced += 5U;
+        }
+        return produced;
+    }
+#endif
+
     inline void decode_huffman_literals(
         std::span<std::uint8_t const> source,
         std::span<std::uint8_t> output,
@@ -866,8 +930,43 @@ namespace sph::zstd::detail
         auto* const out3{output.data() + output_offsets[3]};
         auto const* const entries{table.entries.data()};
         auto const table_bits{table.table_log};
-        auto const group_bits{5U * table_bits};
         auto const last_size{output_offsets[4] - output_offsets[3]};
+#if defined(_MSC_VER) && defined(_M_X64)
+        std::size_t produced{};
+        // The packed reader amortizes its setup on longer literal sections;
+        // keep short sections on the ordinary decoder.
+        if (source.size() >= 2048U)
+        {
+            produced = decode_huffman_packed_bulk(encoded, lengths,
+                {out0, out1, out2, out3}, last_size, entries, table_bits,
+                {&bits0, &bits1, &bits2, &bits3});
+        }
+        else
+        {
+            auto const group_bits{5U * table_bits};
+            auto decode_one = [entries, table_bits](reverse_bit_reader& bits, std::uint8_t* out) {
+                auto const entry{entries[bits.peek_fast_trusted(table_bits)]};
+                bits.consume_fast_trusted(entry.number_bits);
+                *out = entry.symbol;
+            };
+            // Five symbols consume at most five table_bits from each independent stream.
+            // The checked tail handles the end marker and any remaining short group.
+            while (produced + 5U <= last_size &&
+                bits0.remaining() >= group_bits && bits1.remaining() >= group_bits &&
+                bits2.remaining() >= group_bits && bits3.remaining() >= group_bits)
+            {
+                for (unsigned symbol{}; symbol < 5U; ++symbol)
+                {
+                    decode_one(bits0, out0 + produced + symbol);
+                    decode_one(bits1, out1 + produced + symbol);
+                    decode_one(bits2, out2 + produced + symbol);
+                    decode_one(bits3, out3 + produced + symbol);
+                }
+                produced += 5U;
+            }
+        }
+#else
+        auto const group_bits{5U * table_bits};
         auto decode_one = [entries, table_bits](reverse_bit_reader& bits, std::uint8_t* out) {
             auto const entry{entries[bits.peek_fast_trusted(table_bits)]};
             bits.consume_fast_trusted(entry.number_bits);
@@ -889,6 +988,7 @@ namespace sph::zstd::detail
             }
             produced += 5U;
         }
+#endif
 
         auto decode_tail = [&table, entries](std::span<std::uint8_t> destination,
             reverse_bit_reader& bits) {
