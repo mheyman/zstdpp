@@ -8179,3 +8179,36 @@ The mixed-input level-8/9 results now exceed reference; varied text still
 trails it, and the all-level goal remains open. This sample-load change also
 affects other MSVC presets using two-byte fingerprints, which need separate
 speed controls. The existing 22-level GCC table is unchanged.
+
+### MSVC depth-2 row-search call-site inlining (2026-10-25)
+
+Fresh AMD uProf profiles on 1-MiB varied text showed row search and lazy
+parser logic dominate optimized level-8 compression; C++ and reference
+produced byte-identical frames. The depth-2, five-byte-hash, 16-entry-row
+MSVC specialization now asks the compiler to inline the row search at its
+candidate consumer. Other row presets retain their previous call policy.
+The final level-8/9 optimized code sections are byte-identical to the
+screened candidate after narrowing the source scope.
+
+Six alternating direct old/new Release pairs preserved exact compressed
+bytes. The screened level-8 binary improved median throughput by 2.49% on
+mixed input (5/6 wins, 3,000 frames/trial) and 6.19% on varied text (6/6
+wins, 1,000 frames/trial). Level 9 improved 3.81% on mixed input (6/6 wins);
+varied text was near neutral at +0.63% (4/6 wins). Fresh optimized MSVC
+Release `zstdpp_pair` reports below use six alternating trials per row and
+validate reference-byte parity plus both decoders reading both encodings.
+Memory is median peak RSS; code is worker executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB mixed input / 8 | 1445.87 | 1362.37 | 106.13% | 11.02 | 11.45 | 96.31% | 115.00 | 382.00 | 30.10% |
+| 1-MiB mixed input / 9 | 1272.34 | 1199.60 | 106.06% | 16.00 | 16.48 | 97.05% | 115.00 | 382.00 | 30.10% |
+| 1-MiB varied text / 8 | 157.36 | 167.12 | 94.15% | 10.69 | 11.31 | 94.49% | 115.00 | 382.00 | 30.10% |
+| 1-MiB varied text / 9 | 150.39 | 159.27 | 94.42% | 15.69 | 16.31 | 96.18% | 115.00 | 382.00 | 30.10% |
+
+Raw paired reports and before/after trials are in
+`out/goal-row-call-inline-20261025/`; the profiler captures are in
+`out/goal-l8-varied-uprof-{cpp,ref}-20261025/`. The mixed-input rows are
+above reference, but both varied-text rows and other levels still need
+work. MSVC unit tests and full compression acceptance passed, and GCC 13
+unit tests passed. The existing 22-level GCC table is unchanged.

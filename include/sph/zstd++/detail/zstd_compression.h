@@ -2802,11 +2802,25 @@ namespace sph::zstd::detail
                 std::array<std::uint32_t, 64> candidates;
                 // Row-relative tag writes help depth-2 16/32-entry rows; the
                 // measured depth-1 and 64-entry paths retain their original layout.
-                auto const count{row_state_.template find<row_mls, row_log,
-                    (LazyDepth == 0U || LazyDepth == 1U),
-                    (LazyDepth == 2U && row_log <= 5U && row_mls == 5U)>(input,
-                    current, low, HashLog - row_log + 8U,
-                    std::uint32_t{1} << std::min(SearchLog, row_log), lazy_skipping, candidates)};
+                std::size_t count{};
+#if defined(_MSC_VER)
+                if constexpr (LazyDepth == 2U && row_log == 4U && row_mls == 5U)
+                {
+                    // Keep the row search and its candidate consumer in one
+                    // optimized call site for the measured short-row preset.
+                    [[msvc::forceinline_calls]] count = row_state_.template find<row_mls, row_log,
+                        (LazyDepth == 0U || LazyDepth == 1U),
+                        (LazyDepth == 2U && row_log <= 5U && row_mls == 5U)>(input,
+                        current, low, HashLog - row_log + 8U,
+                        std::uint32_t{1} << std::min(SearchLog, row_log), lazy_skipping, candidates);
+                }
+                else
+#endif
+                    count = row_state_.template find<row_mls, row_log,
+                        (LazyDepth == 0U || LazyDepth == 1U),
+                        (LazyDepth == 2U && row_log <= 5U && row_mls == 5U)>(input,
+                        current, low, HashLog - row_log + 8U,
+                        std::uint32_t{1} << std::min(SearchLog, row_log), lazy_skipping, candidates);
                 match_result best;
                 for (std::size_t index{}; index < count; ++index)
                 {
