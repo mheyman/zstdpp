@@ -8064,3 +8064,32 @@ folders. MSVC and GCC 13 unit tests and full compression acceptance passed.
 The existing 22-level GCC table is unchanged. This compiler-specific change
 also applies to other depth-2 row presets, whose speed still needs separate
 measurement; levels 8 and 9 remain below reference on these corpora.
+
+### MSVC level-1 packed length bits (2026-10-25)
+
+On the level-1 fast path, the MSVC sequence writer now packs literal- and
+match-length extra bits and groups the FSE state writes. Six alternating
+direct old/new optimized runs on 1-MiB inputs preserved exact frame bytes.
+The median gain was 4.02% on structured text (6/6 wins). Longer 10,000-frame
+confirmations showed a 1.03% mixed-input gain (5/6 wins); varied text was
+effectively neutral at +0.36% (4/6 wins). A wider bit writer was tested and
+reverted after a mixed-input regression.
+
+Fresh optimized MSVC Release `zstdpp_pair` reports below use six alternating
+3,000-frame trials per row. All frames matched the reference byte-for-byte,
+and both decoders recovered both encodings. Memory is median peak RSS; code
+is worker executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB mixed input / 1 | 1855.29 | 2303.99 | 80.52% | 6.07 | 6.60 | 91.87% | 119.00 | 382.00 | 31.15% |
+| 1-MiB structured text / 1 | 803.91 | 1092.28 | 73.60% | 5.91 | 6.58 | 89.82% | 119.00 | 382.00 | 31.15% |
+| 1-MiB varied text / 1 | 3036.82 | 3414.84 | 88.93% | 5.76 | 6.38 | 90.15% | 119.00 | 382.00 | 31.15% |
+
+Raw paired reports are in `out/goal-l1-packed-pair-{mixed,structured,varied}-20261025/`.
+An optimized, symbolized AMD uProf Windows capture of the same mixed workload
+shifted sampled time in the broad sequence encoder from 1.93 to 1.75 CPU s;
+the parser stayed near 1.3 CPU s. Sampling supports the direction but the
+direct old/new timing is the speed evidence. Level 1 still trails reference;
+MSVC unit tests and full compression acceptance passed. The existing 22-level
+GCC table is unchanged.

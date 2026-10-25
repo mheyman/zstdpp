@@ -708,11 +708,15 @@ namespace sph::zstd
                                effective_parameters_.pledged_source_size == 1048576U)
 #else
 #if defined(_MSC_VER)
-                            // On the measured level-3 double-fast path, emit
-                            // OF/ML/LL FSE state bits as one bounded append.
-                            , false, false, (effective_parameters_.strategy ==
-                                compression_strategy::double_fast &&
-                                Parameters.compression_level == 3), false, false
+                            // Group FSE state writes at measured levels 1 and 3;
+                            // level 1 also packs literal/match-length extra bits.
+                            , false
+                            , (effective_parameters_.strategy == compression_strategy::fast &&
+                               Parameters.compression_level == 1)
+                            , ((effective_parameters_.strategy == compression_strategy::double_fast &&
+                                Parameters.compression_level == 3) ||
+                               (effective_parameters_.strategy == compression_strategy::fast &&
+                                Parameters.compression_level == 1)), false, false
 #else
                             , false, false, false, false, false
 #endif
