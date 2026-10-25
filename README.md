@@ -225,6 +225,40 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### GCC 13 short level-2 Huffman code assignment (2026-10-25)
+
+The collected-literal, 256-KiB level-2 preset now assigns canonical Huffman
+codes by symbol rank rather than repeatedly scanning every symbol for each
+code length. The histogram threshold remains 1,500 bytes; a previous trial
+changed both policies and did not establish a gain. The emitted frame is still
+byte-for-byte identical to the reference, and both decoders recover both
+encodings. The compressor performs no allocations after its initial warmup.
+
+Six CPU-2-pinned direct baseline/candidate pairs improved varied-text
+throughput by a +1.49% paired median (six wins). An independent, longer
+six-pair confirmation improved by +1.51% (five wins). A matched 40,000-frame
+counter run measured 1.09% fewer instructions and 1.84% fewer cycles. Balanced
+input was inconsistent between the short and long controls, and genuine mixed
+input was neutral; neither is claimed as a baseline-to-candidate speedup.
+GCC 13 unit and all-level reference-parity tests passed. The optimized `.text`
+sections at levels 1, 3, and 5 matched saved pre-change baselines. A Windows
+MSVC Debug rebuild could not complete because its existing `/Zi` build hits
+compiler error C1902 (program-database manager mismatch); this GCC-only
+specialization does not alter the MSVC code path.
+
+Final optimized GCC 13 Release reports used six alternating trials and include
+all nine comparison metrics. The varied and balanced level-2 cases still trail
+reference throughput, so the broader goal remains open.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 / varied text, 256 KiB | 3156.29 | 3570.65 | 88.40 | 4.40 | 4.50 | 97.92 | 132.04 | 628.16 | 21.02 |
+| 2 / balanced, 256 KiB | 2076.78 | 2112.98 | 98.29 | 4.58 | 4.47 | 102.36 | 132.04 | 628.16 | 21.02 |
+| 2 / mixed, 256 KiB | 26738.84 | 9681.93 | 276.17 | 4.33 | 4.50 | 96.27 | 132.04 | 628.16 | 21.02 |
+
+Raw paired reports: `out/rank-only-l2-20261025/final-{varied,balanced,mixed}/`.
+Historical level-2 rows below describe earlier builds.
+
 ### GCC 13 double-fast block-splitter layout (2026-10-24)
 
 AMD uProf and Linux `perf` led to a code-generation change in the fingerprint

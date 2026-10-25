@@ -5285,7 +5285,8 @@ namespace sph::zstd::detail
     }
 
     template <bool AlignedLiterals, bool SelectBeforeEmit = false, bool RankCanonical = false,
-        bool DeferredCodes = false>
+        bool DeferredCodes = false,
+        std::size_t HistogramThreshold = RankCanonical ? 8192U : 1500U>
     [[nodiscard]] inline auto encode_huffman_literals(std::span<std::uint8_t const> literals,
         basic_compression_workspace<AlignedLiterals>& workspace, std::vector<std::uint8_t>& output,
         bool optimal_depth = false, std::size_t minimum_gain = 0U) -> bool;
@@ -5466,9 +5467,12 @@ namespace sph::zstd::detail
         bool skip_huffman{};
         if constexpr (GroupFse && !CollectedLiterals)
             skip_huffman = skip_huffman_from_samples(literal_bytes, parsed.sequences.size(), workspace.histogram_workspace);
-        // Collected fast literals also benefit from rank-based canonical codes
-        // and the associated short-input histogram policy.
-        if (!skip_huffman && encode_huffman_literals<AlignedLiterals, !CarefulSelection, GroupFse, DeferredCodes>(literal_bytes, workspace, huffman_literals,
+        // Collected literals use rank-based canonical codes. Grouped FSE
+        // retains its 8192-byte histogram threshold; collected double-fast
+        // literals retain the existing 1500-byte threshold.
+        if (!skip_huffman && encode_huffman_literals<AlignedLiterals, !CarefulSelection,
+            GroupFse || (CollectedLiterals && !GroupFse), DeferredCodes,
+            GroupFse ? 8192U : 1500U>(literal_bytes, workspace, huffman_literals,
             OptimalHuffmanDepth, minimum_literal_gain))
         {
             output.swap(huffman_literals);
@@ -6221,7 +6225,8 @@ namespace sph::zstd::detail
      * Builds a length-limited canonical Huffman tree. FSE-compressed weights
      * support the full byte alphabet; direct weights support symbols up to 128.
      */
-    template <bool AlignedLiterals, bool SelectBeforeEmit, bool RankCanonical, bool DeferredCodes>
+    template <bool AlignedLiterals, bool SelectBeforeEmit, bool RankCanonical, bool DeferredCodes,
+        std::size_t HistogramThreshold>
     [[nodiscard]] inline auto encode_huffman_literals(std::span<std::uint8_t const> literals,
         basic_compression_workspace<AlignedLiterals>& workspace, std::vector<std::uint8_t>& output,
         bool optimal_depth, std::size_t minimum_gain) -> bool
@@ -6236,7 +6241,7 @@ namespace sph::zstd::detail
 #endif
         // Small fast-strategy literal blocks may be cheaper with one histogram
         // than with four histograms and their reduction pass.
-        auto const& frequencies{count_symbols<RankCanonical ? 8192U : 1500U>(
+        auto const& frequencies{count_symbols<HistogramThreshold>(
             literals, workspace.histogram_workspace)};
         std::uint8_t maximum_symbol{};
         std::size_t distinct_symbols{};
