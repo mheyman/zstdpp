@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <chrono>
+#include <cstring>
 #include <functional>
 #include <span>
 #include <type_traits>
@@ -929,10 +930,26 @@ namespace sph::zstd
                 constexpr auto sample_limit{chunk_size - 2U + 1U};
                 for (std::size_t position{}; position < sample_limit; position += SamplingRate)
                 {
+#if defined(_MSC_VER)
+                    std::uint32_t hash{};
+                    if constexpr (HashLog == 8U)
+                    {
+                        hash = bytes[start + position];
+                    }
+                    else
+                    {
+                        // Match the reference's native two-byte sample; memcpy
+                        // permits an unaligned load without aliasing assumptions.
+                        std::uint16_t sample{};
+                        std::memcpy(&sample, bytes.data() + start + position, sizeof(sample));
+                        hash = static_cast<std::uint32_t>(sample) * 0x9E3779B9U >> (32U - HashLog);
+                    }
+#else
                     auto const hash{HashLog == 8U ? static_cast<std::uint32_t>(bytes[start + position]) :
                         (static_cast<std::uint32_t>(bytes[start + position]) |
                             (static_cast<std::uint32_t>(bytes[start + position + 1U]) << 8U)) *
                             0x9E3779B9U >> (32U - HashLog)};
+#endif
                     ++result.events[hash];
                 }
                 result.event_count = sample_limit / SamplingRate;

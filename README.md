@@ -8148,3 +8148,34 @@ Raw reports are in `out/goal-l1-probe-merged-pair-{varied,structured,mixed}-2026
 MSVC unit tests and full compression acceptance passed; the new fixed-versus-
 runtime minMatch-7 parser test also passed under GCC 13. Level 1 remains below
 reference on all three inputs, and the existing 22-level GCC table is unchanged.
+
+### MSVC depth-2 fingerprint sampling (2026-10-25)
+
+The reference splitter reads each two-byte fingerprint sample as a native
+16-bit value. The MSVC template splitter previously assembled two individual
+bytes. It now expresses the same sample as an unaligned `memcpy` into a
+16-bit value, letting the optimizer use the reference's load shape without
+changing the portable GCC path or allocating memory. The AMD uProf level-8
+recording identified fingerprinting as the next sizable cost after row search.
+
+Six alternating direct old/new optimized trials emitted identical frames.
+Median C++ throughput gains on 1-MiB mixed input were 6.46% at level 8 and
+5.24% at level 9 (6/6 wins at both levels, 3,000 frames/trial). On 1-MiB
+varied text, they were 3.89% (6/6 wins) and 0.80% (5/6 wins), respectively,
+with 1,000 frames/trial. Fresh six-trial optimized MSVC Release
+`zstdpp_pair` reports validate byte-identical reference frames and reciprocal
+decoding; memory is median peak RSS and code is worker executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB mixed input / 8 | 1482.44 | 1419.96 | 104.40% | 10.99 | 11.47 | 95.83% | 116.50 | 382.00 | 30.50% |
+| 1-MiB mixed input / 9 | 1286.45 | 1223.95 | 105.11% | 16.04 | 16.46 | 97.43% | 116.50 | 382.00 | 30.50% |
+| 1-MiB varied text / 8 | 153.89 | 163.35 | 94.21% | 10.69 | 11.33 | 94.34% | 116.50 | 382.00 | 30.50% |
+| 1-MiB varied text / 9 | 149.63 | 158.15 | 94.61% | 15.69 | 16.33 | 96.04% | 116.50 | 382.00 | 30.50% |
+
+Raw reports and direct trial outputs are in `out/goal-fingerprint-20261025/`.
+MSVC unit tests and the full compression acceptance suite passed.
+The mixed-input level-8/9 results now exceed reference; varied text still
+trails it, and the all-level goal remains open. This sample-load change also
+affects other MSVC presets using two-byte fingerprints, which need separate
+speed controls. The existing 22-level GCC table is unchanged.
