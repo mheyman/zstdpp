@@ -41,6 +41,7 @@ namespace sph::zstd::detail
         std::array<std::array<std::uint64_t, 4>, 3> sequence_table_mode_counts{};
         std::uint64_t sequence_histogram_ns{}, sequence_normalize_ns{};
         std::uint64_t sequence_build_ns{}, sequence_history_copy_ns{};
+        std::uint64_t fse_no_low_probability_builds{}, fse_low_probability_builds{};
         std::uint64_t huffman_histogram_ns{}, huffman_tree_ns{}, huffman_weights_ns{};
         std::uint64_t huffman_selection_ns{}, huffman_streams_ns{}, huffman_emit_ns{};
         std::uint64_t huffman_codeprep_ns{}, huffman_body_ns{};
@@ -3567,6 +3568,12 @@ namespace sph::zstd::detail
                 cumulative[symbol] = static_cast<std::uint16_t>(cumulative[symbol - 1U] + count);
             }
         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        if (high_threshold == table_size - 1U)
+            ++entropy_trace.fse_no_low_probability_builds;
+        else
+            ++entropy_trace.fse_low_probability_builds;
+#endif
 
         std::size_t position{};
         for (unsigned symbol{}; symbol <= counts.maximum_symbol; ++symbol)

@@ -134,6 +134,9 @@ int main(int argc, char** argv)
                   << " normalize_ns=" << entropy.sequence_normalize_ns
                   << " build_ns=" << entropy.sequence_build_ns
                   << " history_copy_ns=" << entropy.sequence_history_copy_ns << '\n';
+        std::cerr << "FSE table builds no_low_probability=" <<
+            entropy.fse_no_low_probability_builds << " low_probability=" <<
+            entropy.fse_low_probability_builds << '\n';
         std::cerr << "Huffman phases histogram_ns=" << entropy.huffman_histogram_ns
                   << " tree_ns=" << entropy.huffman_tree_ns
                   << " weights_ns=" << entropy.huffman_weights_ns
