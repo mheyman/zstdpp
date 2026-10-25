@@ -8093,3 +8093,31 @@ the parser stayed near 1.3 CPU s. Sampling supports the direction but the
 direct old/new timing is the speed evidence. Level 1 still trails reference;
 MSVC unit tests and full compression acceptance passed. The existing 22-level
 GCC table is unchanged.
+
+### Direct compact-sequence encoding (2026-10-25)
+
+The fast parser stores level-1 sequences as compact 8-byte records. The
+entropy writer now reads their literal length, match length, and already-
+encoded offset base directly, avoiding repeated expansion to a logical
+sequence and reconstruction of the offset. Six alternating 3,000-frame
+old/new MSVC Release trials per 1-MiB input preserved exact frame bytes and
+improved median throughput by 2.81% on mixed input, 2.23% on structured
+text, and 2.02% on varied text (18/18 wins).
+
+Fresh optimized MSVC Release `zstdpp_pair` reports use six alternating
+3,000-frame trials per row. Every C++ frame matched the reference, and both
+decoders recovered both encodings. Memory is median peak RSS; code is worker
+executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB mixed input / 1 | 1928.70 | 2275.30 | 84.77% | 6.08 | 6.59 | 92.27% | 119.00 | 382.00 | 31.15% |
+| 1-MiB structured text / 1 | 810.58 | 1088.81 | 74.45% | 5.94 | 6.59 | 90.16% | 119.00 | 382.00 | 31.15% |
+| 1-MiB varied text / 1 | 3046.51 | 3370.85 | 90.38% | 5.75 | 6.43 | 89.54% | 119.00 | 382.00 | 31.15% |
+
+Raw reports are in `out/goal-l1-compact-direct-pair-{mixed,structured,varied}-final-20261025/`.
+MSVC and GCC 13 unit tests and full compression acceptance passed, including
+a new long-length compact-record encoding check. A clean six-pair GCC 13
+old/new control was approximately neutral (+0.48% median, 4/6 wins), so no
+GCC speed gain is claimed. The existing 22-level GCC table is unchanged;
+level 1 still trails the reference implementation on all three inputs.

@@ -2865,6 +2865,45 @@ namespace
                         "packed length extra bits preserve field order and boundaries");
                 }
     }
+
+    void test_compact_sequence_direct_encoding()
+    {
+        for (auto const [literal_length, match_length, offset, repeat] :
+            {std::array<std::uint32_t, 4>{7U, 8U, 4U, 0U},
+             std::array<std::uint32_t, 4>{65536U, 8U, 4U, 0U},
+             std::array<std::uint32_t, 4>{3U, 65540U, 1U, 1U}})
+        {
+            auto const input_size{static_cast<std::size_t>(literal_length) + match_length + 8U};
+            std::vector<std::uint8_t> input(input_size);
+            for (std::size_t index{}; index < input.size(); ++index)
+                input[index] = static_cast<std::uint8_t>(index * 37U + 11U);
+
+            sph::zstd::detail::compact_parsed_block compact;
+            compact.sequences.push_back({literal_length, match_length, offset,
+                static_cast<std::uint8_t>(repeat)});
+            compact.trailing_literal_position = literal_length + match_length;
+            compact.trailing_literal_length = 8U;
+            sph::zstd::detail::parsed_block ordinary;
+            ordinary.sequences.push_back({literal_length, match_length, offset,
+                static_cast<std::uint8_t>(repeat)});
+            ordinary.trailing_literal_position = compact.trailing_literal_position;
+            ordinary.trailing_literal_length = compact.trailing_literal_length;
+
+            sph::zstd::detail::compression_workspace compact_workspace;
+            sph::zstd::detail::compression_workspace ordinary_workspace;
+            compact_workspace.reserve(input_size, 1U);
+            ordinary_workspace.reserve(input_size, 1U);
+            std::vector<std::uint8_t> compact_output;
+            std::vector<std::uint8_t> ordinary_output;
+            sph::zstd::detail::encode_sequences_block<false, false, false, false,
+                6U, false, false, true, true>(input, compact, compact_workspace, compact_output);
+            sph::zstd::detail::encode_sequences_block<false, false, false, false,
+                6U, false, false, true, true>(input,
+                    sph::zstd::detail::parsed_block_view{ordinary}, ordinary_workspace, ordinary_output);
+            check(compact_output == ordinary_output,
+                "direct compact records preserve ordinary sequence encoding, including long lengths");
+        }
+    }
 }
 
 int main()
@@ -2951,6 +2990,7 @@ int main()
         test_chunked_bit_writer();
         test_wide_sequence_bit_writer();
         test_packed_length_extra_bits();
+        test_compact_sequence_direct_encoding();
     }
     catch (std::exception const& error)
     {

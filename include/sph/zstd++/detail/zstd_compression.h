@@ -5554,9 +5554,38 @@ namespace sph::zstd::detail
         auto const* const literal_storage_end{literals.data() + literals.size()};
         auto const* const input_end{input.data() + input.size()};
         auto literal_position{parsed.input_begin};
+        struct encoded_sequence_values
+        {
+            std::uint32_t literal_length;
+            std::uint32_t match_length;
+            std::uint32_t offset_base;
+        };
+        // The compact record already stores offBase. Read it directly instead
+        // of expanding to a logical offset/repeat pair and rebuilding offBase
+        // in both the code-gathering and reverse bitstream passes.
+        auto const encoded_sequence_at{[&](std::size_t index) -> encoded_sequence_values {
+            if constexpr (std::is_same_v<ParsedView, compact_parsed_block_view>)
+            {
+                auto const* record{parsed.sequences.records + index};
+                auto const extended{record == parsed.sequences.exception};
+                return {
+                    static_cast<std::uint32_t>(record->literals) +
+                        (extended && parsed.sequences.long_literals ? 65536U : 0U),
+                    static_cast<std::uint32_t>(record->match_base) + 3U +
+                        (extended && !parsed.sequences.long_literals ? 65536U : 0U),
+                    record->offset_base};
+            }
+            else
+            {
+                auto const& sequence{parsed.sequences[index]};
+                return {sequence.literal_length, sequence.match_length,
+                    sequence.repeat_code != 0U ?
+                        static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
+            }
+        }};
         for (std::size_t index{}; index < parsed.sequences.size(); ++index)
         {
-            auto const& sequence{parsed.sequences[index]};
+            auto const sequence{encoded_sequence_at(index)};
             if constexpr (!CollectedLiterals)
             {
                 constexpr std::size_t short_literal_copy_size{16U};
@@ -5575,9 +5604,7 @@ namespace sph::zstd::detail
             }
             literal_output += sequence.literal_length;
             literal_position += sequence.literal_length + sequence.match_length;
-            auto const offset_base_value{sequence.repeat_code != 0U ?
-                static_cast<std::uint32_t>(sequence.repeat_code) :
-                sequence.offset + 3U};
+            auto const offset_base_value{sequence.offset_base};
             auto const offset_code{static_cast<unsigned>(std::bit_width(offset_base_value)) - 1U};
             if (offset_code >= offset_default_norm.size())
             {
@@ -5711,12 +5738,11 @@ namespace sph::zstd::detail
         fse_compression_state offset_state{*offset_table.table};
         fse_compression_state match_state{*match_length_table.table};
         auto const last_index{parsed.sequences.size() - 1U};
-        auto const& last{parsed.sequences[last_index]};
+        auto const last{encoded_sequence_at(last_index)};
         auto const last_literal_code{literal_codes[last_index]};
         auto const last_offset_code{offset_codes[last_index]};
         auto const last_match_code{match_codes[last_index]};
-        auto const last_offset_base{last.repeat_code != 0U ?
-            static_cast<std::uint32_t>(last.repeat_code) : last.offset + 3U};
+        auto const last_offset_base{last.offset_base};
         literal_state.initialize(last_literal_code);
         offset_state.initialize(last_offset_code);
         match_state.initialize(last_match_code);
@@ -5734,12 +5760,11 @@ namespace sph::zstd::detail
             literal_size <= parsed.sequences.size() * 8U};
         for (std::size_t index{last_index}; index-- > 0U;)
         {
-            auto const& sequence{parsed.sequences[index]};
+            auto const sequence{encoded_sequence_at(index)};
             auto const literal_code{literal_codes[index]};
             auto const offset_code{offset_codes[index]};
             auto const match_code{match_codes[index]};
-            auto const encoded_offset{sequence.repeat_code != 0U ?
-                static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
+            auto const encoded_offset{sequence.offset_base};
             if constexpr (GroupedStateWrites)
             {
                 auto const of{offset_state.template encode_bits<true>(offset_code)};
