@@ -8121,3 +8121,30 @@ a new long-length compact-record encoding check. A clean six-pair GCC 13
 old/new control was approximately neutral (+0.48% median, 4/6 wins), so no
 GCC speed gain is claimed. The existing 22-level GCC table is unchanged;
 level 1 still trails the reference implementation on all three inputs.
+
+### MSVC level-1 merged candidate guard (2026-10-25)
+
+The minMatch-7 fast parser now combines its byte-tag and valid-index checks
+into one viability decision before the four-byte match probe. This is scoped
+to MSVC; the GCC 13 optimized code section is unchanged. The final MSVC
+binary improved 1-MiB varied-text compression by 7.13% median across six
+alternating 10,000-frame old/new pairs (5/6 wins), with byte-identical
+frames. Structured text was near neutral at -0.33% median (2/6 wins).
+Mixed-input results varied between three independent six-pair long runs;
+pooled median was -0.32% (9/18 wins), so no mixed speedup is claimed.
+
+Fresh optimized MSVC Release `zstdpp_pair` reports use six alternating
+3,000-frame trials per row. Frames matched the reference byte-for-byte, and
+both decoders recovered both encodings. Memory is median peak RSS; code is
+worker executable size.
+
+| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1-MiB varied text / 1 | 3219.31 | 3401.78 | 94.64% | 5.76 | 6.38 | 90.18% | 119.00 | 382.00 | 31.15% |
+| 1-MiB structured text / 1 | 827.08 | 1091.71 | 75.76% | 5.91 | 6.57 | 89.90% | 119.00 | 382.00 | 31.15% |
+| 1-MiB mixed input / 1 | 1937.37 | 2263.21 | 85.60% | 6.06 | 6.58 | 92.02% | 119.00 | 382.00 | 31.15% |
+
+Raw reports are in `out/goal-l1-probe-merged-pair-{varied,structured,mixed}-20261025/`.
+MSVC unit tests and full compression acceptance passed; the new fixed-versus-
+runtime minMatch-7 parser test also passed under GCC 13. Level 1 remains below
+reference on all three inputs, and the existing 22-level GCC table is unchanged.

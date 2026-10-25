@@ -1385,6 +1385,24 @@ namespace sph::zstd::detail
                         break;
                     }
 
+#if defined(_MSC_VER)
+                    if constexpr (MinimumMatch == 7U)
+                    {
+                        // Fold the independent tag and index guards into one
+                        // branch before forming the candidate input address.
+                        auto const viable{(match_index >= prefix_index) &
+                            (previous_tag == input[position])};
+                        if (viable && equal_four(input, position,
+                            match_index - frame_index_base_ - index_bias))
+                        {
+                            insert_entry(hash_one, static_cast<std::uint32_t>(
+                                frame_index_base_ + position_one + index_bias), position_one);
+                            found = true;
+                            break;
+                        }
+                    }
+                    else
+#endif
                     if ((!use_tags || previous_tag == input[position]) &&
                         matches(input, position, match_index, prefix_index))
                     {
@@ -1404,6 +1422,25 @@ namespace sph::zstd::detail
                     auto const previous_tag_one{use_tags ? read_tag(hash_zero) : std::uint8_t{}};
                     insert_entry(hash_zero, static_cast<std::uint32_t>(current_index), position);
 
+#if defined(_MSC_VER)
+                    if constexpr (MinimumMatch == 7U)
+                    {
+                        auto const viable{(match_index >= prefix_index) &
+                            (previous_tag_one == input[position])};
+                        if (viable && equal_four(input, position,
+                            match_index - frame_index_base_ - index_bias))
+                        {
+                            if (step <= 4U)
+                            {
+                                insert_entry(hash_one, static_cast<std::uint32_t>(
+                                    frame_index_base_ + position_one + index_bias), position_one);
+                            }
+                            found = true;
+                            break;
+                        }
+                    }
+                    else
+#endif
                     if ((!use_tags || previous_tag_one == input[position]) &&
                         matches(input, position, match_index, prefix_index))
                     {

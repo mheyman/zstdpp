@@ -2128,6 +2128,55 @@ namespace
         }
     }
 
+    void test_fast_parser_merged_probe()
+    {
+        // The fixed minMatch-7 parser uses a specialized candidate guard on
+        // MSVC. Compare its compact records against the runtime-minimum path
+        // through collisions, block transitions, and changed input history.
+        sph::zstd::detail::fast_match_state<15U, 10U, 7U, 0U> fixed{15U, 10U, 7U, 0U};
+        sph::zstd::detail::fast_match_state<15U, 10U, 0U, 0U> runtime{15U, 10U, 7U, 0U};
+        auto input{make_input(65536U)};
+        sph::zstd::detail::compact_parsed_block fixed_block;
+        sph::zstd::detail::parsed_block runtime_block;
+        fixed_block.sequences.reserve(8192U / 3U + 1U);
+        std::vector<std::uint8_t> fixed_literals(8192U);
+        std::vector<std::uint8_t> runtime_literals(8192U);
+        for (unsigned iteration{}; iteration < 3U; ++iteration)
+        {
+            fixed.reset();
+            runtime.reset();
+            for (std::size_t begin{}; begin < input.size(); begin += 8192U)
+            {
+                fixed_block = fixed.parse<true>(input, begin, 8192U,
+                    std::move(fixed_block), std::nullopt, fixed_literals);
+                runtime_block = runtime.parse<true>(input, begin, 8192U,
+                    std::move(runtime_block), std::nullopt, runtime_literals);
+                check(fixed_block.sequences.size() == runtime_block.sequences.size() &&
+                    fixed_block.trailing_literal_position == runtime_block.trailing_literal_position &&
+                    fixed_block.trailing_literal_length == runtime_block.trailing_literal_length,
+                    "merged fast probe preserves sequence and trailing-literal boundaries");
+                if (fixed_block.sequences.size() == runtime_block.sequences.size())
+                    for (std::size_t index{}; index < fixed_block.sequences.size(); ++index)
+                    {
+                        auto const left{fixed_block.sequences[index]};
+                        auto const& right{runtime_block.sequences[index]};
+                        auto const left_offset_base{left.repeat_code != 0U ?
+                            static_cast<std::uint32_t>(left.repeat_code) : left.offset + 3U};
+                        auto const right_offset_base{right.repeat_code != 0U ?
+                            static_cast<std::uint32_t>(right.repeat_code) : right.offset + 3U};
+                        check(left.literal_length == right.literal_length &&
+                            left.match_length == right.match_length &&
+                            left_offset_base == right_offset_base,
+                            "merged fast probe preserves every parsed sequence");
+                    }
+                check(fixed_literals == runtime_literals,
+                    "merged fast probe preserves collected literal storage");
+            }
+            for (std::size_t index{iteration}; index < input.size(); index += 97U)
+                input[index] ^= 0x5AU;
+        }
+    }
+
     void test_optimal_frontier_initialization()
     {
         auto const input{make_input(8192U)};
@@ -2973,6 +3022,7 @@ int main()
         test_fast_parser_literal_gathering();
         test_double_fast_parser_literal_gathering();
         test_fast_parser_direct_candidates();
+        test_fast_parser_merged_probe();
         test_optimal_parser_workspace();
         test_optimal_frontier_initialization();
         test_optimal_longest_sufficient_match();
