@@ -225,6 +225,42 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Depth-2 row-head wrap without a branch (2026-10-25)
+
+The depth-2 row matcher used a conditional branch to wrap the selected slot
+from zero to the last slot. For its 16- and 32-entry, five-byte-hash rows,
+the new equivalent expression makes GCC 13 emit a conditional move in the hot
+insertion loop. All other row-match specializations keep their prior path.
+The row-head sequence and compressed frame bytes are unchanged.
+
+Six alternating, CPU-2-pinned direct baseline/candidate pairs from the same
+directory, with equal-length executable names, matched frames in every trial.
+On 1-MiB varied text, the candidate won all six pairs at each affected level:
+mean C++ throughput gains were 4.16% at level 8, 4.94% at level 9, and 10.89%
+at level 10. Separate 1,000-frame mixed-input controls won 5/6, 5/6, and 6/6
+pairs, respectively; these are workload-specific results, not an all-input
+guarantee. The optimized GCC build and all 12 tests, including all-level
+compression parity, passed. The MSVC Debug unit and parity targets were
+rebuilt, and all 11 tests passed as a correctness check.
+
+Fresh optimized GCC 13 `zstdpp_pair` reports used six alternating trials per
+row (300 frames for varied text, 1,000 for mixed). Every C++ frame matched
+the reference byte-for-byte, and both decoders recovered both encodings.
+The level-8/9 varied ratios now exceed 100% on this input; the independent
+256-KiB level-2 deficit still keeps the all-level goal open.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 / varied text, 1 MiB | 189.43 | 185.80 | 101.96 | 10.01 | 10.87 | 92.09 | 122.83 | 628.16 | 19.55 |
+| 9 / varied text, 1 MiB | 178.88 | 175.95 | 101.67 | 15.01 | 15.87 | 94.54 | 122.83 | 628.16 | 19.55 |
+| 10 / varied text, 1 MiB | 141.87 | 125.95 | 112.64 | 15.00 | 15.86 | 94.58 | 122.84 | 628.16 | 19.55 |
+| 8 / mixed, 1 MiB | 1479.55 | 1176.09 | 125.80 | 10.26 | 11.00 | 93.29 | 122.83 | 628.16 | 19.55 |
+| 9 / mixed, 1 MiB | 1190.85 | 998.69 | 119.24 | 15.26 | 16.00 | 95.35 | 122.83 | 628.16 | 19.55 |
+| 10 / mixed, 1 MiB | 1178.31 | 978.19 | 120.46 | 15.22 | 16.00 | 95.16 | 122.84 | 628.16 | 19.55 |
+
+Raw paired reports: `out/row-branchless-wrap-l9-20261025/pair-l{8,9,10}-{varied,mixed}/`.
+The preceding row-relative tag-store report remains below as a historical baseline.
+
 ### Depth-2 row-relative tag store (2026-10-25)
 
 The level-8–10 row matcher now writes a selected tag through its already-computed

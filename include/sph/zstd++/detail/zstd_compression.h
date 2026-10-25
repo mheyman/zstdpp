@@ -457,7 +457,10 @@ namespace sph::zstd::detail
             auto const row{(hash >> 8U) << RowLog};
             auto* const tags{tag_table_.data() + row};
             auto next{(static_cast<std::uint32_t>(*tags) - 1U) & row_mask};
-            if (next == 0U)
+            // Depth-2 short rows avoid the unpredictable wrap branch.
+            if constexpr (RowRelativeTag && RowLog <= 5U)
+                next += static_cast<std::uint32_t>(next == 0U) * row_mask;
+            else if (next == 0U)
                 next = row_mask;
             *tags = static_cast<std::uint8_t>(next);
             if constexpr (RowRelativeTag)
