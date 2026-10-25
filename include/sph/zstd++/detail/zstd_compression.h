@@ -47,6 +47,8 @@ namespace sph::zstd::detail
         std::uint64_t huffman_codeprep_ns{}, huffman_body_ns{};
         std::uint64_t huffman_new_codeprep_ns{}, huffman_repeat_codeprep_ns{};
         std::uint64_t huffman_new_blocks{}, huffman_repeat_blocks{}, huffman_discarded_weights{};
+        std::uint64_t huffman_weight_table_builds{}, huffman_weight_table_reuses{};
+        std::uint64_t huffman_weight_table_build_ns{}, huffman_weight_stream_ns{};
         std::uint64_t huffman_histogram_reject_blocks{}, huffman_histogram_reject_bytes{};
         std::uint64_t huffman_sample_eligible_blocks{};
         std::uint64_t blocks{}, sequences{}, literal_bytes{};
@@ -6541,15 +6543,27 @@ namespace sph::zstd::detail
                     std::equal(workspace.huffman_weight_counts.values.begin(),
                         workspace.huffman_weight_counts.values.begin() + normalized.maximum_symbol + 1U,
                         normalized.values.begin())};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                auto const weight_table_start{std::chrono::steady_clock::now()};
+                if (same_table) ++entropy_trace.huffman_weight_table_reuses;
+                else ++entropy_trace.huffman_weight_table_builds;
+#endif
                 if (!same_table)
                 {
                     workspace.huffman_weight_table = build_fse_compression_table(normalized);
                     workspace.huffman_weight_counts = normalized;
                     workspace.huffman_weight_table_valid = true;
                 }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                entropy_trace.huffman_weight_table_build_ns += entropy_trace_elapsed(weight_table_start);
+                auto const weight_stream_start{std::chrono::steady_clock::now()};
+#endif
                 compress_fse_bytes(
                     std::span<std::uint8_t const>{weights}.first(explicit_weights),
                     workspace.huffman_weight_table, workspace.weight_bits, stream);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                entropy_trace.huffman_weight_stream_ns += entropy_trace_elapsed(weight_stream_start);
+#endif
                 if (!stream.empty())
                 {
                     compressed_weights.assign(description.begin(), description.end());

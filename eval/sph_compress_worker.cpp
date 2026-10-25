@@ -150,6 +150,10 @@ int main(int argc, char** argv)
                   << " new_blocks=" << entropy.huffman_new_blocks
                   << " repeat_blocks=" << entropy.huffman_repeat_blocks
                   << " discarded_weights=" << entropy.huffman_discarded_weights
+                  << " weight_table_builds=" << entropy.huffman_weight_table_builds
+                  << " weight_table_reuses=" << entropy.huffman_weight_table_reuses
+                  << " weight_table_build_ns=" << entropy.huffman_weight_table_build_ns
+                  << " weight_stream_ns=" << entropy.huffman_weight_stream_ns
                   << " histogram_reject_blocks=" << entropy.huffman_histogram_reject_blocks
                   << " histogram_reject_bytes=" << entropy.huffman_histogram_reject_bytes
                   << " sample_eligible_blocks=" << entropy.huffman_sample_eligible_blocks << '\n';
