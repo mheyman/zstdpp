@@ -205,6 +205,13 @@ The controller uses that same configured list and refuses to update its report
 if candidate compressed bytes differ from the reference. Building a level does
 not establish that its parser is reference-equivalent.
 
+For host-specific GCC benchmarking, `gcc-release-eval-native` applies
+`-O3 -march=native -mtune=native` to **both** the C++ and reference C/C++ workers.
+Use `gcc-native-pair` to build its paired evaluator. This opt-in preset produces
+CPU-specific binaries; the portable `gcc-release-eval` preset remains the default.
+Add `-DSPH_ZSTDPP_EVAL_LEVELS="1;2;3;8;9;18"` when reproducing the six-level
+screen described below.
+
 New evaluator builds use the normal checked C++ decoder. Historical benchmark
 tables below were produced with an evaluator-only trusted-input decoder and do
 not establish the production decoder's throughput; they need regeneration.
@@ -224,6 +231,27 @@ Repeat with `reference_compress_l3` and a different recording filename. Both bui
 use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
+
+### GCC 13 native-CPU compression comparison (2026-10-25)
+
+On the tested Ryzen 7 5700G, GCC 13.3 resolves `-march=native` and
+`-mtune=native` to `znver3`. A separate Release build applied those same flags
+to C++ and reference zstd. On identical 1-MiB varied-text input, six alternating
+paired trials at each level emitted byte-identical frames; both decoders
+recovered the input from both encodings. Levels 8 and 9 used 500 frames per
+trial, and level 18 used 60. The numbers are specific to this host, corpus,
+compiler, and source-size specialization; other levels and corpora can differ.
+
+| Native GCC 13 / varied text, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Compress L8 | 173.38 | 171.41 | 101.15 | 9.95 | 10.87 | 91.55 | 126.62 | 639.85 | 19.79 |
+| Compress L9 | 183.77 | 181.14 | 101.45 | 14.95 | 15.87 | 94.20 | 126.62 | 639.85 | 19.79 |
+| Compress L18 | 5.99 | 5.81 | 103.04 | 21.72 | 22.24 | 97.64 | 149.05 | 639.85 | 23.29 |
+
+The portable-build benchmark tables below are unchanged. In particular, these
+three native-build leads do not prove that the template implementation is faster
+at every level. Raw reports: `out/zen3-sixlevel-20261025/pair-l8-varied/`,
+`pair-l9-varied/`, and `pair-l18-varied/` under the same directory.
 
 ### MSVC fixed-width padded-literal copy (2026-10-25)
 

@@ -178,6 +178,15 @@
       "cacheVariables": {
         "SPH_ZSTDPP_BUILD_EVAL": "ON"
       }
+    },
+    {
+      "name": "gcc-release-eval-native",
+      "displayName": "GCC Release native-CPU evaluation matrix",
+      "inherits": "gcc-release-eval",
+      "cacheVariables": {
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -mtune=native",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -mtune=native"
+      }
     }
   ],
   "buildPresets": [
@@ -242,6 +251,11 @@
     {
       "name": "gcc-pair",
       "configurePreset": "gcc-release-eval",
+      "targets": ["zstdpp_pair"]
+    },
+    {
+      "name": "gcc-native-pair",
+      "configurePreset": "gcc-release-eval-native",
       "targets": ["zstdpp_pair"]
     },
     {
