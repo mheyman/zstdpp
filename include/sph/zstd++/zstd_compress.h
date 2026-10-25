@@ -925,24 +925,22 @@ namespace sph::zstd
                 destination.event_count += source.event_count;
             };
 
-            fingerprint past;
-            fingerprint recent;
-            record(past, 0U);
-            auto penalty{3};
-            for (auto position{chunk_size}; position <= bytes.size() - chunk_size; position += chunk_size)
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+            if constexpr (SamplingRate == 43U && HashLog == 8U)
             {
-                record(recent, position);
-                if (different(past, recent, penalty))
-                {
-                    return position;
-                }
-                merge(past, recent);
-                if (penalty > 0)
-                {
-                    --penalty;
-                }
+                // The accumulating histogram lands in the faster stack slot
+                // for GCC 13's double-fast splitter with this local order.
+                fingerprint recent;
+                fingerprint past;
+#include "detail/chunk_split_loop.inl"
             }
-            return bytes.size();
+            else
+#endif
+            {
+                fingerprint past;
+                fingerprint recent;
+#include "detail/chunk_split_loop.inl"
+            }
         }
 
         Callback callback_;

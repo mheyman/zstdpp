@@ -225,6 +225,52 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### GCC 13 double-fast block-splitter layout (2026-10-24)
+
+AMD uProf and Linux `perf` led to a code-generation change in the fingerprint
+histograms used when the double-fast strategy decides where to split a block.
+For GCC 13's 43-byte/8-bit-hash splitter only, reversing the two local
+histograms places the accumulating histogram in a faster stack position. The
+algorithm, output bytes, and allocation behavior are unchanged. Other GCC 13
+splitter specializations retain their original code: rebuilt level-1, 5, 7, 9,
+15, 18, and 22 workers were byte-identical to their pre-change binaries.
+Other compilers use the original local order.
+
+Six CPU-2-pinned direct baseline/candidate pairs matched compressed-frame
+bytes. In the final scoped build, level-2 varied text improved by a +2.60%
+paired median (five wins) and genuine mixed input by +10.88% (six wins);
+balanced input was noisy (three wins) and is not claimed as a speed gain.
+Earlier longer direct screens of the same histogram order won all six varied
+pairs at levels 3 (+3.73% paired median) and 4 (+1.95%); mixed controls won
+five of six at each level. GCC unit and all-level compression-parity tests pass;
+MSVC Debug unit and optimized acceptance tests also pass with its original
+splitter order. A direct optimized MSVC level-3 control against the saved
+pre-change executable was neutral on varied text (+0.08% paired median) and
+showed no mixed-input regression (+1.18%, noisy).
+
+The following final GCC 13 Release `-O3` reports used six alternating trials,
+exact reference bytes, and reciprocal decoding. No LTO was used on either
+implementation. Level-2 inputs were 256 KiB; level-3/4 inputs were 1 MiB.
+The C++ level-2 varied gap remains; the tested level-3/4 rows now exceed
+reference throughput.
+
+| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 2 / varied, 256 KiB | 3123.22 | 3520.78 | 88.71 | 4.32 | 4.51 | 95.63 | 132.03 | 628.16 | 21.02 |
+| 2 / balanced, 256 KiB | 2060.08 | 2112.22 | 97.53 | 4.58 | 4.45 | 102.99 | 132.03 | 628.16 | 21.02 |
+| 2 / mixed, 256 KiB | 26805.51 | 9840.88 | 272.39 | 4.33 | 4.52 | 95.76 | 132.03 | 628.16 | 21.02 |
+| 3 / varied, 1 MiB | 2630.16 | 2567.10 | 102.46 | 5.99 | 6.62 | 90.56 | 127.34 | 628.16 | 20.27 |
+| 3 / mixed, 1 MiB | 1950.79 | 1745.24 | 111.78 | 6.26 | 6.71 | 93.33 | 127.34 | 628.16 | 20.27 |
+| 4 / varied, 1 MiB | 2713.39 | 2548.81 | 106.46 | 7.51 | 7.85 | 95.69 | 127.34 | 628.16 | 20.27 |
+| 4 / mixed, 1 MiB | 1926.41 | 1730.69 | 111.31 | 7.76 | 7.97 | 97.38 | 127.34 | 628.16 | 20.27 |
+
+Raw paired reports: level 2 varied `1792895586633315-0`, balanced
+`1792895596123859-0`, mixed `1792895607481396-0` under
+`out/build/gcc13-l2-256k-release/eval/pair-results/`; level 3 varied
+`1792895634655706-0`, mixed `1792895660399543-0`, level 4 varied
+`1792895692259045-0`, mixed `1792895716718274-0` under
+`out/build/gcc13-all-levels/eval/pair-results/`.
+
 ### MSVC level-3 packed match tables (2026-10-24)
 
 The MSVC level-3 double-fast parser now stores each 32-bit match index and its
