@@ -1006,6 +1006,36 @@ namespace
         check(reference_decompress(encoded, input.size()) == input, "reference zstd accepts RLE blocks");
     }
 
+    void test_fse_decode_table_replacement()
+    {
+        using namespace sph::zstd::detail;
+        fse_table reused;
+        for (auto const& counts : {
+                make_normalized_counts(offset_default_norm, 5U),
+                make_normalized_counts(literal_length_default_norm, 6U),
+                make_normalized_counts(match_length_default_norm, 6U)})
+        {
+            reused.entries.fill(fse_entry{65535U, 255U, 255U});
+            build_fse_table(counts, reused);
+            fse_table fresh;
+            build_fse_table(counts, fresh);
+            check(reused.size == fresh.size && reused.table_log == fresh.table_log,
+                "FSE decode table replacement preserves table dimensions");
+            for (std::size_t index{}; index < reused.size; ++index)
+            {
+                auto const& actual{reused.entries[index]};
+                auto const& expected{fresh.entries[index]};
+                check(actual.next_state == expected.next_state &&
+                        actual.number_bits == expected.number_bits && actual.symbol == expected.symbol,
+                    "FSE decode table replacement initializes every active entry");
+            }
+            check(reused.entries[reused.size].next_state == 65535U &&
+                    reused.entries[reused.size].number_bits == 255U &&
+                    reused.entries[reused.size].symbol == 255U,
+                "FSE decode table replacement leaves inactive storage untouched");
+        }
+    }
+
     void test_fse_table_replacement()
     {
         sph::zstd::detail::fse_compression_table reused;
@@ -2811,6 +2841,7 @@ int main()
         test_bounded_sequence_histograms();
         test_rle_blocks();
         test_normalized_count_round_trips();
+        test_fse_decode_table_replacement();
         test_fse_table_replacement();
         test_row_hash_primitives();
         test_row_match_table();

@@ -352,23 +352,23 @@ namespace sph::zstd::detail
 
     struct fse_entry
     {
-        std::uint16_t next_state{};
-        std::uint8_t number_bits{};
-        std::uint8_t symbol{};
+        std::uint16_t next_state;
+        std::uint8_t number_bits;
+        std::uint8_t symbol;
     };
 
     struct fse_table
     {
         static constexpr std::size_t maximum_size{std::size_t{1} << 12U};
+        // The builder writes every entry below size; the inactive tail is never read.
         std::array<fse_entry, maximum_size> entries;
         std::size_t size{};
         unsigned table_log{};
     };
 
-    [[nodiscard]] inline auto build_fse_table(normalized_counts const& counts) -> fse_table
+    inline void build_fse_table(normalized_counts const& counts, fse_table& result)
     {
         auto const table_size{std::size_t{1} << counts.table_log};
-        fse_table result;
         result.size = table_size;
         result.table_log = counts.table_log;
         std::array<std::uint16_t, 256> symbol_next{};
@@ -432,7 +432,6 @@ namespace sph::zstd::detail
                 (static_cast<unsigned>(std::bit_width(next)) - 1U));
             entry.next_state = static_cast<std::uint16_t>((next << entry.number_bits) - table_size);
         }
-        return result;
     }
 
     struct sequence_entry
@@ -531,7 +530,8 @@ namespace sph::zstd::detail
         {
             throw entropy_error{"Zstandard FSE sequence symbol is out of range"};
         }
-        auto const symbols{build_fse_table(counts)};
+        fse_table symbols;
+        build_fse_table(counts, symbols);
         if (symbols.size > sequence_table::maximum_size)
         {
             throw entropy_error{"Zstandard sequence table is too large"};
@@ -582,7 +582,8 @@ namespace sph::zstd::detail
         {
             throw entropy_error{"invalid Zstandard FSE-compressed weights"};
         }
-        auto const table{build_fse_table(counts)};
+        fse_table table;
+        build_fse_table(counts, table);
         reverse_bit_reader bits{source.subspan(counts.bytes_consumed)};
         auto state_one{static_cast<std::size_t>(bits.read(table.table_log))};
         auto state_two{static_cast<std::size_t>(bits.read(table.table_log))};

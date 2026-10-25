@@ -225,6 +225,33 @@ use Release optimization. For source-level profiles, additionally configure
 `-DCMAKE_C_FLAGS_RELEASE="-O3 -g -DNDEBUG"` and
 `-DCMAKE_CXX_FLAGS_RELEASE="-O3 -g -DNDEBUG"`, then rebuild both implementations.
 
+### Decode FSE tables without initializing unused entries (2026-10-25)
+
+The decompressor's FSE table builder previously default-initialized a
+4,096-entry temporary and returned that large object by value for each table.
+It now writes the active entries directly into caller-owned storage. Inactive
+entries are never read. A focused replacement test checks that every active
+entry is initialized and the inactive tail stays untouched; optimized GCC
+tests and all-level MSVC/GCC compression parity passed.
+
+Against the prior optimized MSVC worker, six alternating 10,000-frame direct
+pairs won 6/6 on both 1-MiB inputs: median C++ decompression throughput rose
+10.13% on varied text and 35.41% on the genuine mixed corpus. Each worker
+verified its decoded bytes against the input. The fresh C++/reference rows
+below use six alternating 10,000-frame trials and the same reference-produced
+compressed frame for both decoders. Throughput uses median elapsed time;
+memory uses median peak working set; code size is the complete executable.
+The varied-text decompression deficit and independent compression deficits
+keep the all-level performance goal open.
+
+| Level / corpus / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 / varied text, 1 MiB / decompress | 4470.60 | 8958.07 | 49.91 | 6.31 | 6.32 | 99.75 | 138.00 | 221.00 | 62.44 |
+| 3 / mixed, 1 MiB / decompress | 5810.43 | 5613.47 | 103.51 | 6.55 | 6.55 | 99.94 | 138.00 | 221.00 | 62.44 |
+
+Raw worker metrics and saved baseline/candidate binaries:
+`out/fse-table-init-20261025/`.
+
 ### Once-per-table Huffman code validation at bounded level 3 (2026-10-25)
 
 The optimized MSVC level-3 path with a known pledged input of at most 1 MiB
