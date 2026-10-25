@@ -128,6 +128,10 @@ int main(int argc, char** argv)
                   << " selection_ns=" << entropy.huffman_selection_ns
                   << " streams_ns=" << entropy.huffman_streams_ns
                   << " emit_ns=" << entropy.huffman_emit_ns
+                  << " codeprep_ns=" << entropy.huffman_codeprep_ns
+                  << " new_codeprep_ns=" << entropy.huffman_new_codeprep_ns
+                  << " repeat_codeprep_ns=" << entropy.huffman_repeat_codeprep_ns
+                  << " body_ns=" << entropy.huffman_body_ns
                   << " new_blocks=" << entropy.huffman_new_blocks
                   << " repeat_blocks=" << entropy.huffman_repeat_blocks
                   << " discarded_weights=" << entropy.huffman_discarded_weights

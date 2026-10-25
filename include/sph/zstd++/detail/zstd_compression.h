@@ -39,6 +39,8 @@ namespace sph::zstd::detail
         std::uint64_t gather_ns{}, literals_ns{}, tables_ns{}, bits_ns{};
         std::uint64_t huffman_histogram_ns{}, huffman_tree_ns{}, huffman_weights_ns{};
         std::uint64_t huffman_selection_ns{}, huffman_streams_ns{}, huffman_emit_ns{};
+        std::uint64_t huffman_codeprep_ns{}, huffman_body_ns{};
+        std::uint64_t huffman_new_codeprep_ns{}, huffman_repeat_codeprep_ns{};
         std::uint64_t huffman_new_blocks{}, huffman_repeat_blocks{}, huffman_discarded_weights{};
         std::uint64_t huffman_histogram_reject_blocks{}, huffman_histogram_reject_bytes{};
         std::uint64_t huffman_sample_eligible_blocks{};
@@ -6505,13 +6507,27 @@ namespace sph::zstd::detail
 #endif
         if constexpr (DeferredCodes)
         {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            auto const codeprep_start{std::chrono::steady_clock::now()};
+#endif
             if (!prefer_repeat && !assign_codes()) return false;
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            auto const elapsed{entropy_trace_elapsed(codeprep_start)};
+            entropy_trace.huffman_codeprep_ns += elapsed;
+            entropy_trace.huffman_new_codeprep_ns += elapsed;
+#endif
         }
         if (!prefer_repeat && !four_streams)
         {
             auto& stream{workspace.huffman_streams[0]};
             encode_huffman_stream(literals, codes, stream);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            auto const body_start{std::chrono::steady_clock::now()};
+#endif
             body.insert(body.end(), stream.begin(), stream.end());
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            entropy_trace.huffman_body_ns += entropy_trace_elapsed(body_start);
+#endif
         }
         else if (!prefer_repeat)
         {
@@ -6529,6 +6545,9 @@ namespace sph::zstd::detail
             {
                 return false;
             }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            auto const body_start{std::chrono::steady_clock::now()};
+#endif
             for (std::size_t stream{}; stream < 3U; ++stream)
             {
                 body.push_back(static_cast<std::uint8_t>(streams[stream].size()));
@@ -6538,11 +6557,17 @@ namespace sph::zstd::detail
             {
                 body.insert(body.end(), stream.begin(), stream.end());
             }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            entropy_trace.huffman_body_ns += entropy_trace_elapsed(body_start);
+#endif
         }
 
         bool emit_repeat{repeat_tree};
         if (SelectBeforeEmit ? prefer_repeat : (repeat_symbols_valid && !repeat_tree))
         {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            auto const codeprep_start{std::chrono::steady_clock::now()};
+#endif
             std::array<huffman_code, 256> repeat_codes{};
             auto const cached_codes{workspace.huffman_repeat_codes_valid &&
                 workspace.huffman_repeat_codes_maximum_symbol == workspace.huffman_repeat_maximum_symbol &&
@@ -6591,13 +6616,24 @@ namespace sph::zstd::detail
                     workspace.huffman_repeat_codes_log = workspace.huffman_repeat_log;
                     workspace.huffman_repeat_codes_valid = true;
                 }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                auto const elapsed{entropy_trace_elapsed(codeprep_start)};
+                entropy_trace.huffman_codeprep_ns += elapsed;
+                entropy_trace.huffman_repeat_codeprep_ns += elapsed;
+#endif
                 auto& repeat_body{workspace.huffman_repeat_body};
                 repeat_body.clear();
                 if (!four_streams)
                 {
                     auto& stream{workspace.huffman_streams[0]};
                     encode_huffman_stream(literals, repeat_codes, stream);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                    auto const body_start{std::chrono::steady_clock::now()};
+#endif
                     repeat_body.insert(repeat_body.end(), stream.begin(), stream.end());
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                    entropy_trace.huffman_body_ns += entropy_trace_elapsed(body_start);
+#endif
                 }
                 else
                 {
@@ -6613,6 +6649,9 @@ namespace sph::zstd::detail
                         streams[1].size() <= std::numeric_limits<std::uint16_t>::max() &&
                         streams[2].size() <= std::numeric_limits<std::uint16_t>::max())
                     {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                        auto const body_start{std::chrono::steady_clock::now()};
+#endif
                         for (std::size_t stream{}; stream < 3U; ++stream)
                         {
                             repeat_body.push_back(static_cast<std::uint8_t>(streams[stream].size()));
@@ -6622,6 +6661,9 @@ namespace sph::zstd::detail
                         {
                             repeat_body.insert(repeat_body.end(), stream.begin(), stream.end());
                         }
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                        entropy_trace.huffman_body_ns += entropy_trace_elapsed(body_start);
+#endif
                     }
                 }
                 std::size_t old_bits{};
