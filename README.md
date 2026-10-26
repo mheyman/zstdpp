@@ -283,6 +283,38 @@ Raw old/new trials and fresh C++/reference reports are in
 `out/bit-reader-interior-load-20261025/`. The level-16 decoder remains below
 reference despite the gain; that is the next major decoding target.
 
+### MSVC inlined sequence append (2026-10-25)
+
+The post-window-load uProf capture placed two `append_sequence` specializations
+at 2.47 seconds of sampled CPU time in the level-16 varied-text decoder. MSVC
+now force-inlines this template into the sequence loop; other compilers retain
+their existing code generation. A fresh candidate uProf report no longer lists
+either specialization as a separate hot function. No allocation or
+output-format behavior changes.
+
+Six alternating 10,000-frame old/new MSVC Release pairs verified every decoded
+byte. Level-16 varied decoding improved **9.45%** median (6/6 wins); level 3
+improved 0.69% (5/6), and level 12 improved 0.73% (4/6). Optimized MSVC unit
+and sequence tests passed, and compression acceptance passed. Two short
+`zstdpp_pair` accuracy trials per level confirmed byte-identical compression
+and reciprocal decoding at levels 3, 12, and 16.
+
+Fresh MSVC Release `/O2 /Ob3 /Z7` decoding reports below use six alternating
+10,000-frame C++/reference trials on the same 1-MiB varied-text frame.
+Throughput uses median elapsed time, memory is median peak RSS, and code is
+worker executable size. The short paired compression checks are accuracy
+gates, not the source of these throughput values.
+
+| Input / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Varied text / decode L3 | 9903.56 | 8873.72 | 111.61% | 6.34 | 6.34 | 100.00% | 234.00 | 311.00 | 75.24% |
+| Varied text / decode L12 | 9223.55 | 8855.15 | 104.16% | 6.35 | 6.35 | 100.00% | 232.00 | 311.00 | 74.60% |
+| Varied text / decode L16 | 3588.89 | 5014.44 | 71.57% | 6.35 | 6.34 | 100.15% | 232.00 | 311.00 | 74.60% |
+
+Raw paired and C++/reference runs are in
+`out/msvc-forceinline-append-20261025/`. This moves level 16 closer to
+reference, but its remaining gap is substantial.
+
 ### GCC 13 single-load sequence table entries (2026-10-25)
 
 The decoder's sequence entries are eight bytes each. GCC previously emitted

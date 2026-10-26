@@ -959,6 +959,10 @@ namespace sph::zstd
         }
 
         template <bool Padded, bool Trusted, bool MediumMatchCopy = false>
+#if defined(_MSC_VER)
+        // Keep the output-size and match-copy work in the sequence loop on MSVC.
+        __forceinline
+#endif
         void append_sequence(
             byte_buffer& output,
             std::uint8_t const* literals,
