@@ -247,6 +247,42 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### GCC 13 single-load sequence table entries (2026-10-25)
+
+The decoder's sequence entries are eight bytes each. GCC previously emitted
+separate byte, word, and dword loads for every literal-length, offset, and
+match-length entry; the reference decoder explicitly copies each entry as one
+64-bit value to avoid that code shape. The GCC x86-64 C++ path now does the
+same. A symbolized build has identical optimized `.text` to the benchmark
+worker and confirms three 64-bit entry loads in the sequence loop.
+
+Six alternating CPU-2-pinned, 20,000-frame old/new pairs checked every output
+byte and no ordinary allocations after warm-up. C++ throughput improved in
+all six trials for a level-16 varied reference frame (median +2.75%), a
+level-3 varied frame (+5.17%), and a level-3 mixed frame (+6.95%). The new
+decoder also read reference frames from all 22 levels exactly. A separate
+four-trial, 5,000-frame all-level screen found higher C++ throughput at every
+level, but it is a diagnostic screen rather than a final all-level benchmark.
+Levels 16–22 still trail reference on this varied input.
+Optimized GCC tests passed 11/11; GCC address/undefined sanitizer tests passed
+9/9 with the unrelated long index stress test omitted, and a directly sanitized
+worker decoded the level-16 and level-3 frames. The optimized MSVC decoder
+rebuilt and decoded the level-16 frame exactly.
+
+Fresh six-trial C++/reference results below use the same GCC 13 Release
+`-O3 -DNDEBUG -march=znver3 -mtune=znver3` configuration on both workers.
+Memory is peak resident size; code is worker executable size.
+
+| Native GCC 13 / decode, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Level 16 / varied text | 4590.59 | 5671.00 | 80.95 | 5.69 | 5.72 | 99.59 | 191.34 | 170.12 | 112.47 |
+| Level 3 / varied text | 10493.44 | 9855.97 | 106.47 | 5.64 | 5.72 | 98.50 | 191.34 | 170.12 | 112.47 |
+| Level 3 / mixed | 9211.69 | 6972.97 | 132.11 | 5.89 | 5.95 | 98.98 | 191.34 | 170.12 | 112.47 |
+
+Raw old/new, C++/reference, sanitizer, and all-level screen results are in
+`out/l16-sequence-entry-load-20261025/` and
+`out/l3-decode-gcc-packed-20261025/all-level-screen/`.
+
 ### GCC 13 packed Huffman decode for long literal sections (2026-10-25)
 
 The GCC 13 x86-64 decoder now uses the existing bounded four-stream packed

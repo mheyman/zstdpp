@@ -1115,9 +1115,19 @@ namespace sph::zstd
             auto const* const literal_data{literals.data()};
             for (std::size_t sequence_index{}; sequence_index < sequence_count; ++sequence_index)
             {
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+                // Keep each eight-byte entry in one load instead of three
+                // independent narrow field loads in GCC's sequence hot loop.
+                static_assert(sizeof(detail::sequence_entry) == sizeof(std::uint64_t));
+                detail::sequence_entry literal_entry, offset_entry, match_entry;
+                std::memcpy(&literal_entry, literal_entries + literal_state, sizeof(literal_entry));
+                std::memcpy(&offset_entry, offset_entries + offset_state, sizeof(offset_entry));
+                std::memcpy(&match_entry, match_entries + match_state, sizeof(match_entry));
+#else
                 auto const literal_entry{literal_entries[literal_state]};
                 auto const offset_entry{offset_entries[offset_state]};
                 auto const match_entry{match_entries[match_state]};
+#endif
 
                 std::size_t match_offset{};
                 if (offset_entry.additional_bits > 1U)
