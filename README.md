@@ -247,6 +247,36 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### GCC 13 packed Huffman decode for long literal sections (2026-10-25)
+
+The GCC 13 x86-64 decoder now uses the existing bounded four-stream packed
+Huffman reader for sections of at least 2 KiB, as the MSVC x64 decoder already
+did. Five symbols are decoded per stream from local 64-bit windows before the
+readers are updated; short sections and checked tails keep their previous path.
+On the same 1-MiB varied reference frame, six alternating CPU-2-pinned
+20,000-frame old/new pairs improved the C++ decoder in all six trials (median
++6.14%). The mixed-input control was effectively flat (median -0.06%, 2/6
+wins). The same old/new protocol won 6/6 varied pairs at reference level 1
+(median +7.04%) and level 15 (+1.93%). Both workers verified every decoded
+byte and no ordinary allocations after warm-up. Optimized GCC acceptance
+passed 11/11 tests, address/undefined sanitizer tests passed 10/10 and decoded
+the long varied and mixed frames, and the candidate decoded reference frames
+from levels 1, 3, 5, 9, and 15 exactly. The optimized MSVC level-3 decoder
+also rebuilt and decoded the varied reference frame exactly.
+
+Fresh six-trial, alternating, CPU-2-pinned GCC 13 Release measurements use
+`-O3 -DNDEBUG -march=znver3 -mtune=znver3` for both implementations. The
+varied level-3 decoder now narrowly exceeds reference throughput on this
+input; this does not establish an all-level win. Memory is peak resident size,
+and code is worker executable size.
+
+| Native GCC 13 / decode L3, 1 MiB | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Varied text | 10024.17 | 9953.00 | 100.72 | 5.62 | 5.73 | 98.06 | 191.34 | 170.12 | 112.47 |
+| Mixed | 8629.57 | 6906.40 | 124.95 | 5.89 | 5.98 | 98.50 | 191.34 | 170.12 | 112.47 |
+
+Raw exact-output and timing runs are in `out/l3-decode-gcc-packed-20261025/`.
+
 ### GCC 13 four-chunk long-match counting for short level 2 (2026-10-25)
 
 After the existing two scalar-word checks, the GCC 13 `18/14/14/5`

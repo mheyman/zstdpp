@@ -816,8 +816,14 @@ namespace sph::zstd::detail
         }
     }
 
-#if defined(_MSC_VER) && defined(_M_X64)
-    [[nodiscard]] __declspec(noinline) inline auto decode_huffman_packed_bulk(
+#if (defined(_MSC_VER) && defined(_M_X64)) || \
+    (defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__))
+#if defined(_MSC_VER)
+    [[nodiscard]] __declspec(noinline) inline
+#else
+    [[nodiscard]] [[gnu::noinline]] inline
+#endif
+    auto decode_huffman_packed_bulk(
         std::span<std::uint8_t const> encoded,
         std::array<std::size_t, 4> const& lengths,
         std::array<std::uint8_t*, 4> const& outputs,
@@ -931,7 +937,8 @@ namespace sph::zstd::detail
         auto const* const entries{table.entries.data()};
         auto const table_bits{table.table_log};
         auto const last_size{output_offsets[4] - output_offsets[3]};
-#if defined(_MSC_VER) && defined(_M_X64)
+#if (defined(_MSC_VER) && defined(_M_X64)) || \
+    (defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__))
         std::size_t produced{};
         // The packed reader amortizes its setup on longer literal sections;
         // keep short sections on the ordinary decoder.
