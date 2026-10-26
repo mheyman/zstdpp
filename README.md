@@ -315,6 +315,44 @@ Raw paired and C++/reference runs are in
 `out/msvc-forceinline-append-20261025/`. This moves level 16 closer to
 reference, but its remaining gap is substantial.
 
+### MSVC medium-block sequence bit reads (2026-10-25)
+
+After inlining sequence append, MSVC's combined match-length/literal-length
+extra-bit read became a cost in the medium compressed-block specialization
+(2–8 KiB of compressed data). That specialization now reads the two fields
+separately; non-medium blocks retain their combined read. Splitting all blocks
+was rejected because it slowed mixed decoding, so this change targets only
+the measured shape. GCC retains its original source order and its optimized
+decoder `.text` is byte-identical to the saved baseline.
+
+Six alternating 10,000-frame old/new MSVC Release pairs, each checking the
+decoded bytes, improved varied-text decoding by **3.51%** at level 3,
+**4.99%** at level 12, and **2.44%** at level 16 (6/6 wins in each case).
+A mixed-input screen showed a small level-12 tradeoff (-1.81% median), but
+fresh C++/reference mixed throughput remains above reference at the three
+reported levels. MSVC unit/sequence and compression-acceptance tests passed;
+GCC unit/sequence tests passed and its decoder read saved reference frames
+at all 22 levels exactly. The paired tool confirmed exact compressed bytes
+and both decoders reading both encodings on varied and mixed inputs at levels
+3, 12, and 16.
+
+Fresh MSVC Release `/O2 /Ob3 /Z7` results below use six alternating
+10,000-frame C++/reference decoding trials per row. Throughput uses median
+elapsed time, memory is median peak RSS, and code is worker executable size.
+
+| Input / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Varied text / decode L3 | 10333.97 | 8908.93 | 116.00% | 6.34 | 6.34 | 99.97% | 234.00 | 311.00 | 75.24% |
+| Varied text / decode L12 | 9728.95 | 8919.41 | 109.08% | 6.34 | 6.34 | 99.94% | 234.00 | 311.00 | 75.24% |
+| Varied text / decode L16 | 3660.21 | 4996.38 | 73.26% | 6.34 | 6.34 | 100.00% | 234.00 | 311.00 | 75.24% |
+| Mixed / decode L3 | 7536.46 | 5816.44 | 129.57% | 6.60 | 6.57 | 100.54% | 234.00 | 311.00 | 75.24% |
+| Mixed / decode L12 | 23980.84 | 15725.24 | 152.50% | 6.59 | 6.55 | 100.63% | 234.00 | 311.00 | 75.24% |
+| Mixed / decode L16 | 17887.03 | 15136.28 | 118.17% | 6.59 | 6.56 | 100.54% | 234.00 | 311.00 | 75.24% |
+
+Raw screens, exactness checks and final reports are in
+`out/msvc-split-extra-scoped2-20261025/`. Level-16 varied decoding still
+needs a substantial gain to exceed reference.
+
 ### GCC 13 single-load sequence table entries (2026-10-25)
 
 The decoder's sequence entries are eight bytes each. GCC previously emitted
