@@ -199,7 +199,11 @@ namespace sph::zstd::detail
             auto const bit_count{end_bit - window_start_};
             auto const byte_count{static_cast<unsigned>((bit_offset + bit_count + 7U) / 8U)};
             std::uint64_t packed{};
-            if (byte_count == sizeof(std::uint64_t))
+            // Interior windows can safely read a full word even when they
+            // currently need only seven bytes. Leave the short head path
+            // bounded so a small or truncated input never overreads.
+            if (bytes_.size() >= sizeof(std::uint64_t) &&
+                first_byte <= bytes_.size() - sizeof(std::uint64_t))
             {
                 std::memcpy(&packed, bytes_.data() + first_byte, sizeof(packed));
                 if constexpr (std::endian::native == std::endian::big)

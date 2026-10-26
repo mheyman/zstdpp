@@ -247,6 +247,42 @@ Sampling identifies targets, but unprofiled alternating Release runs determine
 throughput. The Windows profile sessions below are under
 `out/uprof-l3-{decode,ref}-compare-20261025/`.
 
+### Windows decoder interior-word load (2026-10-25)
+
+A fresh optimized AMD uProf capture of a level-16 varied-text reference frame
+placed `reverse_bit_reader::read_fast()` at the top of the C++ decoder's named
+hotspots. Its window reload assembled seven-byte interior windows one byte at
+a time. The reader now copies one eight-byte word whenever the complete word
+lies inside the input; the bounded short-head path is unchanged. This keeps
+truncated-stream accesses safe without adding an allocation.
+
+Six alternating old/new MSVC Release pairs, 10,000 decoded frames per trial,
+verified every output byte. Level-16 varied decoding improved by **15.52%**
+median (6/6 wins), level 12 by 1.78% (5/6), and level 3 was approximately
+neutral at -0.19% (2/6). GCC 13's same-source pairs changed by +0.95% at level
+16 (5/6), +0.23% at level 12 (4/6), and +0.21% at level 3 (3/6). The GCC
+decoder also read saved reference frames at all 22 levels exactly. Optimized
+MSVC and GCC unit/sequence tests passed; the MSVC acceptance executable exited
+successfully (its existing level-3 sequence-field diagnostic remains), and
+`zstdpp_pair` checked byte-identical compression plus both
+decoders reading both encodings at levels 3, 12, and 16 on this input.
+
+Fresh MSVC Release `/O2 /Ob3 /Z7` decoding reports below use six alternating
+10,000-frame C++/reference trials on the same 1-MiB varied-text frame.
+Throughput is based on median elapsed time, memory is median peak RSS, and
+code is worker executable size. The paired compression checks used two short
+accuracy trials separately; their one-frame speed results are not used here.
+
+| Input / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Varied text / decode L3 | 9860.80 | 8908.15 | 110.69% | 6.35 | 6.34 | 100.15% | 229.00 | 311.00 | 73.63% |
+| Varied text / decode L12 | 9250.23 | 8901.77 | 103.91% | 6.35 | 6.34 | 100.06% | 232.00 | 311.00 | 74.60% |
+| Varied text / decode L16 | 3287.60 | 5002.53 | 65.72% | 6.35 | 6.34 | 100.09% | 232.00 | 311.00 | 74.60% |
+
+Raw old/new trials and fresh C++/reference reports are in
+`out/bit-reader-interior-load-20261025/`. The level-16 decoder remains below
+reference despite the gain; that is the next major decoding target.
+
 ### GCC 13 single-load sequence table entries (2026-10-25)
 
 The decoder's sequence entries are eight bytes each. GCC previously emitted
