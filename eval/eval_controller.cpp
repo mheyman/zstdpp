@@ -65,7 +65,7 @@ namespace
         std::uint64_t iterations{20};
         std::uint64_t trials{6};
         std::filesystem::path output_directory{std::filesystem::path{SPH_EVAL_BINARY_DIR} / "eval" / "results"};
-        std::filesystem::path readme{std::filesystem::path{SPH_EVAL_SOURCE_DIR} / "README.md"};
+        std::filesystem::path report{std::filesystem::path{SPH_EVAL_SOURCE_DIR} / "BENCHMARKS.md"};
     };
 
     auto parse_options(int argc, char** argv) -> options
@@ -89,13 +89,13 @@ namespace
             {
                 result.output_directory = argv[++index];
             }
-            else if (argument == "--readme" && index + 1 < argc)
+            else if ((argument == "--report" || argument == "--readme") && index + 1 < argc)
             {
-                result.readme = argv[++index];
+                result.report = argv[++index];
             }
             else
             {
-                throw std::invalid_argument{"usage: zstdpp_eval [--iterations N] [--trials N] [--output DIR] [--readme FILE]"};
+                throw std::invalid_argument{"usage: zstdpp_eval [--iterations N] [--trials N] [--output DIR] [--report FILE]"};
             }
         }
         return result;
@@ -298,22 +298,22 @@ namespace
     auto read_text(std::filesystem::path const& path) -> std::string
     {
         std::ifstream input{path};
-        if (!input) throw std::runtime_error{"cannot open README: " + path.string()};
+        if (!input) throw std::runtime_error{"cannot open benchmark report: " + path.string()};
         std::ostringstream contents;
         contents << input.rdbuf();
         if (input.bad() || contents.bad())
-            throw std::runtime_error{"cannot read README: " + path.string()};
+            throw std::runtime_error{"cannot read benchmark report: " + path.string()};
         return contents.str();
     }
 
-    void update_readme(std::filesystem::path const& path, std::string const& report)
+    void update_report(std::filesystem::path const& path, std::string const& report)
     {
         auto contents{read_text(path)};
         auto const begin{contents.find(report_begin)};
         auto const end{contents.find(report_end)};
         if ((begin == std::string::npos) != (end == std::string::npos))
         {
-            throw std::runtime_error{"README evaluation markers are unbalanced"};
+            throw std::runtime_error{"benchmark evaluation markers are unbalanced"};
         }
         if (begin == std::string::npos)
         {
@@ -331,7 +331,7 @@ namespace
         }
         contents.push_back('\n');
         std::ofstream output{path, std::ios::trunc};
-        if (!output) throw std::runtime_error{"cannot update README: " + path.string()};
+        if (!output) throw std::runtime_error{"cannot update benchmark report: " + path.string()};
         output << contents;
     }
 
@@ -488,8 +488,8 @@ int main(int argc, char** argv)
         auto const report{make_report(results, configuration.iterations, raw, configuration.trials)};
         write_csv(configuration.output_directory / "metrics.csv", results);
         write_metrics_markdown(configuration.output_directory / "METRICS.md", report);
-        update_readme(configuration.readme, report);
-        std::cout << "Updated " << configuration.readme.string() << '\n';
+        update_report(configuration.report, report);
+        std::cout << "Updated " << configuration.report.string() << '\n';
         std::cout << "Raw metrics: " << (configuration.output_directory / "metrics.csv").string() << '\n';
         std::cout << "Metrics report: " << (configuration.output_directory / "METRICS.md").string() << '\n';
         return 0;

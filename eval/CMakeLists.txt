@@ -130,5 +130,5 @@ add_custom_target(run_eval
     DEPENDS zstdpp_eval
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     USES_TERMINAL
-    COMMENT "Benchmarking sph-zstd++ against reference zstd and updating README.md"
+    COMMENT "Benchmarking sph-zstd++ against reference zstd and updating BENCHMARKS.md"
 )
