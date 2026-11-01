@@ -47,7 +47,7 @@ def grid(data, operation):
     return "\n".join(lines)
 
 
-def detailed_table(data, operation, kinds=KINDS[:-1]):
+def detailed_table(data, operation, kinds=KINDS):
     lines = ["| Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | "
              "C++ memory (MiB) | Reference memory (MiB) | % of Reference | "
              "C++ code (KiB) | Reference code (KiB) | % of Reference |",
@@ -132,7 +132,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each overview cell shows **speed / peak memory / executable size**, as C++ percentages of reference. Higher speed and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim. Expand the full measurements for C++ and reference values in MiB/s, MiB, and KiB, with percentage comparisons for every level and input.
+Measured {args.date} from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **speed / peak memory / executable size**, as C++ percentages of reference. Higher speed and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim. [Full measurements](BENCHMARKS_INPUTS.md) give C++ and reference values in MiB/s, MiB, and KiB for every level and input.
 
 ### Compression (% of reference)
 
@@ -141,19 +141,6 @@ Measured {args.date} from the current optimized GCC 13 build against the bundled
 ### Decompression (% of reference)
 
 """ + grid(data, "decompress") + """
-
-<details>
-<summary>Full measurements: speed, memory, and executable size</summary>
-
-#### Compression
-
-""" + detailed_table(data, "compress", KINDS) + """
-
-#### Decompression
-
-""" + detailed_table(data, "decompress", KINDS) + """
-
-</details>
 
 [Experiment history](PERFORMANCE_HISTORY.md) and the [performance work list](PERFORMANCE_PLAN.md) track progress separately.
 
@@ -164,26 +151,26 @@ To benchmark your own 1 MiB input, build the optimized `msvc-pair` or `gcc-pair`
     start = readme.index("## Performance\n")
     end = readme.index("## Project notes\n", start)
     updated = readme[:start] + performance + readme[end:]
-    if "- [Other input benchmark matrix](BENCHMARKS_INPUTS.md)" not in updated:
+    if "- [Full current benchmark matrix](BENCHMARKS_INPUTS.md)" not in updated:
         updated = updated.replace("- [Benchmark tables and methodology](BENCHMARKS.md)",
-                                  "- [Benchmark tables and methodology](BENCHMARKS.md)\n- [Other input benchmark matrix](BENCHMARKS_INPUTS.md)")
+                                  "- [Benchmark tables and methodology](BENCHMARKS.md)\n- [Full current benchmark matrix](BENCHMARKS_INPUTS.md)")
     args.readme.write_text(updated, encoding="utf-8", newline="\n")
 
-    details = f"""# Current benchmark matrix: additional input shapes
+    details = f"""# Current benchmark matrix: all input shapes
 
-Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout, 1 MiB inputs, two alternating trials of 100 frames per row for each operation. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results.
+Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and level 16 compression rows use longer confirmed measurements, as in the README; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report.
 
-Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`). Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
+Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 
 [README overview](README.md#performance) · [Current mixed-input measurements](BENCHMARKS.md#current-evaluation) · [Experiment history](PERFORMANCE_HISTORY.md)
 
 ## Compression
 
-""" + detailed_table(data, "compress") + """
+""" + detailed_table(data, "compress", KINDS) + """
 
 ## Decompression
 
-""" + detailed_table(data, "decompress") + "\n"
+""" + detailed_table(data, "decompress", KINDS) + "\n"
     args.details.write_text(details, encoding="utf-8", newline="\n")
 
 
