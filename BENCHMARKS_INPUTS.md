@@ -1,6 +1,6 @@
 # Current benchmark matrix: all input shapes
 
-Measured 2026-11-01 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and level 16 compression rows use longer confirmed measurements, as in the README; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report.
+Measured 2026-11-01 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and level 16 compression rows use longer confirmed measurements, as in the README; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report. Structured decompression levels 16–22 below use six alternating 10,000-frame exact-output trials.
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 
@@ -184,13 +184,13 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | structured | 13 | 26555.92 | 21837.00 | 121.61% | 5.59 | 5.64 | 99.10% | 123.28 | 202.89 | 60.76% |
 | structured | 14 | 28165.28 | 24924.71 | 113.00% | 5.58 | 5.64 | 98.86% | 123.28 | 202.89 | 60.76% |
 | structured | 15 | 27184.42 | 25945.61 | 104.77% | 5.61 | 5.63 | 99.48% | 123.28 | 202.89 | 60.76% |
-| structured | 16 | 18891.36 | 20218.89 | 93.43% | 5.60 | 5.70 | 98.35% | 123.28 | 202.89 | 60.76% |
-| structured | 17 | 19469.09 | 21692.51 | 89.75% | 5.58 | 5.62 | 99.34% | 123.28 | 202.89 | 60.76% |
-| structured | 18 | 15776.53 | 16178.99 | 97.51% | 5.61 | 5.72 | 97.95% | 123.28 | 202.89 | 60.76% |
-| structured | 19 | 15971.01 | 19147.81 | 83.41% | 5.62 | 5.71 | 98.49% | 123.28 | 202.89 | 60.76% |
-| structured | 20 | 16170.81 | 18692.49 | 86.51% | 5.60 | 5.69 | 98.52% | 123.28 | 202.89 | 60.76% |
-| structured | 21 | 16459.26 | 18925.55 | 86.97% | 5.59 | 5.65 | 98.93% | 123.28 | 202.89 | 60.76% |
-| structured | 22 | 16781.46 | 19175.68 | 87.51% | 5.60 | 5.69 | 98.49% | 123.28 | 202.89 | 60.76% |
+| structured | 16 | 19018.47 | 20715.75 | 91.81% | 5.60 | 5.59 | 100.28% | 123.28 | 202.89 | 60.76% |
+| structured | 17 | 19097.79 | 20928.17 | 91.25% | 5.61 | 5.74 | 97.72% | 123.28 | 202.89 | 60.76% |
+| structured | 18 | 15767.18 | 17672.49 | 89.22% | 5.59 | 5.65 | 98.79% | 123.28 | 202.89 | 60.76% |
+| structured | 19 | 15939.70 | 17893.80 | 89.08% | 5.60 | 5.71 | 98.22% | 123.28 | 202.89 | 60.76% |
+| structured | 20 | 15991.94 | 17885.47 | 89.41% | 5.61 | 5.69 | 98.46% | 123.28 | 202.89 | 60.76% |
+| structured | 21 | 16898.17 | 18708.71 | 90.32% | 5.61 | 5.61 | 99.90% | 123.28 | 202.89 | 60.76% |
+| structured | 22 | 17106.45 | 19255.11 | 88.84% | 5.60 | 5.64 | 99.31% | 123.28 | 202.89 | 60.76% |
 | random | 1 | 40276.36 | 38343.40 | 105.04% | 6.60 | 6.53 | 101.08% | 123.28 | 202.89 | 60.76% |
 | random | 2 | 35007.07 | 35962.35 | 97.34% | 6.57 | 6.50 | 101.14% | 123.28 | 202.89 | 60.76% |
 | random | 3 | 33576.24 | 38952.02 | 86.20% | 6.61 | 6.59 | 100.27% | 123.28 | 202.89 | 60.76% |

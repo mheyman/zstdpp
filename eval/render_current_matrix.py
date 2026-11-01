@@ -5,6 +5,7 @@ import csv
 from datetime import date
 from pathlib import Path
 import re
+from statistics import median
 
 
 KINDS = ("zero", "repeated", "structured", "random", "mixed")
@@ -94,6 +95,27 @@ def confirmed_pair(path):
             values[6], values[7])
 
 
+def confirmed_decoder_pairs(directory, level, code_sizes):
+    samples = {"cpp": [], "reference": []}
+    for trial in range(1, 7):
+        for name in samples:
+            path = directory / f"l{level}-{name}-{trial}.csv"
+            with path.open(newline="") as stream:
+                rows = list(csv.reader(stream))
+            if len(rows) != 1 or len(rows[0]) != 5:
+                raise ValueError(f"invalid decoder trial: {path}")
+            elapsed, peak, input_bytes, output_bytes, iterations = map(int, rows[0])
+            if elapsed <= 0 or peak <= 0 or input_bytes <= 0 or output_bytes != 1048576 or iterations != 10000:
+                raise ValueError(f"unexpected decoder trial values: {path}")
+            samples[name].append((elapsed, peak))
+    cpp_elapsed = median(row[0] for row in samples["cpp"])
+    reference_elapsed = median(row[0] for row in samples["reference"])
+    return (10000 * 1e9 / cpp_elapsed, 10000 * 1e9 / reference_elapsed,
+            median(row[1] for row in samples["cpp"]) / 1048576,
+            median(row[1] for row in samples["reference"]) / 1048576,
+            *code_sizes)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mixed", type=Path, required=True)
@@ -107,6 +129,8 @@ def main():
                         help="longer paired level-13 mixed-input SUMMARY.md to supersede the short screen")
     parser.add_argument("--confirmed-l16", type=Path,
                         help="longer paired level-16 mixed-input SUMMARY.md to supersede the short screen")
+    parser.add_argument("--confirmed-structured-decode", type=Path,
+                        help="six longer paired structured decoder trials for levels 16–22")
     args = parser.parse_args()
     data = load_eval(args.mixed, "mixed")
     for name in KINDS[:-1]:
@@ -119,6 +143,10 @@ def main():
         data["mixed", 13, "compress"] = confirmed_pair(args.confirmed_l13)
     if args.confirmed_l16:
         data["mixed", 16, "compress"] = confirmed_pair(args.confirmed_l16)
+    if args.confirmed_structured_decode:
+        for level in range(16, 23):
+            key = "structured", level, "decompress"
+            data[key] = confirmed_decoder_pairs(args.confirmed_structured_decode, level, data[key][4:])
 
     confirmation_note = ""
     if args.confirmed_l13:
@@ -140,7 +168,9 @@ Measured {args.date} from the current optimized GCC 13 build against the bundled
 
 ### Decompression (% of reference)
 
-""" + grid(data, "decompress") + """
+""" + ("Structured levels 16–22 use six alternating 10,000-frame exact-output trials; "
+       "the other cells use the screening trials described above.\n\n"
+       if args.confirmed_structured_decode else "") + grid(data, "decompress") + """
 
 <details>
 <summary>Full measurements: speed, memory, and executable size</summary>
@@ -169,9 +199,12 @@ To benchmark your own 1 MiB input, build the optimized `msvc-pair` or `gcc-pair`
                                   "- [Benchmark tables and methodology](BENCHMARKS.md)\n- [Full current benchmark matrix](BENCHMARKS_INPUTS.md)")
     args.readme.write_text(updated, encoding="utf-8", newline="\n")
 
+    structured_note = (" Structured decompression levels 16–22 below use six alternating "
+                       "10,000-frame exact-output trials."
+                       if args.confirmed_structured_decode else "")
     details = f"""# Current benchmark matrix: all input shapes
 
-Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and level 16 compression rows use longer confirmed measurements, as in the README; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report.
+Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and level 16 compression rows use longer confirmed measurements, as in the README; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report.{structured_note}
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 
