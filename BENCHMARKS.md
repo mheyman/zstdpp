@@ -2,7 +2,15 @@
 
 These measurements compare optimized, isolated sph-zstd++ (`C++`) and bundled reference-zstd (`Reference`) workers at the same level and on the same input. Throughput is MiB/s (higher is better); memory is peak resident set size and code is the complete worker executable (lower is better). Percentages are `C++ / Reference × 100`. Compression outputs are byte-compared and both decoders check both encodings in paired runs.
 
-The [current 22-level mixed-input evaluation](#current-evaluation) was run on 2026-11-01 from this checkout with GCC 13 Release. The [additional input matrix](BENCHMARKS_INPUTS.md) covers zero-filled, repeated, structured, and seeded-random data from the same optimized build. The focused tables immediately below are dated snapshots from earlier changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
+The [current 22-level mixed-input evaluation](#current-evaluation) was run on 2026-11-01 from this checkout with GCC 13 Release. The [additional input matrix](BENCHMARKS_INPUTS.md) covers zero-filled, repeated, structured, and seeded-random data from the same optimized build. The earlier focused tables further below are dated snapshots from prior changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
+
+## Confirmed mixed-input level 13 compression
+
+The short all-level screen below measured 77.24% of reference at level 13, but its three trials varied widely. A pinned-core follow-up used six alternating trials of 1,000 frames each on the same current optimized workers and 1-MiB mixed input. Every trial passed exact compressed-byte comparison and both decoding directions. The README uses this longer result for its level 13 mixed-input compression cell; the original screen remains below for provenance.
+
+| C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 522.50 | 466.52 | 112.00% | 21.19 | 21.93 | 96.62% | 126.88 | 628.16 | 20.20% |
 
 ## Earlier focused measurements
 

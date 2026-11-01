@@ -4,6 +4,7 @@ import argparse
 import csv
 from datetime import date
 from pathlib import Path
+import re
 
 
 KINDS = ("zero", "repeated", "structured", "random", "mixed")
@@ -46,11 +47,12 @@ def grid(data, operation):
     return "\n".join(lines)
 
 
-def detailed_table(data, operation):
-    lines = ["| Input | Level | C++ speed (MiB/s) | Ref speed (MiB/s) | Speed % | "
-             "C++ RSS (MiB) | Ref RSS (MiB) | RSS % | C++ code (KiB) | Ref code (KiB) | Code % |",
+def detailed_table(data, operation, kinds=KINDS[:-1]):
+    lines = ["| Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | "
+             "C++ memory (MiB) | Reference memory (MiB) | % of Reference | "
+             "C++ code (KiB) | Reference code (KiB) | % of Reference |",
              "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"]
-    for kind in KINDS[:-1]:
+    for kind in kinds:
         for level in range(1, 23):
             values = data[kind, level, operation]
             lines.append(f"| {kind} | {level} | {values[0]:.2f} | {values[1]:.2f} | "
@@ -59,6 +61,37 @@ def detailed_table(data, operation):
                          f"{values[4]:.2f} | {values[5]:.2f} | "
                          f"{percent(values[4], values[5]):.2f}% |")
     return "\n".join(lines)
+
+
+def confirmed_pair(path):
+    report = path.read_text(encoding="utf-8")
+    rows = [line for line in report.splitlines()
+            if line.startswith("| ") and line[2:3].isdigit()]
+    if len(rows) != 1:
+        raise ValueError(f"expected one numeric benchmark row: {path}")
+    values = [float(value.strip()) for value in rows[0].strip("|").split("|")]
+    if len(values) != 9:
+        raise ValueError(f"expected nine benchmark metrics: {path}")
+    with (path.parent / "trials.csv").open(newline="") as stream:
+        trials = list(csv.DictReader(stream))
+    if len(trials) < 2 or any(row["exact_bytes"] != "true" for row in trials):
+        raise ValueError(f"missing exact paired trials: {path.parent / 'trials.csv'}")
+
+    def median_uint(field):
+        ordered = sorted(int(row[field]) for row in trials)
+        middle = len(ordered) // 2
+        return (ordered[middle] if len(ordered) % 2 else
+                ordered[middle - 1] + (ordered[middle] - ordered[middle - 1]) // 2)
+
+    match = re.search(r"trials of (\d+) iterations", report)
+    if not match:
+        raise ValueError(f"missing iteration count: {path}")
+    iterations = int(match.group(1))
+    return (iterations * 1e9 / median_uint("cpp_elapsed_ns"),
+            iterations * 1e9 / median_uint("reference_elapsed_ns"),
+            median_uint("cpp_peak_bytes") / 1048576,
+            median_uint("reference_peak_bytes") / 1048576,
+            values[6], values[7])
 
 
 def main():
@@ -70,6 +103,8 @@ def main():
     parser.add_argument("--details", type=Path, default=Path("BENCHMARKS_INPUTS.md"))
     parser.add_argument("--date", default=date.today().isoformat(),
                         help="date on which the measurements were collected")
+    parser.add_argument("--confirmed-l13", type=Path,
+                        help="longer paired level-13 mixed-input SUMMARY.md to supersede the short screen")
     args = parser.parse_args()
     data = load_eval(args.mixed, "mixed")
     for name in KINDS[:-1]:
@@ -78,18 +113,38 @@ def main():
                 for level in range(1, 23) for operation in OPERATIONS}
     if set(data) != expected:
         raise ValueError(f"incomplete matrix: missing {expected - set(data)}; extra {set(data) - expected}")
+    if args.confirmed_l13:
+        data["mixed", 13, "compress"] = confirmed_pair(args.confirmed_l13)
+
+    confirmation_note = ("The mixed-input level 13 compression cell uses a longer six-trial "
+                         "1,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-13-compression); "
+                         "the original short-screen row remains in the detailed evaluation.\n\n"
+                         if args.confirmed_l13 else "")
 
     performance = f"""## Performance
 
-Measured {args.date} from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size**, as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim.
+Measured {args.date} from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each overview cell shows **throughput / peak memory / executable size**, as C++ percentages of reference; the expanded tables below show the C++ and reference values and all nine comparison metrics. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim.
 
 ### Compression (% of reference)
 
-""" + grid(data, "compress") + """
+""" + confirmation_note + grid(data, "compress") + """
 
 ### Decompression (% of reference)
 
 """ + grid(data, "decompress") + """
+
+<details>
+<summary>Full compression and decompression measurements (C++ and reference)</summary>
+
+#### Compression
+
+""" + detailed_table(data, "compress", KINDS) + """
+
+#### Decompression
+
+""" + detailed_table(data, "decompress", KINDS) + """
+
+</details>
 
 [Full measurements and method](BENCHMARKS.md#current-evaluation) include the C++ and reference values for mixed input. [Other input measurements](BENCHMARKS_INPUTS.md) contain the full values for zero, repeated, structured, and random data. [Experiment history](PERFORMANCE_HISTORY.md) and the [performance work list](PERFORMANCE_PLAN.md) track progress separately.
 

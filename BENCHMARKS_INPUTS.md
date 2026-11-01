@@ -8,7 +8,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 
 ## Compression
 
-| Input | Level | C++ speed (MiB/s) | Ref speed (MiB/s) | Speed % | C++ RSS (MiB) | Ref RSS (MiB) | RSS % | C++ code (KiB) | Ref code (KiB) | Code % |
+| Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | zero | 1 | 38180.50 | 8276.57 | 461.31% | 5.09 | 5.89 | 86.46% | 131.25 | 628.16 | 20.89% |
 | zero | 2 | 38950.20 | 8437.26 | 461.65% | 5.25 | 6.07 | 86.51% | 127.40 | 628.16 | 20.28% |
@@ -101,7 +101,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 
 ## Decompression
 
-| Input | Level | C++ speed (MiB/s) | Ref speed (MiB/s) | Speed % | C++ RSS (MiB) | Ref RSS (MiB) | RSS % | C++ code (KiB) | Ref code (KiB) | Code % |
+| Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | zero | 1 | 66658.22 | 49974.66 | 133.38% | 5.59 | 5.52 | 101.17% | 123.38 | 202.89 | 60.81% |
 | zero | 2 | 69713.76 | 52865.49 | 131.87% | 5.59 | 5.54 | 100.95% | 123.38 | 202.89 | 60.81% |
