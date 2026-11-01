@@ -983,8 +983,13 @@ namespace sph::zstd
             auto const can_overcopy{output.remaining_capacity() >= copy_slack};
             if constexpr (Padded)
             {
+#if defined(_MSC_VER) || (defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__x86_64__))
 #if defined(_MSC_VER)
-                if (can_overcopy)
+                constexpr bool unconditional_padded_literals = true;
+#else
+                constexpr bool unconditional_padded_literals = MediumMatchCopy;
+#endif
+                if (can_overcopy && unconditional_padded_literals)
                 {
                     // Padded literals and at least 16 writable output bytes
                     // permit the reference decoder's unconditional short copy.
@@ -995,6 +1000,8 @@ namespace sph::zstd
                             literal_length - copy_slack);
                     }
                 }
+                else if (can_overcopy)
+                    copy_literals<true>(destination.data(), literals, literal_length);
                 else
                     copy_literals<false>(destination.data(), literals, literal_length);
 #else
