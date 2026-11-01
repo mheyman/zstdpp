@@ -1262,6 +1262,8 @@ namespace sph::zstd::detail
         std::uint64_t unsorted_visits{};
         std::uint64_t main_visits{};
         std::uint64_t match_extensions{};
+        std::uint64_t adjacent_cache_probes{};
+        std::uint64_t adjacent_cache_hits{};
     };
     inline binary_tree_trace_counters binary_tree_trace{};
 #endif
@@ -3059,11 +3061,17 @@ namespace sph::zstd::detail
                 auto const length = [&]() -> std::size_t {
                     if constexpr (TrackForward && CacheAdjacentInsertion)
                     {
+#ifdef SPH_ZSTDPP_TRACE_BT
+                        ++binary_tree_trace.adjacent_cache_probes;
+#endif
                         auto const cached{comparison_cache_.rows[(current - 1U) & 1U]
                             [(match_index - 1U) & 63U]};
                         if (cached.current == current - 1U &&
                             cached.match == match_index - 1U && cached.length != 0U)
                         {
+#ifdef SPH_ZSTDPP_TRACE_BT
+                            ++binary_tree_trace.adjacent_cache_hits;
+#endif
                             // Shifting both strings by one byte under the same
                             // end turns a positive exact LCP into exactly LCP-1.
                             return cached.length - 1U;

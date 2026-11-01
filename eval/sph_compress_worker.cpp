@@ -110,7 +110,9 @@ int main(int argc, char** argv)
 #ifdef SPH_ZSTDPP_TRACE_BT
         std::cerr << "binary-tree visits unsorted=" << sph::zstd::detail::binary_tree_trace.unsorted_visits
                   << " main=" << sph::zstd::detail::binary_tree_trace.main_visits
-                  << " extensions=" << sph::zstd::detail::binary_tree_trace.match_extensions << '\n';
+                  << " extensions=" << sph::zstd::detail::binary_tree_trace.match_extensions
+                  << " adjacent-cache-probes=" << sph::zstd::detail::binary_tree_trace.adjacent_cache_probes
+                  << " adjacent-cache-hits=" << sph::zstd::detail::binary_tree_trace.adjacent_cache_hits << '\n';
 #endif
 #ifdef SPH_ZSTDPP_TRACE_PHASES
         std::cerr << "compression phases parse_ns=" << sph::zstd::compression_trace.parse_ns
