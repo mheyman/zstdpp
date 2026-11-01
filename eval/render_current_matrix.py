@@ -64,7 +64,7 @@ def detailed_table(data, operation, kinds=KINDS):
     return "\n".join(lines)
 
 
-def confirmed_pair(path):
+def confirmed_pair(path, code_sizes):
     report = path.read_text(encoding="utf-8")
     rows = [line for line in report.splitlines()
             if line.startswith("| ") and line[2:3].isdigit()]
@@ -73,6 +73,9 @@ def confirmed_pair(path):
     values = [float(value.strip()) for value in rows[0].strip("|").split("|")]
     if len(values) != 9:
         raise ValueError(f"expected nine benchmark metrics: {path}")
+    if any(abs(values[index] - code_sizes[position]) > 0.01
+           for position, index in enumerate((6, 7))):
+        raise ValueError(f"confirmed worker code sizes differ from the matrix: {path}")
     with (path.parent / "trials.csv").open(newline="") as stream:
         trials = list(csv.DictReader(stream))
     if len(trials) < 2 or any(row["exact_bytes"] != "true" for row in trials):
@@ -92,7 +95,7 @@ def confirmed_pair(path):
             iterations * 1e9 / median_uint("reference_elapsed_ns"),
             median_uint("cpp_peak_bytes") / 1048576,
             median_uint("reference_peak_bytes") / 1048576,
-            values[6], values[7])
+            *code_sizes)
 
 
 def confirmed_decoder_pairs(directory, level, code_sizes):
@@ -140,9 +143,11 @@ def main():
     if set(data) != expected:
         raise ValueError(f"incomplete matrix: missing {expected - set(data)}; extra {set(data) - expected}")
     if args.confirmed_l13:
-        data["mixed", 13, "compress"] = confirmed_pair(args.confirmed_l13)
+        key = "mixed", 13, "compress"
+        data[key] = confirmed_pair(args.confirmed_l13, data[key][4:])
     if args.confirmed_l16:
-        data["mixed", 16, "compress"] = confirmed_pair(args.confirmed_l16)
+        key = "mixed", 16, "compress"
+        data[key] = confirmed_pair(args.confirmed_l16, data[key][4:])
     if args.confirmed_structured_decode:
         for level in range(16, 23):
             key = "structured", level, "decompress"
@@ -160,7 +165,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size** as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. These short runs are a screening comparison; the [full benchmark matrix](BENCHMARKS_INPUTS.md) gives absolute C++ and reference values in MiB/s, MiB, and KiB, along with methodology and input definitions.
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size** as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. These short runs are a screening comparison. Expand the tables below for all nine absolute comparison metrics; the [full benchmark matrix](BENCHMARKS_INPUTS.md) also provides methodology and input definitions.
 
 ### Compression (% of reference)
 
@@ -170,7 +175,22 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
 
 """ + ("Structured levels 16–22 use six alternating 10,000-frame exact-output trials; "
        "the other cells use the screening trials described above.\n\n"
-       if args.confirmed_structured_decode else "") + grid(data, "decompress") + "\n\n"
+       if args.confirmed_structured_decode else "") + grid(data, "decompress") + """
+
+<details>
+<summary>Absolute C++ and reference measurements for every level and input</summary>
+
+#### Compression
+
+""" + detailed_table(data, "compress") + """
+
+#### Decompression
+
+""" + detailed_table(data, "decompress") + """
+
+</details>
+
+"""
     readme = args.readme.read_text(encoding="utf-8")
     start = readme.index("## Performance\n")
     end = readme.index("## More information\n", start)
@@ -180,9 +200,15 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
     structured_note = (" Structured decompression levels 16–22 below use six alternating "
                        "10,000-frame exact-output trials."
                        if args.confirmed_structured_decode else "")
+    confirmed_levels = [str(level) for level, present in ((13, args.confirmed_l13),
+                        (16, args.confirmed_l16)) if present]
+    confirmed_note = (" The mixed-input level " + " and ".join(confirmed_levels) +
+                      " compression rows use longer confirmed measurements; the "
+                      "[short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report."
+                      if confirmed_levels else "")
     details = f"""# Current benchmark matrix: all input shapes
 
-Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and level 16 compression rows use longer confirmed measurements, as in the README; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report.{structured_note}
+Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results.{confirmed_note}{structured_note}
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 
