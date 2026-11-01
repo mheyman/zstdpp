@@ -77,11 +77,27 @@ int main(int argc, char** argv)
             {
                 output.insert(output.end(), bytes.begin(), bytes.end());
             });
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+        std::uint64_t reset_ns{};
+        std::uint64_t frame_ns{};
+#endif
         auto const compress = [&]
         {
             output.clear();
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            auto const reset_start{sph::zstd::eval::clock::now()};
+#endif
             compressor.reset();
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            reset_ns += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                sph::zstd::eval::clock::now() - reset_start).count());
+            auto const frame_start{sph::zstd::eval::clock::now()};
+#endif
             compressor.compress_frame(input);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+            frame_ns += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                sph::zstd::eval::clock::now() - frame_start).count());
+#endif
         };
         compress(); // Warm caches and allocate reusable workspace before timing.
         auto const allocations_after_warmup{sph::zstd::detail::cache_aligned_allocation_count};
@@ -116,8 +132,18 @@ int main(int argc, char** argv)
 #endif
 #ifdef SPH_ZSTDPP_TRACE_PHASES
         std::cerr << "compression phases parse_ns=" << sph::zstd::compression_trace.parse_ns
+                  << " reset_ns=" << reset_ns
+                  << " frame_ns=" << frame_ns
+                  << " select_ns=" << sph::zstd::compression_trace.select_ns
+                  << " select_count=" << sph::zstd::compression_trace.select_count
                   << " partition_ns=" << sph::zstd::compression_trace.partition_ns
                   << " partition_encode_ns=" << sph::zstd::compression_trace.partition_encode_ns
+                  << " partition_backup_ns=" << sph::zstd::compression_trace.partition_backup_ns
+                  << " partition_reconcile_ns=" << sph::zstd::compression_trace.partition_reconcile_ns
+                  << " partition_entropy_ns=" << sph::zstd::compression_trace.partition_entropy_ns
+                  << " partition_emit_ns=" << sph::zstd::compression_trace.partition_emit_ns
+                  << " partition_count=" << sph::zstd::compression_trace.partition_count
+                  << " partition_raw_count=" << sph::zstd::compression_trace.partition_raw_count
                   << " encode_ns=" << sph::zstd::compression_trace.encode_ns
                   << " emit_ns=" << sph::zstd::compression_trace.emit_ns << '\n';
         auto const& entropy{sph::zstd::detail::entropy_trace};

@@ -24,6 +24,14 @@ namespace sph::zstd
         std::uint64_t parse_ns{};
         std::uint64_t partition_ns{};
         std::uint64_t partition_encode_ns{};
+        std::uint64_t partition_backup_ns{};
+        std::uint64_t partition_reconcile_ns{};
+        std::uint64_t partition_entropy_ns{};
+        std::uint64_t partition_emit_ns{};
+        std::uint64_t partition_count{};
+        std::uint64_t partition_raw_count{};
+        std::uint64_t select_ns{};
+        std::uint64_t select_count{};
         std::uint64_t encode_ns{};
         std::uint64_t emit_ns{};
     };
@@ -232,7 +240,16 @@ namespace sph::zstd
             {
                 auto const available{input.size() - block_begin};
                 auto const candidate_size{std::min<std::size_t>(Parameters.block_size, available)};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                auto const select_start{std::chrono::steady_clock::now()};
+                ++compression_trace.select_count;
+#endif
                 auto const block_size{select_block_size(input.subspan(block_begin, candidate_size))};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                compression_trace.select_ns += static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - select_start).count());
+#endif
                 auto const last{block_begin + block_size == input.size()};
                 emit_block(input, block_begin, block_size, last);
                 block_begin += block_size;
@@ -832,6 +849,10 @@ namespace sph::zstd
                 auto const part{full.subblock(begin, end)};
                 auto const bytes{input.subspan(part.input_begin,
                     part.trailing_literal_position + part.trailing_literal_length - part.input_begin)};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                auto const backup_start{std::chrono::steady_clock::now()};
+                ++compression_trace.partition_count;
+#endif
                 auto const saved_repeats{decoder_repeats};
                 auto const saved_sequences{workspace.sequence_histories};
                 auto const saved_lengths{workspace.huffman_repeat_lengths};
@@ -840,14 +861,31 @@ namespace sph::zstd
                 auto const saved_maximum{workspace.huffman_repeat_maximum_symbol};
                 auto const saved_size{workspace.huffman_repeat_literal_size};
                 auto const saved_valid{workspace.huffman_repeat_valid};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                compression_trace.partition_backup_ns += static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - backup_start).count());
+                auto const reconcile_start{std::chrono::steady_clock::now()};
+#endif
                 detail::reconcile_partition_repeats(
                     std::span<detail::parsed_sequence>{parsed_.sequences}.subspan(begin, end - begin),
                     encoder_repeats, decoder_repeats);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                compression_trace.partition_reconcile_ns += static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - reconcile_start).count());
+                auto const entropy_start{std::chrono::steady_clock::now()};
+#endif
                 detail::encode_sequences_block<true, false, false,
                     (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra),
                     (effective_parameters_.strategy >= compression_strategy::binary_tree_ultra ?
                         static_cast<unsigned>(effective_parameters_.strategy) - 1U : 6U)>(
                     input, part, workspace, compressed_);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                compression_trace.partition_entropy_ns += static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - entropy_start).count());
+#endif
                 constexpr auto gain_log{effective_parameters_.strategy >= compression_strategy::binary_tree_ultra ?
                     static_cast<unsigned>(effective_parameters_.strategy) - 1U : 6U};
                 auto const minimum_gain{(bytes.size() >> gain_log) + 2U};
@@ -856,6 +894,9 @@ namespace sph::zstd
                 auto const rle{block_count_ != 0U && compressed_.size() < 25U && detail::is_rle(bytes)};
                 if (rle || compressed_.empty())
                 {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                    ++compression_trace.partition_raw_count;
+#endif
                     decoder_repeats = saved_repeats;
                     workspace.sequence_histories = saved_sequences;
                     workspace.huffman_repeat_lengths = saved_lengths;
@@ -873,10 +914,18 @@ namespace sph::zstd
                 std::array<std::uint8_t, 3> const encoded_header{
                     static_cast<std::uint8_t>(header), static_cast<std::uint8_t>(header >> 8U),
                     static_cast<std::uint8_t>(header >> 16U)};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                auto const emit_partition_start{std::chrono::steady_clock::now()};
+#endif
                 emit(encoded_header);
                 if (rle) emit(bytes.first<1>());
                 else if (type == 2U) emit(compressed_);
                 else emit(bytes);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                compression_trace.partition_emit_ns += static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                        std::chrono::steady_clock::now() - emit_partition_start).count());
+#endif
                 compression_savings_ += static_cast<std::int64_t>(bytes.size()) -
                     static_cast<std::int64_t>(rle ? 4U : stored_size + 3U);
                 ++block_count_;
@@ -963,10 +1012,21 @@ namespace sph::zstd
                         hash = static_cast<std::uint32_t>(sample) * 0x9E3779B9U >> (32U - HashLog);
                     }
 #else
-                    auto const hash{HashLog == 8U ? static_cast<std::uint32_t>(bytes[start + position]) :
-                        (static_cast<std::uint32_t>(bytes[start + position]) |
+                    std::uint32_t hash{};
+                    if constexpr (HashLog == 8U)
+                        hash = bytes[start + position];
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__x86_64__)
+                    else if constexpr (SamplingRate == 1U && HashLog == 10U)
+                    {
+                        std::uint16_t sample{};
+                        std::memcpy(&sample, bytes.data() + start + position, sizeof(sample));
+                        hash = static_cast<std::uint32_t>(sample) * 0x9E3779B9U >> (32U - HashLog);
+                    }
+#endif
+                    else
+                        hash = (static_cast<std::uint32_t>(bytes[start + position]) |
                             (static_cast<std::uint32_t>(bytes[start + position + 1U]) << 8U)) *
-                            0x9E3779B9U >> (32U - HashLog)};
+                            0x9E3779B9U >> (32U - HashLog);
 #endif
                     ++result.events[hash];
                 }
