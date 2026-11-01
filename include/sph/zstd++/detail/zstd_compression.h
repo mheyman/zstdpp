@@ -3064,10 +3064,28 @@ namespace sph::zstd::detail
 #ifdef SPH_ZSTDPP_TRACE_BT
                         ++binary_tree_trace.adjacent_cache_probes;
 #endif
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+                        auto const& cached{comparison_cache_.rows[(current - 1U) & 1U]
+                            [(match_index - 1U) & 63U]};
+#else
                         auto const cached{comparison_cache_.rows[(current - 1U) & 1U]
                             [(match_index - 1U) & 63U]};
-                        if (cached.current == current - 1U &&
-                            cached.match == match_index - 1U && cached.length != 0U)
+#endif
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+                        // Keep the 12-byte entry but compare its two identity
+                        // fields with one load. The length is read only on a hit.
+                        static_assert(std::endian::native == std::endian::little);
+                        static_assert(offsetof(adjacent_insertion_cache<true>::entry, match) == 4U);
+                        std::uint64_t cached_key{};
+                        std::memcpy(&cached_key, &cached, sizeof(cached_key));
+                        auto const expected_key{static_cast<std::uint64_t>(current - 1U) |
+                            (static_cast<std::uint64_t>(match_index - 1U) << 32U)};
+                        auto const cache_hit{cached_key == expected_key && cached.length != 0U};
+#else
+                        auto const cache_hit{cached.current == current - 1U &&
+                            cached.match == match_index - 1U && cached.length != 0U};
+#endif
+                        if (cache_hit)
                         {
 #ifdef SPH_ZSTDPP_TRACE_BT
                             ++binary_tree_trace.adjacent_cache_hits;

@@ -105,6 +105,8 @@ def main():
                         help="date on which the measurements were collected")
     parser.add_argument("--confirmed-l13", type=Path,
                         help="longer paired level-13 mixed-input SUMMARY.md to supersede the short screen")
+    parser.add_argument("--confirmed-l16", type=Path,
+                        help="longer paired level-16 mixed-input SUMMARY.md to supersede the short screen")
     args = parser.parse_args()
     data = load_eval(args.mixed, "mixed")
     for name in KINDS[:-1]:
@@ -115,11 +117,18 @@ def main():
         raise ValueError(f"incomplete matrix: missing {expected - set(data)}; extra {set(data) - expected}")
     if args.confirmed_l13:
         data["mixed", 13, "compress"] = confirmed_pair(args.confirmed_l13)
+    if args.confirmed_l16:
+        data["mixed", 16, "compress"] = confirmed_pair(args.confirmed_l16)
 
-    confirmation_note = ("The mixed-input level 13 compression cell uses a longer six-trial "
-                         "1,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-13-compression); "
-                         "the original short-screen row remains in the detailed evaluation.\n\n"
-                         if args.confirmed_l13 else "")
+    confirmation_note = ""
+    if args.confirmed_l13:
+        confirmation_note += ("The mixed-input level 13 compression cell uses a longer six-trial "
+                              "1,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-13-compression). ")
+    if args.confirmed_l16:
+        confirmation_note += ("The mixed-input level 16 compression cell uses a longer six-trial "
+                              "2,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-16-compression). ")
+    if confirmation_note:
+        confirmation_note += "The short-screen rows remain in the detailed evaluation.\n\n"
 
     performance = f"""## Performance
 
