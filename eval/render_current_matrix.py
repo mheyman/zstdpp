@@ -160,7 +160,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size** as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. These short runs are a screening comparison. Expand the tables below for absolute C++ and reference values in MiB/s, MiB, and KiB; methodology and input definitions are in the [full benchmark matrix](BENCHMARKS_INPUTS.md).
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size** as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. These short runs are a screening comparison; the [full benchmark matrix](BENCHMARKS_INPUTS.md) gives absolute C++ and reference values in MiB/s, MiB, and KiB, along with methodology and input definitions.
 
 ### Compression (% of reference)
 
@@ -170,22 +170,7 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
 
 """ + ("Structured levels 16–22 use six alternating 10,000-frame exact-output trials; "
        "the other cells use the screening trials described above.\n\n"
-       if args.confirmed_structured_decode else "") + grid(data, "decompress") + """
-
-<details>
-<summary>Absolute C++ and reference measurements for every level and input</summary>
-
-#### Compression
-
-""" + detailed_table(data, "compress", KINDS) + """
-
-#### Decompression
-
-""" + detailed_table(data, "decompress", KINDS) + """
-
-</details>
-
-"""
+       if args.confirmed_structured_decode else "") + grid(data, "decompress") + "\n\n"
     readme = args.readme.read_text(encoding="utf-8")
     start = readme.index("## Performance\n")
     end = readme.index("## More information\n", start)
