@@ -2,7 +2,7 @@
 
 A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zstd/), built around compile-time compression settings and callback-driven streaming. This repository also contains the reference zstd implementation used for byte-level compatibility checks and matched performance comparisons.
 
-The project is an active port, not a drop-in replacement for every zstd feature. Supported paths include streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and the fast, double-fast, greedy, lazy, and binary-tree parsing strategies. Dictionary and multithreaded modes are not implemented. The acceptance corpus produces byte-for-byte identical compressed output at levels 1, 3, 5, 7, 8, 9, and 15; broader level and input coverage is exercised by the paired evaluator.
+The project is an active port, not a drop-in replacement for every zstd feature. Supported paths include streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and the fast, double-fast, greedy, lazy, and binary-tree parsing strategies. Dictionary and multithreaded modes are not implemented. The current benchmark matrix confirms byte-for-byte identical compressed output at levels 1–22 on five deterministic inputs; the acceptance suite checks the public API and cross-decoding separately.
 
 ## Use it
 
@@ -24,6 +24,14 @@ auto compressor = sph::zstd::zstd_compress{
 std::vector<std::uint8_t> input{/* ... */};
 compressor.update(input);
 compressor.finish();
+
+std::vector<std::uint8_t> restored;
+auto decompressor = sph::zstd::zstd_decompress{
+    [&restored](std::span<std::uint8_t const> bytes) {
+        restored.insert(restored.end(), bytes.begin(), bytes.end());
+    }};
+decompressor.update(compressed);
+decompressor.finish();
 ```
 
 Compression parameters can be fixed at compile time. The helper preserves the callback's concrete type for inlining:
@@ -61,96 +69,70 @@ The tests compare resolved compression parameters and compressed bytes, and chec
 
 ## Performance
 
-[Benchmark tables](BENCHMARKS.md) report C++ and reference throughput, peak memory, and complete worker code size, including percentages, for compression and decompression. The selected tables below show the last complete 22-level mixed-input compression screen and recent production-decoder and alternate-input measurements. These were **not all captured from one build**; the complete all-level screen predates later retained changes. A current-checkout all-level/all-input matrix still needs to be run, and no missing level/input measurements are inferred. The older all-level decompression matrix in the detailed report used an evaluator-only trusted-input decoder and must not be read as production-decoder throughput.
+Measured 2026-11-01 from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size**, as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim.
 
-Higher throughput is better; lower memory and code size are better. Every percentage is C++ / Reference × 100.
+### Compression (% of reference)
 
-### Mixed-input compression, levels 1–22
+| Level | Zero | Repeated | Structured | Random | Mixed |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 461.3% / 86.5% / 20.9% | 160.6% / 86.3% / 20.9% | 98.6% / 85.1% / 20.9% | 128.5% / 102.6% / 20.9% | 112.3% / 89.7% / 20.9% |
+| 2 | 461.6% / 86.5% / 20.3% | 253.9% / 85.5% / 20.3% | 97.2% / 88.3% / 20.3% | 135.9% / 102.6% / 20.3% | 111.5% / 89.9% / 20.3% |
+| 3 | 251.0% / 90.3% / 20.3% | 163.2% / 90.5% / 20.3% | 97.9% / 90.1% / 20.3% | 122.6% / 103.7% / 20.3% | 103.8% / 92.2% / 20.3% |
+| 4 | 240.7% / 95.1% / 20.3% | 167.2% / 94.9% / 20.3% | 93.9% / 94.7% / 20.3% | 131.0% / 107.4% / 20.3% | 110.3% / 97.5% / 20.3% |
+| 5 | 190.6% / 89.5% / 20.3% | 163.0% / 88.1% / 20.3% | 94.4% / 88.4% / 20.3% | 124.6% / 99.5% / 20.3% | 112.2% / 92.0% / 20.3% |
+| 6 | 367.1% / 89.2% / 19.6% | 184.9% / 89.8% / 19.6% | 134.3% / 89.8% / 19.6% | 112.7% / 100.7% / 19.6% | 144.3% / 90.1% / 19.6% |
+| 7 | 368.0% / 92.0% / 19.6% | 180.8% / 91.7% / 19.6% | 133.7% / 91.7% / 19.6% | 121.5% / 99.1% / 19.6% | 101.6% / 93.3% / 19.6% |
+| 8 | 317.8% / 91.9% / 19.6% | 166.3% / 91.1% / 19.6% | 131.8% / 91.6% / 19.6% | 115.6% / 99.3% / 19.6% | 117.0% / 93.0% / 19.6% |
+| 9 | 310.4% / 93.7% / 19.6% | 169.6% / 93.9% / 19.6% | 123.3% / 94.5% / 19.6% | 116.9% / 99.8% / 19.6% | 110.7% / 95.1% / 19.6% |
+| 10 | 341.5% / 94.5% / 19.6% | 166.0% / 94.1% / 19.6% | 124.4% / 94.4% / 19.6% | 98.5% / 99.6% / 19.6% | 138.9% / 94.4% / 19.6% |
+| 11 | 322.2% / 94.5% / 19.6% | 162.7% / 94.4% / 19.6% | 122.7% / 94.3% / 19.6% | 143.8% / 99.8% / 19.6% | 131.4% / 94.7% / 19.6% |
+| 12 | 324.0% / 94.5% / 19.6% | 159.6% / 94.0% / 19.6% | 113.4% / 94.6% / 19.6% | 109.7% / 100.1% / 19.6% | 118.4% / 94.9% / 19.6% |
+| 13 | 612.3% / 95.5% / 20.2% | 147.0% / 95.8% / 20.2% | 121.7% / 95.8% / 20.2% | 133.4% / 99.8% / 20.2% | 77.2% / 96.5% / 20.2% |
+| 14 | 510.7% / 95.7% / 19.6% | 158.2% / 95.8% / 19.6% | 132.1% / 96.2% / 19.6% | 124.2% / 99.4% / 19.6% | 102.6% / 96.4% / 19.6% |
+| 15 | 524.9% / 95.7% / 19.6% | 156.3% / 95.6% / 19.6% | 124.3% / 95.1% / 19.6% | 84.3% / 100.6% / 19.6% | 144.1% / 96.4% / 19.6% |
+| 16 | 378.1% / 97.7% / 22.4% | 91.3% / 97.5% / 22.4% | 84.4% / 97.3% / 22.4% | 110.6% / 102.4% / 22.4% | 112.0% / 98.1% / 22.4% |
+| 17 | 417.7% / 97.8% / 22.4% | 96.1% / 97.3% / 22.4% | 84.9% / 97.4% / 22.4% | 112.3% / 102.0% / 22.4% | 98.5% / 99.5% / 22.4% |
+| 18 | 442.0% / 97.7% / 22.5% | 92.5% / 97.7% / 22.5% | 109.5% / 97.3% / 22.5% | 137.4% / 101.4% / 22.5% | 130.9% / 99.5% / 22.5% |
+| 19 | 371.6% / 97.5% / 22.5% | 90.6% / 97.6% / 22.5% | 108.4% / 97.4% / 22.5% | 134.2% / 102.3% / 22.5% | 149.4% / 99.3% / 22.5% |
+| 20 | 363.6% / 97.6% / 22.5% | 88.1% / 97.1% / 22.5% | 110.2% / 97.7% / 22.5% | 128.7% / 101.6% / 22.5% | 148.7% / 99.4% / 22.5% |
+| 21 | 385.6% / 97.3% / 22.5% | 91.2% / 97.3% / 22.5% | 95.8% / 97.6% / 22.5% | 131.7% / 102.1% / 22.5% | 148.6% / 99.6% / 22.5% |
+| 22 | 378.2% / 97.6% / 22.5% | 90.2% / 97.3% / 22.5% | 139.4% / 97.0% / 22.5% | 118.5% / 102.1% / 22.5% | 139.4% / 100.1% / 22.5% |
 
-Last complete GCC 13 Release `-O3` screen, 1-MiB deterministic mixed input, 2026-10-24; six alternating trials per level, with exact compressed bytes and reciprocal decoding. See [methodology and newer focused results](BENCHMARKS.md).
+### Decompression (% of reference)
 
-| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 / mixed, 1 MiB | 2272.44 | 2129.66 | 106.70 | 5.52 | 6.12 | 90.11 | 131.23 | 628.16 | 20.89 |
-| 2 / mixed, 1 MiB | 2842.75 | 2514.11 | 113.07 | 5.63 | 6.24 | 90.29 | 127.15 | 628.16 | 20.24 |
-| 3 / mixed, 1 MiB | 1865.05 | 1732.12 | 107.67 | 6.23 | 6.75 | 92.25 | 127.34 | 628.16 | 20.27 |
-| 4 / mixed, 1 MiB | 1936.43 | 1651.40 | 117.26 | 7.76 | 8.03 | 96.69 | 127.34 | 628.16 | 20.27 |
-| 5 / mixed, 1 MiB | 2281.13 | 2134.45 | 106.87 | 7.85 | 8.51 | 92.22 | 127.41 | 628.16 | 20.28 |
-| 6 / mixed, 1 MiB | 2526.90 | 1908.92 | 132.37 | 7.76 | 8.49 | 91.33 | 122.82 | 628.16 | 19.55 |
-| 7 / mixed, 1 MiB | 1981.91 | 1527.08 | 129.78 | 10.26 | 11.02 | 93.12 | 122.82 | 628.16 | 19.55 |
-| 8 / mixed, 1 MiB | 1536.34 | 1200.21 | 128.00 | 10.22 | 11.01 | 92.88 | 122.82 | 628.16 | 19.55 |
-| 9 / mixed, 1 MiB | 1162.91 | 974.56 | 119.33 | 15.26 | 16.00 | 95.36 | 122.82 | 628.16 | 19.55 |
-| 10 / mixed, 1 MiB | 1155.97 | 982.07 | 117.71 | 15.24 | 16.00 | 95.22 | 122.83 | 628.16 | 19.55 |
-| 11 / mixed, 1 MiB | 1080.65 | 890.42 | 121.36 | 15.25 | 16.04 | 95.08 | 122.83 | 628.16 | 19.55 |
-| 12 / mixed, 1 MiB | 1088.96 | 931.19 | 116.94 | 15.24 | 16.02 | 95.10 | 122.83 | 628.16 | 19.55 |
-| 13 / mixed, 1 MiB | 516.60 | 421.38 | 122.60 | 21.20 | 22.00 | 96.33 | 126.85 | 628.16 | 20.19 |
-| 14 / mixed, 1 MiB | 491.91 | 428.03 | 114.92 | 21.20 | 21.99 | 96.39 | 122.85 | 628.16 | 19.56 |
-| 15 / mixed, 1 MiB | 497.41 | 420.91 | 118.17 | 21.20 | 22.00 | 96.36 | 122.85 | 628.16 | 19.56 |
-| 16 / mixed, 1 MiB | 100.21 | 94.89 | 105.60 | 21.47 | 21.87 | 98.18 | 140.66 | 628.16 | 22.39 |
-| 17 / mixed, 1 MiB | 103.08 | 92.97 | 110.88 | 21.84 | 21.87 | 99.84 | 140.66 | 628.16 | 22.39 |
-| 18 / mixed, 1 MiB | 74.23 | 58.49 | 126.91 | 22.34 | 22.38 | 99.81 | 141.02 | 628.16 | 22.45 |
-| 19 / mixed, 1 MiB | 74.10 | 60.30 | 122.89 | 22.33 | 22.37 | 99.83 | 141.02 | 628.16 | 22.45 |
-| 20 / mixed, 1 MiB | 75.07 | 58.77 | 127.74 | 22.31 | 22.38 | 99.69 | 141.02 | 628.16 | 22.45 |
-| 21 / mixed, 1 MiB | 73.30 | 58.72 | 124.84 | 22.34 | 22.38 | 99.83 | 141.02 | 628.16 | 22.45 |
-| 22 / mixed, 1 MiB | 76.03 | 59.34 | 128.12 | 22.34 | 22.37 | 99.86 | 141.02 | 628.16 | 22.45 |
+| Level | Zero | Repeated | Structured | Random | Mixed |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 133.4% / 101.2% / 60.8% | 480.0% / 98.8% / 60.8% | 110.0% / 99.1% / 60.8% | 105.7% / 99.6% / 60.8% | 120.0% / 99.8% / 60.8% |
+| 2 | 131.9% / 101.0% / 60.8% | 500.4% / 101.3% / 60.8% | 112.6% / 98.0% / 60.8% | 110.6% / 100.8% / 60.8% | 129.5% / 97.2% / 60.8% |
+| 3 | 131.9% / 102.9% / 60.8% | 546.3% / 99.7% / 60.8% | 109.1% / 99.5% / 60.8% | 97.4% / 101.3% / 60.8% | 131.7% / 98.3% / 60.8% |
+| 4 | 136.5% / 101.3% / 60.8% | 479.5% / 99.9% / 60.8% | 108.5% / 97.9% / 60.8% | 110.2% / 101.6% / 60.8% | 127.4% / 97.8% / 60.8% |
+| 5 | 125.1% / 101.3% / 60.8% | 484.5% / 98.4% / 60.8% | 114.0% / 98.4% / 60.8% | 100.1% / 100.9% / 60.8% | 129.1% / 98.1% / 60.8% |
+| 6 | 127.6% / 103.1% / 60.8% | 518.4% / 96.3% / 60.8% | 107.9% / 98.8% / 60.8% | 92.2% / 100.4% / 60.8% | 170.6% / 97.3% / 60.8% |
+| 7 | 122.3% / 101.7% / 60.8% | 511.2% / 99.8% / 60.8% | 109.4% / 100.8% / 60.8% | 96.1% / 100.9% / 60.8% | 165.6% / 97.8% / 60.8% |
+| 8 | 124.0% / 102.7% / 60.8% | 474.8% / 100.5% / 60.8% | 110.5% / 98.1% / 60.8% | 97.7% / 99.9% / 60.8% | 170.2% / 99.9% / 60.8% |
+| 9 | 139.8% / 102.2% / 60.8% | 501.8% / 97.4% / 60.8% | 107.3% / 97.8% / 60.8% | 96.2% / 101.1% / 60.8% | 168.0% / 100.5% / 60.8% |
+| 10 | 151.6% / 101.2% / 60.8% | 523.5% / 101.2% / 60.8% | 116.6% / 98.0% / 60.8% | 98.1% / 100.7% / 60.8% | 161.9% / 98.1% / 60.8% |
+| 11 | 136.9% / 103.2% / 60.8% | 513.4% / 100.1% / 60.8% | 100.2% / 99.5% / 60.8% | 97.3% / 101.3% / 60.8% | 169.2% / 99.9% / 60.8% |
+| 12 | 128.1% / 101.3% / 60.8% | 508.6% / 98.0% / 60.8% | 112.6% / 98.6% / 60.8% | 99.7% / 100.9% / 60.8% | 167.6% / 98.4% / 60.8% |
+| 13 | 139.7% / 99.7% / 60.8% | 483.1% / 98.9% / 60.8% | 120.6% / 97.5% / 60.8% | 101.5% / 100.1% / 60.8% | 160.5% / 98.4% / 60.8% |
+| 14 | 103.6% / 101.4% / 60.8% | 518.4% / 98.4% / 60.8% | 106.4% / 97.7% / 60.8% | 102.4% / 101.6% / 60.8% | 168.1% / 98.0% / 60.8% |
+| 15 | 123.3% / 103.2% / 60.8% | 537.5% / 98.4% / 60.8% | 105.2% / 99.4% / 60.8% | 103.9% / 101.4% / 60.8% | 163.5% / 97.6% / 60.8% |
+| 16 | 120.1% / 102.8% / 60.8% | 285.7% / 98.8% / 60.8% | 92.2% / 99.0% / 60.8% | 103.7% / 101.4% / 60.8% | 127.4% / 100.7% / 60.8% |
+| 17 | 134.2% / 101.4% / 60.8% | 264.2% / 98.5% / 60.8% | 96.8% / 100.6% / 60.8% | 97.4% / 102.1% / 60.8% | 127.9% / 98.7% / 60.8% |
+| 18 | 146.2% / 101.0% / 60.8% | 442.5% / 98.8% / 60.8% | 78.8% / 98.8% / 60.8% | 97.4% / 99.7% / 60.8% | 110.3% / 98.4% / 60.8% |
+| 19 | 127.1% / 99.9% / 60.8% | 465.1% / 100.6% / 60.8% | 81.4% / 99.2% / 60.8% | 110.2% / 101.2% / 60.8% | 111.7% / 98.3% / 60.8% |
+| 20 | 129.4% / 101.0% / 60.8% | 446.1% / 98.0% / 60.8% | 85.0% / 100.7% / 60.8% | 97.4% / 101.1% / 60.8% | 110.4% / 98.2% / 60.8% |
+| 21 | 139.1% / 101.4% / 60.8% | 411.2% / 100.7% / 60.8% | 79.8% / 100.7% / 60.8% | 102.9% / 100.4% / 60.8% | 114.9% / 97.8% / 60.8% |
+| 22 | 120.2% / 99.9% / 60.8% | 444.7% / 98.7% / 60.8% | 81.0% / 97.4% / 60.8% | 97.7% / 100.4% / 60.8% | 112.0% / 97.3% / 60.8% |
 
-### Other input shapes, optimized compression
+[Full measurements and method](BENCHMARKS.md#current-evaluation) include the C++ and reference values for mixed input. [Other input measurements](BENCHMARKS_INPUTS.md) contain the full values for zero, repeated, structured, and random data. [Experiment history](PERFORMANCE_HISTORY.md) and the [performance work list](PERFORMANCE_PLAN.md) track progress separately.
 
-Latest available focused paired reports, collected 2026-10-25 on the indicated compiler. They cover measured levels only.
-
-MSVC Release, six alternating trials per 1-MiB input at levels 1, 8, 9, and 15:
-
-| Input / level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1-MiB varied text / 1 | 3219.31 | 3401.78 | 94.64% | 5.76 | 6.38 | 90.18% | 119.00 | 382.00 | 31.15% |
-| 1-MiB structured text / 1 | 827.08 | 1091.71 | 75.76% | 5.91 | 6.57 | 89.90% | 119.00 | 382.00 | 31.15% |
-| 1-MiB mixed input / 1 | 1937.37 | 2263.21 | 85.60% | 6.06 | 6.58 | 92.02% | 119.00 | 382.00 | 31.15% |
-| 1-MiB mixed input / 8 | 1445.87 | 1362.37 | 106.13% | 11.02 | 11.45 | 96.31% | 115.00 | 382.00 | 30.10% |
-| 1-MiB mixed input / 9 | 1272.34 | 1199.60 | 106.06% | 16.00 | 16.48 | 97.05% | 115.00 | 382.00 | 30.10% |
-| 1-MiB varied text / 8 | 157.36 | 167.12 | 94.15% | 10.69 | 11.31 | 94.49% | 115.00 | 382.00 | 30.10% |
-| 1-MiB varied text / 9 | 150.39 | 159.27 | 94.42% | 15.69 | 16.31 | 96.18% | 115.00 | 382.00 | 30.10% |
-| 1-MiB repeated text / 15 | 1223.52 | 1227.72 | 99.66% | 21.66 | 22.28 | 97.23% | 116.00 | 382.00 | 30.37% |
-| 1-MiB structured text / 15 | 833.92 | 730.85 | 114.10% | 21.67 | 22.34 | 97.03% | 116.00 | 382.00 | 30.37% |
-| 1-MiB mixed input / 15 | 672.41 | 535.68 | 125.52% | 21.98 | 22.46 | 97.88% | 116.00 | 382.00 | 30.37% |
-
-GCC 13 Release `-O3`, six alternating trials after the double-fast splitter-layout change; levels 2 (256 KiB), 3 and 4 (1 MiB):
-
-| Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 2 / varied, 256 KiB | 3123.22 | 3520.78 | 88.71 | 4.32 | 4.51 | 95.63 | 132.03 | 628.16 | 21.02 |
-| 2 / balanced, 256 KiB | 2060.08 | 2112.22 | 97.53 | 4.58 | 4.45 | 102.99 | 132.03 | 628.16 | 21.02 |
-| 2 / mixed, 256 KiB | 26805.51 | 9840.88 | 272.39 | 4.33 | 4.52 | 95.76 | 132.03 | 628.16 | 21.02 |
-| 3 / varied, 1 MiB | 2630.16 | 2567.10 | 102.46 | 5.99 | 6.62 | 90.56 | 127.34 | 628.16 | 20.27 |
-| 3 / mixed, 1 MiB | 1950.79 | 1745.24 | 111.78 | 6.26 | 6.71 | 93.33 | 127.34 | 628.16 | 20.27 |
-| 4 / varied, 1 MiB | 2713.39 | 2548.81 | 106.46 | 7.51 | 7.85 | 95.69 | 127.34 | 628.16 | 20.27 |
-| 4 / mixed, 1 MiB | 1926.41 | 1730.69 | 111.31 | 7.76 | 7.97 | 97.38 | 127.34 | 628.16 | 20.27 |
-
-### Production decompression, varied and mixed input
-
-MSVC Release `/O2 /Ob3 /Z7`, 1-MiB reference-produced frames, six alternating 10,000-frame trials per row on 2026-11-01 after direct FSE-to-sequence-table construction. Both workers decoded identical bytes. See [additional GCC decoder measurements](BENCHMARKS.md#gcc-13-decompression-levels-3-and-16-1-mib).
-
-| Input / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Varied text / decode L3 | 9487.90 | 8136.11 | 116.61% | 6.28 | 6.28 | 100.03% | 234.00 | 311.00 | 75.24% |
-| Varied text / decode L12 | 9366.33 | 8226.54 | 113.86% | 6.28 | 6.28 | 100.03% | 234.00 | 311.00 | 75.24% |
-| Varied text / decode L16 | 3522.01 | 4661.63 | 75.55% | 6.28 | 6.29 | 99.88% | 234.00 | 311.00 | 75.24% |
-| Mixed / decode L3 | 7522.65 | 5530.51 | 136.02% | 6.54 | 6.51 | 100.57% | 234.00 | 311.00 | 75.24% |
-| Mixed / decode L12 | 23314.97 | 14813.74 | 157.39% | 6.53 | 6.49 | 100.51% | 234.00 | 311.00 | 75.24% |
-| Mixed / decode L16 | 17376.16 | 14216.77 | 122.22% | 6.53 | 6.49 | 100.57% | 234.00 | 311.00 | 75.24% |
-
-For a fresh, byte-checked comparison at one level and input, build the optimized paired evaluator:
-
-```powershell
-cmake --preset msvc-release-eval
-cmake --build --preset msvc-pair
-.\out\build\msvc-release-eval\eval\bin\zstdpp_pair.exe --level 3 --iterations 1000 --trials 6
-```
-
-Pass `--input path\to\file` to use your own data. Its size must equal the configured `SPH_ZSTDPP_EVAL_CORPUS_SIZE` (1 MiB by default); configure a separate Release build for other sizes. The tool requires its four worker executables beside it, compares compressed bytes after every trial, checks both decoders against both frame encodings, and writes a fresh `SUMMARY.md` and raw trial files. The `gcc-pair` and `gcc-native-pair` presets provide equivalent Linux comparisons. See [benchmark methodology](BENCHMARKS.md#how-to-reproduce) for the full matrix and caveats.
+To benchmark your own 1 MiB input, build the optimized `msvc-pair` or `gcc-pair` target and run `zstdpp_pair --level 3 --input path/to/file --iterations 1000 --trials 6`. The pair tool checks exact compressed bytes and both decoders.
 
 ## Project notes
 
 - [Benchmark tables and methodology](BENCHMARKS.md)
+- [Other input benchmark matrix](BENCHMARKS_INPUTS.md)
 - [Performance task list](PERFORMANCE_PLAN.md)
 - [Experiment history and prior reports](PERFORMANCE_HISTORY.md)
 - [Bundled reference implementation](reference_zstd/README.md)

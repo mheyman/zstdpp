@@ -14,6 +14,7 @@
 #include <iostream>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -64,6 +65,7 @@ namespace
     {
         std::uint64_t iterations{20};
         std::uint64_t trials{6};
+        std::optional<std::filesystem::path> input;
         std::filesystem::path output_directory{std::filesystem::path{SPH_EVAL_BINARY_DIR} / "eval" / "results"};
         std::filesystem::path report{std::filesystem::path{SPH_EVAL_SOURCE_DIR} / "BENCHMARKS.md"};
     };
@@ -89,13 +91,17 @@ namespace
             {
                 result.output_directory = argv[++index];
             }
+            else if (argument == "--input" && index + 1 < argc)
+            {
+                result.input = argv[++index];
+            }
             else if ((argument == "--report" || argument == "--readme") && index + 1 < argc)
             {
                 result.report = argv[++index];
             }
             else
             {
-                throw std::invalid_argument{"usage: zstdpp_eval [--iterations N] [--trials N] [--output DIR] [--report FILE]"};
+                throw std::invalid_argument{"usage: zstdpp_eval [--input FILE] [--iterations N] [--trials N] [--output DIR] [--report FILE]"};
             }
         }
         return result;
@@ -393,7 +399,10 @@ int main(int argc, char** argv)
             !std::filesystem::is_empty(configuration.output_directory))
             throw std::invalid_argument{"evaluation output directory must be empty to preserve raw trials"};
         std::filesystem::create_directories(configuration.output_directory);
-        auto const corpus{sph::zstd::eval::make_mixed_corpus(SPH_EVAL_CORPUS_SIZE)};
+        auto const corpus{configuration.input ? sph::zstd::eval::read_binary(*configuration.input) :
+            sph::zstd::eval::make_mixed_corpus(SPH_EVAL_CORPUS_SIZE)};
+        if (corpus.size() != SPH_EVAL_CORPUS_SIZE)
+            throw std::invalid_argument{"input size does not match configured evaluation corpus size"};
         auto const corpus_path{configuration.output_directory / "corpus.bin"};
         sph::zstd::eval::write_binary(corpus_path, corpus);
 
