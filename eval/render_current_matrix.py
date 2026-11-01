@@ -160,7 +160,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **speed / peak memory / executable size**, as C++ percentages of reference. Higher speed and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim. Expand the full measurements below for C++ and reference values in MiB/s, MiB, and KiB for every level and input; they are also maintained in the [benchmark matrix](BENCHMARKS_INPUTS.md).
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size** as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. These short runs are a screening comparison; the methodology and absolute C++/reference values in MiB/s, MiB, and KiB are in the [full benchmark matrix](BENCHMARKS_INPUTS.md).
 
 ### Compression (% of reference)
 
@@ -170,33 +170,11 @@ Measured {args.date} from the current optimized GCC 13 build against the bundled
 
 """ + ("Structured levels 16–22 use six alternating 10,000-frame exact-output trials; "
        "the other cells use the screening trials described above.\n\n"
-       if args.confirmed_structured_decode else "") + grid(data, "decompress") + """
-
-<details>
-<summary>Full measurements: speed, memory, and executable size</summary>
-
-#### Compression
-
-""" + detailed_table(data, "compress", KINDS) + """
-
-#### Decompression
-
-""" + detailed_table(data, "decompress", KINDS) + """
-
-</details>
-
-[Experiment history](PERFORMANCE_HISTORY.md) and the [performance work list](PERFORMANCE_PLAN.md) track progress separately.
-
-To benchmark your own 1 MiB input, build the optimized `msvc-pair` or `gcc-pair` target and run `zstdpp_pair --level 3 --input path/to/file --iterations 1000 --trials 6`. The pair tool checks exact compressed bytes and both decoders.
-
-"""
+       if args.confirmed_structured_decode else "") + grid(data, "decompress") + "\n\n"
     readme = args.readme.read_text(encoding="utf-8")
     start = readme.index("## Performance\n")
-    end = readme.index("## Project notes\n", start)
+    end = readme.index("## More information\n", start)
     updated = readme[:start] + performance + readme[end:]
-    if "- [Full current benchmark matrix](BENCHMARKS_INPUTS.md)" not in updated:
-        updated = updated.replace("- [Benchmark tables and methodology](BENCHMARKS.md)",
-                                  "- [Benchmark tables and methodology](BENCHMARKS.md)\n- [Full current benchmark matrix](BENCHMARKS_INPUTS.md)")
     args.readme.write_text(updated, encoding="utf-8", newline="\n")
 
     structured_note = (" Structured decompression levels 16–22 below use six alternating "
