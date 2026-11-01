@@ -148,8 +148,15 @@
                         long_tags[long_hash_zero] = short_tags[short_hash_zero] = input[position];
 #endif
 
+                    // On GCC 13, a zero offset compares the position with itself
+                    // safely; eager evaluation matches the reference branch pattern.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                    if ((repeat_one != 0U) & equal_four(input_data + position + 1U,
+                        input_data + position + 1U - repeat_one))
+#else
                     if (repeat_one != 0U && equal_four(input_data + position + 1U,
                         input_data + position + 1U - repeat_one))
+#endif
                     {
                         ++position;
                         match_position = position - repeat_one;
@@ -309,8 +316,14 @@
                     if constexpr (UseTags) short_tags[position_short_hash] = input[position - 1U];
 #endif
 
-                    while (position <= limit && repeat_two != 0U &&
+                    while (position <= limit &&
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                        ((repeat_two != 0U) &
+                            equal_four(input_data + position, input_data + position - repeat_two)))
+#else
+                        repeat_two != 0U &&
                         equal_four(input_data + position, input_data + position - repeat_two))
+#endif
                     {
                         auto const repeat_length{count_match(
                             input_data, position, position - repeat_two, block_end, 4U)};
