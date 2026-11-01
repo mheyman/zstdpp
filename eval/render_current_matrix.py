@@ -132,7 +132,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **speed / peak memory / executable size**, as C++ percentages of reference. Higher speed and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim. [Full measurements](BENCHMARKS_INPUTS.md) give C++ and reference values in MiB/s, MiB, and KiB for every level and input.
+Measured {args.date} from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **speed / peak memory / executable size**, as C++ percentages of reference. Higher speed and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim. Expand the full measurements below for C++ and reference values in MiB/s, MiB, and KiB for every level and input; they are also maintained in the [benchmark matrix](BENCHMARKS_INPUTS.md).
 
 ### Compression (% of reference)
 
@@ -141,6 +141,19 @@ Measured {args.date} from the current optimized GCC 13 build against the bundled
 ### Decompression (% of reference)
 
 """ + grid(data, "decompress") + """
+
+<details>
+<summary>Full measurements: speed, memory, and executable size</summary>
+
+#### Compression
+
+""" + detailed_table(data, "compress", KINDS) + """
+
+#### Decompression
+
+""" + detailed_table(data, "decompress", KINDS) + """
+
+</details>
 
 [Experiment history](PERFORMANCE_HISTORY.md) and the [performance work list](PERFORMANCE_PLAN.md) track progress separately.
 
