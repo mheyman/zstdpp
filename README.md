@@ -69,7 +69,7 @@ The tests compare resolved compression parameters and compressed bytes, and chec
 
 ## Performance
 
-Measured 2026-11-01 from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each overview cell shows **throughput / peak memory / executable size**, as C++ percentages of reference; the expanded tables below show the C++ and reference values and all nine comparison metrics. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim.
+Measured 2026-11-01 from the current optimized GCC 13 build against the bundled reference on five deterministic 1 MiB inputs at every level. Each overview cell shows **speed / peak memory / executable size**, as C++ percentages of reference. Higher speed and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. The mixed-input rows used three alternating trials of 200 iterations; other inputs used two alternating trials of 100 iterations. Short runs, especially for zero-filled data, are a screening comparison rather than a precise speedup claim. Expand the full measurements for C++ and reference values in MiB/s, MiB, and KiB, with percentage comparisons for every level and input.
 
 ### Compression (% of reference)
 
@@ -128,7 +128,7 @@ The mixed-input level 13 compression cell uses a longer six-trial 1,000-frame [c
 | 22 | 122.4% / 101.7% / 60.8% | 440.0% / 98.5% / 60.8% | 82.6% / 97.6% / 60.8% | 100.3% / 100.0% / 60.8% | 123.9% / 99.9% / 60.8% |
 
 <details>
-<summary>Full compression and decompression measurements (C++ and reference)</summary>
+<summary>Full measurements: speed, memory, and executable size</summary>
 
 #### Compression
 
@@ -362,7 +362,7 @@ The mixed-input level 13 compression cell uses a longer six-trial 1,000-frame [c
 
 </details>
 
-[Full measurements and method](BENCHMARKS.md#current-evaluation) include the C++ and reference values for mixed input. [Other input measurements](BENCHMARKS_INPUTS.md) contain the full values for zero, repeated, structured, and random data. [Experiment history](PERFORMANCE_HISTORY.md) and the [performance work list](PERFORMANCE_PLAN.md) track progress separately.
+[Experiment history](PERFORMANCE_HISTORY.md) and the [performance work list](PERFORMANCE_PLAN.md) track progress separately.
 
 To benchmark your own 1 MiB input, build the optimized `msvc-pair` or `gcc-pair` target and run `zstdpp_pair --level 3 --input path/to/file --iterations 1000 --trials 6`. The pair tool checks exact compressed bytes and both decoders.
 
