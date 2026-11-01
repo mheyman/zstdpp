@@ -135,6 +135,9 @@ def main():
     parser.add_argument("--confirmed-structured", action="append", nargs=2,
                         metavar=("LEVEL", "SUMMARY"), default=[],
                         help="longer paired structured compression result to supersede a short-screen row")
+    parser.add_argument("--confirmed-compression", action="append", nargs=3,
+                        metavar=("INPUT", "LEVEL", "SUMMARY"), default=[],
+                        help="longer paired compression result for one input and level")
     parser.add_argument("--confirmed-structured-decode", type=Path,
                         help="six longer paired structured decoder trials for levels 16–22")
     args = parser.parse_args()
@@ -152,6 +155,7 @@ def main():
         key = "mixed", 16, "compress"
         data[key] = confirmed_pair(args.confirmed_l16, data[key][4:])
     structured_levels = []
+    confirmed_keys = set()
     for level_text, path_text in args.confirmed_structured:
         level = int(level_text)
         if level not in range(1, 23) or level in structured_levels:
@@ -159,6 +163,16 @@ def main():
         key = "structured", level, "compress"
         data[key] = confirmed_pair(Path(path_text), data[key][4:])
         structured_levels.append(level)
+        confirmed_keys.add(key)
+    confirmed_compression_levels = set()
+    for kind, level_text, path_text in args.confirmed_compression:
+        level = int(level_text)
+        key = kind, level, "compress"
+        if kind not in KINDS or level not in range(1, 23) or key in confirmed_keys:
+            raise ValueError(f"invalid or repeated compression confirmation: {kind}, {level}")
+        data[key] = confirmed_pair(Path(path_text), data[key][4:])
+        confirmed_keys.add(key)
+        confirmed_compression_levels.add(level)
     if args.confirmed_structured_decode:
         for level in range(16, 23):
             key = "structured", level, "decompress"
@@ -178,6 +192,12 @@ def main():
                               ", ".join(map(str, sorted(structured_levels))) +
                               " use longer six-trial [confirmations]"
                               "(BENCHMARKS.md#confirmed-structured-input-compression).\n\n")
+    if confirmed_compression_levels:
+        confirmation_note += ("Compression levels " +
+                              ", ".join(map(str, sorted(confirmed_compression_levels))) +
+                              " use six-trial [current-candidate confirmations]"
+                              "(BENCHMARKS.md#confirmed-double-fast-guard-compression) "
+                              "for all five inputs.\n\n")
 
     performance = f"""## Performance
 
@@ -227,6 +247,11 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
                            ", ".join(map(str, sorted(structured_levels))) +
                            " use longer six-trial confirmations in "
                            "[BENCHMARKS.md](BENCHMARKS.md#confirmed-structured-input-compression).")
+    if confirmed_compression_levels:
+        confirmed_note += (" Compression levels " +
+                           ", ".join(map(str, sorted(confirmed_compression_levels))) +
+                           " use six-trial current-candidate confirmations on all five inputs in "
+                           "[BENCHMARKS.md](BENCHMARKS.md#confirmed-double-fast-guard-compression).")
     details = f"""# Current benchmark matrix: all input shapes
 
 Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results.{confirmed_note}{structured_note}
