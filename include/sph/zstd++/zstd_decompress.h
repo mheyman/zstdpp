@@ -1260,12 +1260,30 @@ namespace sph::zstd
 
                 if (sequence_index + 1U != sequence_count) [[likely]]
                 {
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+                    // These three FSE state fields are adjacent in the reverse
+                    // bitstream. Read once, then split in decode order.
+                    auto const literal_state_bits{literal_entry.state_bits};
+                    auto const match_state_bits{match_entry.state_bits};
+                    auto const offset_state_bits{offset_entry.state_bits};
+                    auto const state_bits{static_cast<unsigned>(literal_state_bits +
+                        match_state_bits + offset_state_bits)};
+                    auto const state_value{read_sequence_bits(state_bits)};
+                    literal_state = static_cast<std::size_t>(literal_entry.next_state) +
+                        (state_value >> (match_state_bits + offset_state_bits));
+                    match_state = static_cast<std::size_t>(match_entry.next_state) +
+                        ((state_value >> offset_state_bits) &
+                            ((std::uint32_t{1} << match_state_bits) - 1U));
+                    offset_state = static_cast<std::size_t>(offset_entry.next_state) +
+                        (state_value & ((std::uint32_t{1} << offset_state_bits) - 1U));
+#else
                     literal_state = static_cast<std::size_t>(literal_entry.next_state) +
                         (literal_entry.state_bits == 0U ? 0U : read_sequence_bits(literal_entry.state_bits));
                     match_state = static_cast<std::size_t>(match_entry.next_state) +
                         (match_entry.state_bits == 0U ? 0U : read_sequence_bits(match_entry.state_bits));
                     offset_state = static_cast<std::size_t>(offset_entry.next_state) +
                         (offset_entry.state_bits == 0U ? 0U : read_sequence_bits(offset_entry.state_bits));
+#endif
                 }
             }
             repeat_offsets_ = {repeat0, repeat1, repeat2};
