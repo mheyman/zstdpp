@@ -1036,6 +1036,45 @@ namespace
         }
     }
 
+#if defined(_MSC_VER)
+    void test_direct_sequence_table_matches_fse_builder()
+    {
+        using namespace sph::zstd::detail;
+        auto verify = []<std::size_t Count>(normalized_counts const& counts,
+            std::array<std::uint32_t, Count> const& bases,
+            std::array<std::uint8_t, Count> const& extra_bits)
+        {
+            fse_table generic;
+            build_fse_table(counts, generic);
+            sequence_table direct;
+            direct.entries.fill(sequence_entry{65535U, 255U, 255U, 0xffffffffU});
+            build_sequence_table(counts, bases, extra_bits, direct);
+            check(direct.valid && direct.size == generic.size && direct.table_log == generic.table_log,
+                "direct FSE sequence table preserves dimensions");
+            for (std::size_t index{}; index < direct.size; ++index)
+            {
+                auto const& actual{direct.entries[index]};
+                auto const& expected{generic.entries[index]};
+                check(actual.next_state == expected.next_state &&
+                        actual.state_bits == expected.number_bits &&
+                        actual.additional_bits == extra_bits[expected.symbol] &&
+                        actual.base_value == bases[expected.symbol],
+                    "direct FSE sequence table matches the generic builder");
+            }
+            check(direct.entries[direct.size].next_state == 65535U &&
+                    direct.entries[direct.size].additional_bits == 255U &&
+                    direct.entries[direct.size].state_bits == 255U &&
+                    direct.entries[direct.size].base_value == 0xffffffffU,
+                "direct FSE sequence table leaves inactive storage untouched");
+        };
+        verify(make_normalized_counts(offset_default_norm, 5U), offset_base, offset_bits);
+        verify(make_normalized_counts(literal_length_default_norm, 6U),
+            literal_length_base, literal_length_bits);
+        verify(make_normalized_counts(match_length_default_norm, 6U),
+            match_length_base, match_length_bits);
+    }
+#endif
+
     void test_fse_table_replacement()
     {
         sph::zstd::detail::fse_compression_table reused;
@@ -2992,6 +3031,9 @@ int main()
         test_rle_blocks();
         test_normalized_count_round_trips();
         test_fse_decode_table_replacement();
+#if defined(_MSC_VER)
+        test_direct_sequence_table_matches_fse_builder();
+#endif
         test_fse_table_replacement();
         test_row_hash_primitives();
         test_row_match_table();

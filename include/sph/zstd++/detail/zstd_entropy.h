@@ -572,6 +572,83 @@ namespace sph::zstd::detail
         {
             throw entropy_error{"Zstandard FSE sequence symbol is out of range"};
         }
+#if defined(_MSC_VER)
+        // On MSVC, spreading symbols directly into the final entries avoids a
+        // separate FSE table and conversion pass. GCC's compact intermediate
+        // table remains faster for its sequence-decoder specializations.
+        auto const table_size{std::size_t{1} << counts.table_log};
+        if (table_size > sequence_table::maximum_size)
+        {
+            throw entropy_error{"Zstandard sequence table is too large"};
+        }
+        std::array<std::uint16_t, 256> symbol_next{};
+        auto high_threshold{table_size - 1U};
+        std::size_t total{};
+        for (unsigned symbol{}; symbol <= counts.maximum_symbol; ++symbol)
+        {
+            auto const count{counts.values[symbol]};
+            if (count == -1)
+            {
+                result.entries[high_threshold--].additional_bits = static_cast<std::uint8_t>(symbol);
+                symbol_next[symbol] = 1;
+                ++total;
+            }
+            else if (count >= 0)
+            {
+                symbol_next[symbol] = static_cast<std::uint16_t>(count);
+                total += static_cast<std::size_t>(count);
+            }
+            else
+            {
+                throw entropy_error{"invalid negative Zstandard FSE count"};
+            }
+        }
+        if (total != table_size)
+        {
+            throw entropy_error{"Zstandard FSE counts do not fill the decoding table"};
+        }
+
+        auto const table_mask{table_size - 1U};
+        auto const step{(table_size >> 1U) + (table_size >> 3U) + 3U};
+        std::size_t position{};
+        for (unsigned symbol{}; symbol <= counts.maximum_symbol; ++symbol)
+        {
+            auto const count{counts.values[symbol]};
+            for (int occurrence{}; occurrence < count; ++occurrence)
+            {
+                result.entries[position].additional_bits = static_cast<std::uint8_t>(symbol);
+                position = (position + step) & table_mask;
+                while (position > high_threshold)
+                {
+                    position = (position + step) & table_mask;
+                }
+            }
+        }
+        if (position != 0)
+        {
+            throw entropy_error{"invalid Zstandard FSE symbol spread"};
+        }
+
+        for (std::size_t index{}; index < table_size; ++index)
+        {
+            auto const symbol{result.entries[index].additional_bits};
+            auto const next{static_cast<unsigned>(symbol_next[symbol]++)};
+            if (next == 0)
+            {
+                throw entropy_error{"invalid Zstandard FSE decoding state"};
+            }
+            auto const state_bits{counts.table_log - (static_cast<unsigned>(std::bit_width(next)) - 1U)};
+            result.entries[index] = sequence_entry{
+                static_cast<std::uint16_t>((next << state_bits) - table_size),
+                additional_bits[symbol],
+                static_cast<std::uint8_t>(state_bits),
+                bases[symbol]
+            };
+        }
+        result.size = table_size;
+        result.table_log = counts.table_log;
+        result.valid = true;
+#else
         fse_table symbols;
         build_fse_table(counts, symbols);
         if (symbols.size > sequence_table::maximum_size)
@@ -591,6 +668,7 @@ namespace sph::zstd::detail
                 bases[symbol.symbol]
             };
         }
+#endif
     }
 
     template <std::size_t Count>

@@ -127,16 +127,16 @@ GCC 13 Release `-O3`, six alternating trials after the double-fast splitter-layo
 
 ### Production decompression, varied and mixed input
 
-MSVC Release `/O2 /Ob3 /Z7`, 1-MiB reference-produced frames, six alternating 10,000-frame trials per row on 2026-10-25. Both workers decoded identical bytes. See [additional GCC decoder measurements](BENCHMARKS.md#gcc-13-decompression-levels-3-and-16-1-mib).
+MSVC Release `/O2 /Ob3 /Z7`, 1-MiB reference-produced frames, six alternating 10,000-frame trials per row on 2026-11-01 after direct FSE-to-sequence-table construction. Both workers decoded identical bytes. See [additional GCC decoder measurements](BENCHMARKS.md#gcc-13-decompression-levels-3-and-16-1-mib).
 
 | Input / operation | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Varied text / decode L3 | 10333.97 | 8908.93 | 116.00% | 6.34 | 6.34 | 99.97% | 234.00 | 311.00 | 75.24% |
-| Varied text / decode L12 | 9728.95 | 8919.41 | 109.08% | 6.34 | 6.34 | 99.94% | 234.00 | 311.00 | 75.24% |
-| Varied text / decode L16 | 3660.21 | 4996.38 | 73.26% | 6.34 | 6.34 | 100.00% | 234.00 | 311.00 | 75.24% |
-| Mixed / decode L3 | 7536.46 | 5816.44 | 129.57% | 6.60 | 6.57 | 100.54% | 234.00 | 311.00 | 75.24% |
-| Mixed / decode L12 | 23980.84 | 15725.24 | 152.50% | 6.59 | 6.55 | 100.63% | 234.00 | 311.00 | 75.24% |
-| Mixed / decode L16 | 17887.03 | 15136.28 | 118.17% | 6.59 | 6.56 | 100.54% | 234.00 | 311.00 | 75.24% |
+| Varied text / decode L3 | 9487.90 | 8136.11 | 116.61% | 6.28 | 6.28 | 100.03% | 234.00 | 311.00 | 75.24% |
+| Varied text / decode L12 | 9366.33 | 8226.54 | 113.86% | 6.28 | 6.28 | 100.03% | 234.00 | 311.00 | 75.24% |
+| Varied text / decode L16 | 3522.01 | 4661.63 | 75.55% | 6.28 | 6.29 | 99.88% | 234.00 | 311.00 | 75.24% |
+| Mixed / decode L3 | 7522.65 | 5530.51 | 136.02% | 6.54 | 6.51 | 100.57% | 234.00 | 311.00 | 75.24% |
+| Mixed / decode L12 | 23314.97 | 14813.74 | 157.39% | 6.53 | 6.49 | 100.51% | 234.00 | 311.00 | 75.24% |
+| Mixed / decode L16 | 17376.16 | 14216.77 | 122.22% | 6.53 | 6.49 | 100.57% | 234.00 | 311.00 | 75.24% |
 
 For a fresh, byte-checked comparison at one level and input, build the optimized paired evaluator:
 
