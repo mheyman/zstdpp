@@ -116,6 +116,8 @@ int main(int argc, char** argv)
 #endif
 #ifdef SPH_ZSTDPP_TRACE_PHASES
         std::cerr << "compression phases parse_ns=" << sph::zstd::compression_trace.parse_ns
+                  << " partition_ns=" << sph::zstd::compression_trace.partition_ns
+                  << " partition_encode_ns=" << sph::zstd::compression_trace.partition_encode_ns
                   << " encode_ns=" << sph::zstd::compression_trace.encode_ns
                   << " emit_ns=" << sph::zstd::compression_trace.emit_ns << '\n';
         auto const& entropy{sph::zstd::detail::entropy_trace};

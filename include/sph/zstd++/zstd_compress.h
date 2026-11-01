@@ -22,6 +22,8 @@ namespace sph::zstd
     struct compression_phase_trace
     {
         std::uint64_t parse_ns{};
+        std::uint64_t partition_ns{};
+        std::uint64_t partition_encode_ns{};
         std::uint64_t encode_ns{};
         std::uint64_t emit_ns{};
     };
@@ -620,6 +622,9 @@ namespace sph::zstd
                         if constexpr (effective_parameters_.strategy >= compression_strategy::binary_tree_optimal &&
                             effective_parameters_.window_log >= 17U)
                         {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                            auto const partition_start{std::chrono::steady_clock::now()};
+#endif
                             bool estimates_valid{true};
                             auto estimate = [&](detail::parsed_block_view const& range)
                             {
@@ -628,6 +633,11 @@ namespace sph::zstd
                                 return size.value_or(std::numeric_limits<std::size_t>::max() / 4U);
                             };
                             auto const partitions{detail::derive_sequence_partitions(parsed_, estimate)};
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                            compression_trace.partition_ns += static_cast<std::uint64_t>(
+                                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                    std::chrono::steady_clock::now() - partition_start).count());
+#endif
 #ifdef SPH_ZSTDPP_TRACE_OPTIMAL
                             std::fprintf(stderr, "P %zu", parsed_.sequences.size());
                             for (std::size_t index{}; index < partitions.count; ++index)
@@ -636,7 +646,15 @@ namespace sph::zstd
 #endif
                             if (estimates_valid && partitions.count > 1U)
                             {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                                auto const partition_encode_start{std::chrono::steady_clock::now()};
+#endif
                                 emit_partitions(input, partitions, initial_optimal_repeats, last);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                                compression_trace.partition_encode_ns += static_cast<std::uint64_t>(
+                                    std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                        std::chrono::steady_clock::now() - partition_encode_start).count());
+#endif
                                 return;
                             }
                         }
