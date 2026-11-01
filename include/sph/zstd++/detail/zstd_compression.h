@@ -4749,6 +4749,52 @@ namespace sph::zstd::detail
         set_optimal_base_prices(workspace, accurate);
     }
 
+    // Keep full prices for the hot match lookup. Refresh touched symbols under
+    // the previous base, then shift both tables by the new base-price delta.
+    inline void update_btopt_statistics(optimal_parse_workspace& workspace,
+        std::span<std::uint8_t const> input, std::size_t literal_position,
+        std::span<parsed_sequence const> sequences) noexcept
+    {
+        if (workspace.predefined_prices) return;
+        auto const previous_offset_base{workspace.offset_base_price};
+        auto const previous_match_base{workspace.match_length_base_price};
+        for (auto const& sequence : sequences)
+        {
+            for (auto const literal : input.subspan(literal_position, sequence.literal_length))
+                workspace.literal_frequencies[literal] += 2U;
+            workspace.literal_sum += 2U * sequence.literal_length;
+
+            auto const literal_code{literal_length_symbol(sequence.literal_length)};
+            ++workspace.literal_length_frequencies[literal_code];
+            ++workspace.literal_length_sum;
+
+            auto const offset_base_value{sequence.repeat_code != 0U ?
+                static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
+            auto const offset_code{static_cast<std::size_t>(std::bit_width(offset_base_value)) - 1U};
+            ++workspace.offset_frequencies[offset_code];
+            ++workspace.offset_sum;
+            workspace.offset_prices[offset_code] = static_cast<std::uint32_t>(offset_code) *
+                optimal_bitcost_multiplier + previous_offset_base -
+                optimal_bit_weight(workspace.offset_frequencies[offset_code]);
+
+            auto const match_code{match_length_symbol(sequence.match_length)};
+            ++workspace.match_length_frequencies[match_code];
+            ++workspace.match_length_sum;
+            workspace.match_length_prices[match_code] = match_length_bits[match_code] *
+                optimal_bitcost_multiplier + previous_match_base -
+                optimal_bit_weight(workspace.match_length_frequencies[match_code]);
+            literal_position += sequence.literal_length + sequence.match_length;
+        }
+        workspace.literal_base_price = optimal_bit_weight(workspace.literal_sum);
+        workspace.literal_length_base_price = optimal_bit_weight(workspace.literal_length_sum);
+        workspace.match_length_base_price = optimal_bit_weight(workspace.match_length_sum);
+        workspace.offset_base_price = optimal_bit_weight(workspace.offset_sum);
+        auto const match_delta{workspace.match_length_base_price - previous_match_base};
+        auto const offset_delta{workspace.offset_base_price - previous_offset_base};
+        for (auto& price : workspace.match_length_prices) price += match_delta;
+        for (auto& price : workspace.offset_prices) price += offset_delta;
+    }
+
     inline void reset_optimal_paths(optimal_parse_workspace& workspace) noexcept
     {
         for (auto& path : workspace.paths)
@@ -5163,7 +5209,10 @@ namespace sph::zstd::detail
                 }
 #endif
                 result.sequences.insert(result.sequences.end(), selected.begin(), selected.end());
-                update_optimal_statistics(optimal, input, anchor, selected, accurate);
+                if (accurate)
+                    update_optimal_statistics(optimal, input, anchor, selected, accurate);
+                else
+                    update_btopt_statistics(optimal, input, anchor, selected);
                 position += direct_local + direct_length;
                 anchor = position;
                 continue;
@@ -5182,7 +5231,10 @@ namespace sph::zstd::detail
                 }
 #endif
                 result.sequences.insert(result.sequences.end(), selected.begin(), selected.end());
-                update_optimal_statistics(optimal, input, anchor, selected, accurate);
+                if (accurate)
+                    update_optimal_statistics(optimal, input, anchor, selected, accurate);
+                else
+                    update_btopt_statistics(optimal, input, anchor, selected);
                 anchor = position + selected_size - trailing;
             }
             position += selected_size;

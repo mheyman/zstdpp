@@ -2369,7 +2369,24 @@ namespace
             };
             verify();
             std::array<parsed_sequence, 1> const sequences{{{17U, 60U, 8U, 0U}}};
-            update_optimal_statistics(workspace, input, 0U, sequences, accurate);
+            if (accurate)
+                update_optimal_statistics(workspace, input, 0U, sequences, accurate);
+            else
+            {
+                for (unsigned update{}; update < 128U; ++update)
+                {
+                    auto baseline{workspace};
+                    update_optimal_statistics(baseline, input, 0U, sequences, false);
+                    update_btopt_statistics(workspace, input, 0U, sequences);
+                    check(workspace.match_length_prices == baseline.match_length_prices &&
+                        workspace.offset_prices == baseline.offset_prices &&
+                        workspace.match_length_base_price == baseline.match_length_base_price &&
+                        workspace.offset_base_price == baseline.offset_base_price &&
+                        workspace.literal_base_price == baseline.literal_base_price &&
+                        workspace.literal_length_base_price == baseline.literal_length_base_price,
+                        "incremental btopt prices match a full statistics refresh");
+                }
+            }
             verify();
             initialize_optimal_prices(workspace, input, accurate);
             verify();
