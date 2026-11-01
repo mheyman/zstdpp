@@ -132,6 +132,9 @@ def main():
                         help="longer paired level-13 mixed-input SUMMARY.md to supersede the short screen")
     parser.add_argument("--confirmed-l16", type=Path,
                         help="longer paired level-16 mixed-input SUMMARY.md to supersede the short screen")
+    parser.add_argument("--confirmed-structured", action="append", nargs=2,
+                        metavar=("LEVEL", "SUMMARY"), default=[],
+                        help="longer paired structured compression result to supersede a short-screen row")
     parser.add_argument("--confirmed-structured-decode", type=Path,
                         help="six longer paired structured decoder trials for levels 16–22")
     args = parser.parse_args()
@@ -148,6 +151,14 @@ def main():
     if args.confirmed_l16:
         key = "mixed", 16, "compress"
         data[key] = confirmed_pair(args.confirmed_l16, data[key][4:])
+    structured_levels = []
+    for level_text, path_text in args.confirmed_structured:
+        level = int(level_text)
+        if level not in range(1, 23) or level in structured_levels:
+            raise ValueError(f"invalid or repeated structured confirmation level: {level}")
+        key = "structured", level, "compress"
+        data[key] = confirmed_pair(Path(path_text), data[key][4:])
+        structured_levels.append(level)
     if args.confirmed_structured_decode:
         for level in range(16, 23):
             key = "structured", level, "decompress"
@@ -162,6 +173,11 @@ def main():
                               "2,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-16-compression). ")
     if confirmation_note:
         confirmation_note += "The short-screen rows remain in the detailed evaluation.\n\n"
+    if structured_levels:
+        confirmation_note += ("Structured compression levels " +
+                              ", ".join(map(str, sorted(structured_levels))) +
+                              " use longer six-trial [confirmations]"
+                              "(BENCHMARKS.md#confirmed-structured-input-compression).\n\n")
 
     performance = f"""## Performance
 
@@ -206,6 +222,11 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
                       " compression rows use longer confirmed measurements; the "
                       "[short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report."
                       if confirmed_levels else "")
+    if structured_levels:
+        confirmed_note += (" Structured compression levels " +
+                           ", ".join(map(str, sorted(structured_levels))) +
+                           " use longer six-trial confirmations in "
+                           "[BENCHMARKS.md](BENCHMARKS.md#confirmed-structured-input-compression).")
     details = f"""# Current benchmark matrix: all input shapes
 
 Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results.{confirmed_note}{structured_note}

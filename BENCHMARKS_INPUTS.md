@@ -1,6 +1,6 @@
 # Current benchmark matrix: all input shapes
 
-Measured 2026-11-01 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and 16 compression rows use longer confirmed measurements; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report. Structured decompression levels 16–22 below use six alternating 10,000-frame exact-output trials.
+Measured 2026-11-01 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and 16 compression rows use longer confirmed measurements; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report. Structured compression levels 1, 2, 3, 4, 16 use longer six-trial confirmations in [BENCHMARKS.md](BENCHMARKS.md#confirmed-structured-input-compression). Structured decompression levels 16–22 below use six alternating 10,000-frame exact-output trials.
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 
@@ -54,10 +54,10 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | repeated | 20 | 1727.73 | 1573.58 | 109.80% | 21.63 | 22.30 | 96.96% | 145.16 | 628.16 | 23.11% |
 | repeated | 21 | 1258.13 | 1572.28 | 80.02% | 21.73 | 22.24 | 97.72% | 145.16 | 628.16 | 23.11% |
 | repeated | 22 | 1751.12 | 1592.01 | 109.99% | 21.73 | 22.22 | 97.80% | 145.16 | 628.16 | 23.11% |
-| structured | 1 | 655.74 | 658.08 | 99.65% | 5.20 | 5.97 | 87.11% | 131.25 | 628.16 | 20.89% |
-| structured | 2 | 779.69 | 817.05 | 95.43% | 5.38 | 6.27 | 85.79% | 127.40 | 628.16 | 20.28% |
-| structured | 3 | 677.80 | 710.59 | 95.39% | 6.02 | 6.67 | 90.14% | 127.38 | 628.16 | 20.28% |
-| structured | 4 | 655.90 | 700.10 | 93.69% | 7.60 | 8.02 | 94.67% | 127.38 | 628.16 | 20.28% |
+| structured | 1 | 649.68 | 669.31 | 97.07% | 5.24 | 6.12 | 85.60% | 131.25 | 628.16 | 20.89% |
+| structured | 2 | 808.59 | 831.79 | 97.21% | 5.36 | 6.24 | 85.80% | 127.40 | 628.16 | 20.28% |
+| structured | 3 | 683.45 | 716.29 | 95.41% | 6.12 | 6.72 | 91.14% | 127.38 | 628.16 | 20.28% |
+| structured | 4 | 647.65 | 692.28 | 93.55% | 7.74 | 7.96 | 97.18% | 127.38 | 628.16 | 20.28% |
 | structured | 5 | 959.35 | 949.35 | 101.05% | 7.75 | 8.46 | 91.69% | 127.35 | 628.16 | 20.27% |
 | structured | 6 | 2410.16 | 1697.10 | 142.02% | 7.48 | 8.33 | 89.76% | 122.84 | 628.16 | 19.56% |
 | structured | 7 | 2347.80 | 1713.85 | 136.99% | 9.97 | 10.88 | 91.67% | 122.84 | 628.16 | 19.56% |
@@ -69,7 +69,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | structured | 13 | 985.79 | 839.70 | 117.40% | 20.92 | 21.85 | 95.76% | 126.88 | 628.16 | 20.20% |
 | structured | 14 | 1039.29 | 834.83 | 124.49% | 20.95 | 21.82 | 96.01% | 122.88 | 628.16 | 19.56% |
 | structured | 15 | 1047.37 | 819.88 | 127.75% | 20.86 | 21.88 | 95.33% | 122.88 | 628.16 | 19.56% |
-| structured | 16 | 486.85 | 513.54 | 94.80% | 21.19 | 21.73 | 97.53% | 144.95 | 628.16 | 23.07% |
+| structured | 16 | 493.05 | 487.10 | 101.22% | 21.22 | 21.73 | 97.63% | 144.95 | 628.16 | 23.07% |
 | structured | 17 | 492.71 | 487.01 | 101.17% | 21.15 | 21.70 | 97.48% | 144.95 | 628.16 | 23.07% |
 | structured | 18 | 390.93 | 294.01 | 132.97% | 21.67 | 22.21 | 97.59% | 145.16 | 628.16 | 23.11% |
 | structured | 19 | 212.92 | 195.92 | 108.67% | 21.70 | 22.27 | 97.41% | 145.16 | 628.16 | 23.11% |
