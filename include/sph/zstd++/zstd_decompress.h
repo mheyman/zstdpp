@@ -1170,6 +1170,19 @@ namespace sph::zstd
                     copy_nonoverlapping(match_destination, output_data + source_position, match_length);
                 return;
             }
+            // Short offsets are faster with the doubling copy below; the
+            // chunk loop helps long-distance matches in structured blocks.
+            if (match_offset >= 1024U && match_length >= 64U)
+            {
+                // Each 32-byte source chunk precedes its destination chunk,
+                // even when the complete match overlaps itself.
+                for (std::size_t position{}; position + 32U < match_length; position += 32U)
+                    std::memcpy(match_destination + position,
+                        match_destination + position - match_offset, 32U);
+                std::memcpy(match_destination + match_length - 32U,
+                    match_destination + match_length - 32U - match_offset, 32U);
+                return;
+            }
             std::memcpy(match_destination, output_data + source_position, match_offset);
             auto written{match_offset};
             while (written < match_length)
