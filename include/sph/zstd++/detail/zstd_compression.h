@@ -5748,7 +5748,8 @@ namespace sph::zstd::detail
         bool optimal_depth = false, std::size_t minimum_gain = 0U) -> bool;
 
     // Keep the entropy/table selection shared when a block chooses its bit writer.
-    template <bool Wide, bool Grouped, bool AlignedLiterals, typename ParsedView>
+    template <bool Wide, bool Grouped, bool DoubleRleShortcut = false,
+        bool AlignedLiterals, typename ParsedView>
     inline void write_sequence_bitstream(ParsedView const& parsed,
         basic_compression_workspace<AlignedLiterals>& workspace,
         selected_sequence_table const& literal_table,
@@ -5779,10 +5780,10 @@ namespace sph::zstd::detail
         bits.append(last.literal_length, literal_length_bits[last_ll]);
         bits.append(last.match_length - 3U, match_length_bits[last_ml]);
         bits.append(last_offset, last_of);
-        if constexpr (Wide && Grouped)
+        if constexpr ((Wide && Grouped) || DoubleRleShortcut)
         {
-            // Dense fast blocks commonly have fixed LL and OF codes. Their
-            // run-length tables emit no state bits; keep the ML-only loop hot.
+            // Blocks with fixed LL and OF codes emit no bits for those FSE
+            // states; keep the ML-only loop hot.
             if (literal_table.mode == sequence_table_mode::run_length &&
                 offset_table.mode == sequence_table_mode::run_length) [[likely]]
             {
@@ -5792,8 +5793,19 @@ namespace sph::zstd::detail
                     auto const ll{workspace.literal_codes[index]};
                     auto const of{workspace.offset_codes[index]};
                     auto const ml{workspace.match_codes[index]};
-                    auto const ml_bits{match_state.template encode_bits<true>(ml)};
-                    bits.append_unchecked(ml_bits.value, ml_bits.count);
+                    if constexpr (Wide && Grouped)
+                    {
+                        auto const ml_bits{match_state.template encode_bits<true>(ml)};
+                        bits.append_unchecked(ml_bits.value, ml_bits.count);
+                    }
+                    else
+                    {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                        match_state.encode_inlined(bits, ml);
+#else
+                        match_state.encode(bits, ml);
+#endif
+                    }
                     bits.append(sequence.literal_length, literal_length_bits[ll]);
                     bits.append(sequence.match_length - 3U, match_length_bits[ml]);
                     auto const encoded_offset{sequence.repeat_code != 0U ?
@@ -5850,6 +5862,7 @@ namespace sph::zstd::detail
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
         bool ValidateCodesOnce = false, bool DirectOffBase = false,
+        bool DoubleRleShortcut = false,
         bool AlignedLiterals,
         typename ParsedView = parsed_block_view>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
@@ -5860,6 +5873,7 @@ namespace sph::zstd::detail
         static_assert(!AdaptiveWideWrites || AdaptiveGroupedWrites);
         static_assert(!PackedLengthBits || GroupedStateWrites);
         static_assert(!DirectOffBase || std::is_same_v<ParsedView, parsed_block_view>);
+        static_assert(!DoubleRleShortcut || std::is_same_v<ParsedView, parsed_block_view>);
         output.clear();
         if (parsed.sequences.empty())
         {
@@ -6055,6 +6069,19 @@ namespace sph::zstd::detail
         entropy_trace.tables_ns += entropy_trace_elapsed(entropy_phase_start);
         entropy_phase_start = std::chrono::steady_clock::now();
 #endif
+        if constexpr (DoubleRleShortcut)
+        {
+            if (literal_table.mode == sequence_table_mode::run_length &&
+                offset_table.mode == sequence_table_mode::run_length)
+            {
+                write_sequence_bitstream<false, false, true>(parsed, workspace, literal_table,
+                    offset_table, match_length_table, output);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                entropy_trace.bits_ns += entropy_trace_elapsed(entropy_phase_start);
+#endif
+                return;
+            }
+        }
         if constexpr (AdaptiveWideWrites)
         {
             if (literal_size <= parsed.sequences.size() * 8U)
@@ -6200,6 +6227,7 @@ namespace sph::zstd::detail
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
         bool ValidateCodesOnce = false, bool DirectOffBase = false,
+        bool DoubleRleShortcut = false,
         bool AlignedLiterals>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         compact_parsed_block const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
@@ -6208,7 +6236,7 @@ namespace sph::zstd::detail
         encode_sequences_block<CarefulSelection, GroupFse, CollectedLiterals,
             OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, WideSequenceBits,
             PackedLengthBits, GroupedStateWrites, AdaptiveGroupedWrites, AdaptiveWideWrites,
-            ValidateCodesOnce, DirectOffBase,
+            ValidateCodesOnce, DirectOffBase, DoubleRleShortcut,
             AlignedLiterals, compact_parsed_block_view>(
                 input, compact_parsed_block_view{parsed}, workspace, output);
     }
