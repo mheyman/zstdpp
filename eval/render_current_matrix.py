@@ -202,7 +202,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations. Expand the tables below for all nine absolute measurements at every level and input.
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison. Expand the section below for all nine absolute measurements at every level and input. The [full benchmark matrix](BENCHMARKS_INPUTS.md) adds input definitions and longer confirmations.
 
 ### Compression (% of reference)
 

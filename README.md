@@ -2,9 +2,13 @@
 
 A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zstd/), built around compile-time compression settings and callback-driven streaming. This repository also contains the reference zstd implementation used for byte-level compatibility checks and matched performance comparisons.
 
-The project is an active port, not a drop-in replacement for every zstd feature. Supported paths include streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and the fast, double-fast, greedy, lazy, and binary-tree parsing strategies. Dictionary and multithreaded modes are not implemented. The current benchmark matrix confirms byte-for-byte identical compressed output at levels 1–22 on five deterministic inputs; the acceptance suite checks the public API and cross-decoding separately.
+[Use it](#use-it) · [Build and verify](#build-and-verify) · [Performance](#performance) · [Full benchmark matrix](BENCHMARKS_INPUTS.md) · [Roadmap](PERFORMANCE_PLAN.md)
 
-[Use it](#use-it) · [Build and verify](#build-and-verify) · [Performance](#performance) · [Current work](PERFORMANCE_PLAN.md) · [Development history](PERFORMANCE_HISTORY.md)
+## Project status
+
+This is an active port, with streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and fast through binary-tree match parsing. Dictionary and multithreaded modes are still missing.
+
+The current benchmark matrix confirms byte-for-byte identical compressed output at levels 1–22 on five deterministic inputs. The acceptance suite checks the public API and decoding in both directions. See the [performance work list](PERFORMANCE_PLAN.md) for current optimization targets and the [experiment history](PERFORMANCE_HISTORY.md) for earlier results.
 
 ## Use it
 
@@ -71,7 +75,7 @@ The tests compare resolved compression parameters and compressed bytes, and chec
 
 ## Performance
 
-Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations. Expand the tables below for all nine absolute measurements at every level and input.
+Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison. Expand the section below for all nine absolute measurements at every level and input. The [full benchmark matrix](BENCHMARKS_INPUTS.md) adds input definitions and longer confirmations.
 
 ### Compression (% of reference)
 
