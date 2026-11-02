@@ -221,7 +221,7 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
        if args.confirmed_structured_decode else "") + (
        "Random levels 3 and 4 use six alternating 100,000-frame exact-output "
        "[confirmations](BENCHMARKS.md#confirmed-random-input-decompression); "
-       "their throughput ratios remain close and variable.\n\n"
+       "earlier batches were closer to parity.\n\n"
        if args.confirmed_random_decode else "") + grid(data, "decompress") + """
 
 <details>
