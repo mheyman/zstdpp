@@ -1565,6 +1565,29 @@ namespace
             "low-probability FSE normalized counts decode in the mixed evaluation corpus");
     }
 
+    void test_cross_frame_sequence_table_cache()
+    {
+        std::vector<std::uint8_t> structured(1024U * 1024U);
+        for (std::size_t index{}; index < structured.size(); ++index)
+            structured[index] = static_cast<std::uint8_t>((index / 16U + index % 7U) & 255U);
+        auto const mixed{make_mixed_entropy_input()};
+        auto const structured_frame{reference_compress(structured, 18)};
+        auto const mixed_frame{reference_compress(mixed, 18)};
+        std::vector<std::uint8_t> decoded(structured.size());
+        auto decompressor = sph::zstd::zstd_decompress{
+            [](std::span<std::uint8_t const>) {}};
+        std::array<std::vector<std::uint8_t> const*, 4> const inputs{
+            &structured, &structured, &mixed, &structured};
+        for (auto const* input : inputs)
+        {
+            auto const& frame{input == &mixed ? mixed_frame : structured_frame};
+            decompressor.reset();
+            decompressor.decompress_frame(frame, decoded);
+            check(decoded == *input,
+                "cached and changed sequence tables decode across frame resets");
+        }
+    }
+
     void test_huffman_minimum_gain()
     {
         // Literals from the optimal pre-split regression: 117 raw bytes,
@@ -3092,6 +3115,7 @@ int main()
         test_reference_rle_golden_frame();
         test_reference_zero_sequence_golden_frames();
         test_reference_entropy_frames();
+        test_cross_frame_sequence_table_cache();
         test_huffman_minimum_gain();
         test_cpp_match_compression();
         test_cpp_huffman_literal_compression();

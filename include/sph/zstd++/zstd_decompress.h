@@ -48,7 +48,8 @@ namespace sph::zstd
             "zstd_decompress maximum_decoded_block_size must be in [1, 128 KiB]");
 
     public:
-        explicit zstd_decompress(Callback callback) : callback_{std::move(callback)}
+        explicit zstd_decompress(Callback callback) : callback_{std::move(callback)},
+            sequence_caches_{std::make_unique<sequence_cache_workspace>()}
         {
             literals_.reserve(Parameters.maximum_decoded_block_size + copy_slack);
         }
@@ -792,9 +793,26 @@ namespace sph::zstd
             return {regenerated_literals, header_size + compressed_size, true};
         }
 
+        struct sequence_table_cache
+        {
+            // Long descriptions still decode normally; this covers the common
+            // compressed FSE headers without making the decoder object large.
+            std::array<std::uint8_t, 256> description{};
+            std::size_t description_size{};
+            detail::sequence_table table{};
+        };
+
+        struct sequence_cache_workspace
+        {
+            sequence_table_cache literal_length;
+            sequence_table_cache offset;
+            sequence_table_cache match_length;
+        };
+
         template <std::size_t Count, std::size_t NormCount>
         void load_sequence_table(
             detail::sequence_table& table,
+            sequence_table_cache& cache,
             std::uint8_t mode,
             std::span<std::uint8_t const> source,
             std::size_t& offset,
@@ -827,6 +845,17 @@ namespace sph::zstd
                 return;
             case 2:
             {
+                auto const description{source.subspan(offset)};
+                // Decoding this header is deterministic for the table kind, so
+                // the previously consumed byte prefix identifies the same table.
+                if (cache.description_size != 0U &&
+                    description.size() >= cache.description_size &&
+                    std::memcmp(description.data(), cache.description.data(), cache.description_size) == 0)
+                {
+                    offset += cache.description_size;
+                    detail::copy_sequence_table(cache.table, table);
+                    return;
+                }
                 auto const counts{detail::read_normalized_counts(source.subspan(offset),
                     static_cast<unsigned>(Count - 1U))};
                 if (counts.table_log > maximum_table_log)
@@ -835,6 +864,12 @@ namespace sph::zstd
                 }
                 offset += counts.bytes_consumed;
                 detail::build_sequence_table(counts, bases, additional_bits, table);
+                if (counts.bytes_consumed <= cache.description.size())
+                {
+                    std::memcpy(cache.description.data(), description.data(), counts.bytes_consumed);
+                    cache.description_size = counts.bytes_consumed;
+                    detail::copy_sequence_table(table, cache.table);
+                }
                 return;
             }
             case 3:
@@ -1118,12 +1153,15 @@ namespace sph::zstd
             {
                 throw detail::entropy_error{"reserved Zstandard sequence-header bits are set"};
             }
-            load_sequence_table(literal_length_table_, static_cast<std::uint8_t>(modes >> 6U), source, offset,
+            load_sequence_table(literal_length_table_, sequence_caches_->literal_length,
+                static_cast<std::uint8_t>(modes >> 6U), source, offset,
                 9U, detail::literal_length_base, detail::literal_length_bits,
                 detail::literal_length_default_norm, 6U);
-            load_sequence_table(offset_table_, static_cast<std::uint8_t>((modes >> 4U) & 3U), source, offset,
+            load_sequence_table(offset_table_, sequence_caches_->offset,
+                static_cast<std::uint8_t>((modes >> 4U) & 3U), source, offset,
                 8U, detail::offset_base, detail::offset_bits, detail::offset_default_norm, 5U);
-            load_sequence_table(match_length_table_, static_cast<std::uint8_t>((modes >> 2U) & 3U), source, offset,
+            load_sequence_table(match_length_table_, sequence_caches_->match_length,
+                static_cast<std::uint8_t>((modes >> 2U) & 3U), source, offset,
                 9U, detail::match_length_base, detail::match_length_bits,
                 detail::match_length_default_norm, 6U);
             if (offset >= source.size())
@@ -1494,6 +1532,7 @@ namespace sph::zstd
         detail::sequence_table literal_length_table_{};
         detail::sequence_table offset_table_{};
         detail::sequence_table match_length_table_{};
+        std::unique_ptr<sequence_cache_workspace> sequence_caches_;
         std::array<std::size_t, 3> repeat_offsets_{1, 4, 8};
         std::uint64_t frame_decoded_size_{};
         std::uint64_t encoded_size_{};
