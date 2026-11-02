@@ -4,6 +4,14 @@ These measurements compare optimized, isolated sph-zstd++ (`C++`) and bundled re
 
 The [current 22-level mixed-input evaluation](#current-evaluation) was run on 2026-11-01 from this checkout with GCC 13 Release. The [full current matrix](BENCHMARKS_INPUTS.md) covers mixed, zero-filled, repeated, structured, and seeded-random data from the same optimized build. The earlier focused tables further below are dated snapshots from prior changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
 
+## Confirmed random-input level 15 compression
+
+The two-trial 100-frame screen reported 78.0% of reference, but a longer pinned-core comparison did not reproduce that gap. Six alternating 3,000-frame trials used the same optimized workers and deterministic 1-MiB random input. Five of six paired throughput ratios favored C++; the one contrary trial shows that timing remains variable. Every trial produced byte-identical compressed frames, and both decoders recovered both encodings. The README and full input matrix use the longer median result. Raw trials are under `out/combined-medium-extras-20261101/confirm-random-l15-long/`.
+
+| C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 183.52 | 165.29 | 111.03% | 21.89 | 21.98 | 99.63% | 122.88 | 628.16 | 19.56% |
+
 ## Confirmed mixed-input level 13 compression
 
 Short level-13 screens have varied widely. A pinned-core follow-up used six alternating trials of 1,000 frames each on the current optimized workers and 1-MiB mixed input. Every trial passed exact compressed-byte comparison and both decoding directions. The README uses this longer result for its level-13 mixed-input compression cell; the current short screen remains below for provenance. Raw paired trials are under `out/optimal-price-delta-split-20261101/confirm-l13-mixed/`.
