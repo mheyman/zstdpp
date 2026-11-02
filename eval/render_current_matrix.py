@@ -186,43 +186,17 @@ def main():
             data[key] = confirmed_decoder_pairs(args.confirmed_random_decode, level,
                                                 data[key][4:], 100000)
 
-    confirmation_note = ""
-    if args.confirmed_l13:
-        confirmation_note += ("The mixed-input level 13 compression cell uses a longer six-trial "
-                              "1,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-13-compression). ")
-    if args.confirmed_l16:
-        confirmation_note += ("The mixed-input level 16 compression cell uses a longer six-trial "
-                              "2,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-16-compression). ")
-    if confirmation_note:
-        confirmation_note += "The short-screen rows remain in the detailed evaluation.\n\n"
-    if structured_levels:
-        confirmation_note += ("Structured compression levels " +
-                              ", ".join(map(str, sorted(structured_levels))) +
-                              " use longer six-trial [confirmations]"
-                              "(BENCHMARKS.md#confirmed-structured-input-compression).\n\n")
-    if confirmed_compression_levels:
-        confirmation_note += ("Compression levels " +
-                              ", ".join(map(str, sorted(confirmed_compression_levels))) +
-                              " use six-trial [current-candidate confirmations]"
-                              "(BENCHMARKS.md#confirmed-double-fast-guard-compression) "
-                              "for all five inputs.\n\n")
-
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size** as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. These short runs are a screening comparison. Expand the tables below for all nine absolute comparison metrics; the [full benchmark matrix](BENCHMARKS_INPUTS.md) also provides methodology and input definitions.
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) explains inputs and confirmed rows. Expand the absolute tables below for all nine measurements.
 
 ### Compression (% of reference)
 
-""" + confirmation_note + grid(data, "compress") + """
+""" + grid(data, "compress") + """
 
 ### Decompression (% of reference)
 
-""" + ("Structured levels 16–22 use six alternating 10,000-frame exact-output trials.\n\n"
-       if args.confirmed_structured_decode else "") + (
-       "Random levels 3 and 4 use six alternating 100,000-frame exact-output "
-       "[confirmations](BENCHMARKS.md#confirmed-random-input-decompression); "
-       "earlier batches were closer to parity.\n\n"
-       if args.confirmed_random_decode else "") + grid(data, "decompress") + """
+""" + grid(data, "decompress") + """
 
 <details>
 <summary>Absolute C++ and reference measurements for every level and input</summary>

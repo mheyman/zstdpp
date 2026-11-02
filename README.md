@@ -4,7 +4,7 @@ A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zst
 
 The project is an active port, not a drop-in replacement for every zstd feature. Supported paths include streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and the fast, double-fast, greedy, lazy, and binary-tree parsing strategies. Dictionary and multithreaded modes are not implemented. The current benchmark matrix confirms byte-for-byte identical compressed output at levels 1–22 on five deterministic inputs; the acceptance suite checks the public API and cross-decoding separately.
 
-[Use it](#use-it) · [Build and verify](#build-and-verify) · [Performance](#performance) · [Development history](PERFORMANCE_HISTORY.md)
+[Use it](#use-it) · [Build and verify](#build-and-verify) · [Performance](#performance) · [Current work](PERFORMANCE_PLAN.md) · [Development history](PERFORMANCE_HISTORY.md)
 
 ## Use it
 
@@ -71,15 +71,9 @@ The tests compare resolved compression parameters and compressed bytes, and chec
 
 ## Performance
 
-Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at every level. Each cell shows **throughput / peak memory / executable size** as C++ percentages of reference. Higher throughput and lower memory or code size are better. Compression frames matched byte for byte, and both decoders recovered the input. These short runs are a screening comparison. Expand the tables below for all nine absolute comparison metrics; the [full benchmark matrix](BENCHMARKS_INPUTS.md) also provides methodology and input definitions.
+Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) explains inputs and confirmed rows. Expand the absolute tables below for all nine measurements.
 
 ### Compression (% of reference)
-
-The mixed-input level 13 compression cell uses a longer six-trial 1,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-13-compression). The mixed-input level 16 compression cell uses a longer six-trial 2,000-frame [confirmation](BENCHMARKS.md#confirmed-mixed-input-level-16-compression). The short-screen rows remain in the detailed evaluation.
-
-Structured compression levels 1, 2, 16 use longer six-trial [confirmations](BENCHMARKS.md#confirmed-structured-input-compression).
-
-Compression levels 3, 4 use six-trial [current-candidate confirmations](BENCHMARKS.md#confirmed-double-fast-guard-compression) for all five inputs.
 
 | Level | Zero | Repeated | Structured | Random | Mixed |
 | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -107,10 +101,6 @@ Compression levels 3, 4 use six-trial [current-candidate confirmations](BENCHMAR
 | 22 | 374.5% / 97.1% / 23.1% | 109.2% / 97.7% / 23.1% | 114.1% / 97.2% / 23.1% | 135.3% / 102.1% / 23.1% | 114.6% / 99.8% / 23.1% |
 
 ### Decompression (% of reference)
-
-Structured levels 16–22 use six alternating 10,000-frame exact-output trials.
-
-Random levels 3 and 4 use six alternating 100,000-frame exact-output [confirmations](BENCHMARKS.md#confirmed-random-input-decompression); earlier batches were closer to parity.
 
 | Level | Zero | Repeated | Structured | Random | Mixed |
 | ---: | ---: | ---: | ---: | ---: | ---: |
