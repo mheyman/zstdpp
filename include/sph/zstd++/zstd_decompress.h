@@ -885,6 +885,48 @@ namespace sph::zstd
             std::memcpy(destination, source, count);
         }
 
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+        // Medium compressed blocks commonly produce tiny nonoverlapping matches.
+        // A separate exact-width helper avoids a libc call without enlarging the
+        // shared sequence loop used by other block shapes.
+        __attribute__((noinline)) static void copy_small_match(
+            std::uint8_t* destination,
+            std::uint8_t const* source,
+            std::size_t count) noexcept
+        {
+            switch (count)
+            {
+            case 1U:
+                destination[0] = source[0];
+                return;
+            case 2U:
+                std::memcpy(destination, source, 2U);
+                return;
+            case 3U:
+                std::memcpy(destination, source, 2U);
+                destination[2] = source[2];
+                return;
+            case 4U:
+                std::memcpy(destination, source, 4U);
+                return;
+            case 5U:
+                std::memcpy(destination, source, 4U);
+                destination[4] = source[4];
+                return;
+            case 6U:
+                std::memcpy(destination, source, 4U);
+                std::memcpy(destination + 4U, source + 4U, 2U);
+                return;
+            case 7U:
+                std::memcpy(destination, source, 4U);
+                std::memcpy(destination + 3U, source + 3U, 4U);
+                return;
+            default:
+                return;
+            }
+        }
+#endif
+
         template <bool Padded>
         static void copy_literals(
             std::uint8_t* destination,
@@ -947,6 +989,13 @@ namespace sph::zstd
             }
             if constexpr (MediumMatchCopy)
             {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                if (count >= 1U && count <= 7U)
+                {
+                    copy_small_match(destination, source, count);
+                    return;
+                }
+#endif
                 if (count >= 64U && count <= 256U && offset >= count)
                 {
                     for (std::size_t position{}; position + 32U < count; position += 32U)
