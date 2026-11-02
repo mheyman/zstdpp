@@ -232,12 +232,9 @@ def main():
         data[key] = confirmed_decoder_pair_directory(Path(directory_text), data[key][4:])
         confirmed_random_decode_levels.add(level)
 
-    near_parity_note = (" For example, level-20 random decompression's independent medians "
-                        "favor C++, while its paired median favors reference."
-                        if 20 in confirmed_random_decode_levels else "")
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive.{near_parity_note} Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
 
 ### Compression (% of reference)
 
@@ -272,13 +269,13 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
                        if args.confirmed_structured_decode else "")
     random_decode_note = (" Random decompression levels 3 and 4 use six alternating "
                           "100,000-frame exact-output trials in "
-                          "[BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-decompression)."
+                          "[BENCHMARKS.md](BENCHMARKS.md#confirmed-cross-frame-fse-table-cache)."
                           if args.confirmed_random_decode else "")
     if confirmed_random_decode_levels:
         random_decode_note += (" Random decompression levels " +
                                ", ".join(map(str, sorted(confirmed_random_decode_levels))) +
-                               " use six alternating 100,000-frame exact-output trials in "
-                               "[BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-decompression-levels-12-and-20).")
+                               " use six alternating 100,000-frame exact-output trials; "
+                               "see the [benchmark report](BENCHMARKS.md).")
     confirmed_levels = [str(level) for level, present in ((13, args.confirmed_l13),
                         (16, args.confirmed_l16)) if present]
     confirmed_note = (" The mixed-input level " + " and ".join(confirmed_levels) +
