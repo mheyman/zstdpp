@@ -2,7 +2,21 @@
 
 These measurements compare optimized, isolated sph-zstd++ (`C++`) and bundled reference-zstd (`Reference`) workers at the same level and on the same input. Throughput is MiB/s (higher is better); memory is peak resident set size and code is the complete worker executable (lower is better). Percentages are `C++ / Reference × 100`. Compression outputs are byte-compared and both decoders check both encodings in paired runs.
 
-The [current 22-level mixed-input evaluation](#current-evaluation) was run on 2026-11-02 from this checkout with GCC 13 Release. The [full current matrix](BENCHMARKS_INPUTS.md) covers mixed, zero-filled, repeated, structured, and seeded-random data from the same optimized build. The earlier focused tables further below are dated snapshots from prior changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
+The [22-level mixed-input screening evaluation](#mixed-input-screening-evaluation) was run on 2026-11-02 with GCC 13 Release. Its level-3 row predates the double-RLE writer below; use the confirmed table and [full current matrix](BENCHMARKS_INPUTS.md) for the current level-3 result. The full matrix covers mixed, zero-filled, repeated, structured, and seeded-random data. Other focused tables further below are dated snapshots from prior changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
+
+## Confirmed level-3 double-RLE sequence writer
+
+The level-3 double-fast encoder now uses a match-length-only FSE state loop when both literal-length and offset tables are run-length. Both omitted states emit zero bits; their literal-length and offset extra bits are still written in the original order. A phase trace found this table combination in 98,098 of 99,099 structured sequence blocks and 31,031 of 35,035 mixed blocks over 1,000 frames. Six alternating old/new pairs of 10,000 frames gained 3.22% median on structured input (6/6 wins) and 4.45% on mixed (5/6). Zero, repeated, and random controls were near baseline. On a separate 1-MiB varied-text corpus, the literal-length table was never run-length and six 10,000-frame pairs were neutral (−0.40% median, 3/6 wins). Every candidate frame matched the reference bytes, optimized GCC acceptance passed 12/12, and focused MSVC compression parity passed. The level-4 worker's `.text` section is unchanged.
+
+These independent six-trial candidate/reference comparisons checked compressed bytes and both decoders on both encodings. Structured, mixed, and random used 3,000 frames per trial; zero and repeated used 10,000. The level-3 structured lead is narrow and timing sensitive. Raw phase traces, old/new controls, and paired reports are under `out/l3-phase-modes-20261102/` and `out/l3-double-rle-writer-20261102/`.
+
+| Input | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Zero | 19963.37 | 7753.26 | 257.48% | 6.00 | 6.59 | 91.02% | 127.38 | 628.16 | 20.28% |
+| Repeated | 14747.55 | 8713.14 | 169.26% | 6.00 | 6.64 | 90.44% | 127.38 | 628.16 | 20.28% |
+| Structured | 740.97 | 728.01 | 101.78% | 6.12 | 6.74 | 90.82% | 127.38 | 628.16 | 20.28% |
+| Random | 3505.03 | 2846.51 | 123.13% | 6.98 | 6.61 | 105.59% | 127.38 | 628.16 | 20.28% |
+| Mixed | 2105.57 | 1778.04 | 118.42% | 6.22 | 6.78 | 91.78% | 127.38 | 628.16 | 20.28% |
 
 ## Current optimal-parser specialization
 
@@ -214,7 +228,7 @@ Six alternating native-targeted Release trials per row after the single-load seq
 
 ## Earlier 22-level mixed-input screen
 
-The following compression screen was collected on 2026-10-24 with GCC 13 Release `-O3`, one-MiB deterministic mixed input, six alternating trials per level, 300 frames per trial at levels 1–15 and 100 at levels 16–22. Every trial passed exact compressed-byte parity and reciprocal decoding. It predates later retained optimizations; use the [current evaluation](#current-evaluation) for this checkout.
+The following compression screen was collected on 2026-10-24 with GCC 13 Release `-O3`, one-MiB deterministic mixed input, six alternating trials per level, 300 frames per trial at levels 1–15 and 100 at levels 16–22. Every trial passed exact compressed-byte parity and reciprocal decoding. It predates later retained optimizations; use the [current matrix](BENCHMARKS_INPUTS.md) for this checkout.
 
 | Level / corpus | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -243,7 +257,7 @@ The following compression screen was collected on 2026-10-24 with GCC 13 Release
 
 <!-- SPH_ZSTDPP_EVAL_BEGIN -->
 
-## Current evaluation
+## Mixed-input screening evaluation
 
 Generated by `zstdpp_eval` using **GNU 13.3.0**, Release, 3 alternating trials of 200 timed iterations each, and a deterministic 1048576-byte mixed corpus. **Key: `C++` is sph-zstd++; `Reference` is reference zstd.** Code size is the complete worker executable; memory is peak resident set size, so both intentionally include runtime overhead. Each percentage is C++ / Reference * 100, computed before display rounding. Higher is better for throughput; lower is better for memory and code size.
 

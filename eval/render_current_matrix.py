@@ -243,17 +243,22 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
                         (16, args.confirmed_l16)) if present]
     confirmed_note = (" The mixed-input level " + " and ".join(confirmed_levels) +
                       " compression rows use longer confirmed measurements; the "
-                      "[short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report."
+                      "[short-screen rows](BENCHMARKS.md#mixed-input-screening-evaluation) remain in the evaluation report."
                       if confirmed_levels else "")
     if structured_levels:
         confirmed_note += (" Structured compression levels " +
                            ", ".join(map(str, sorted(structured_levels))) +
                            " use longer six-trial confirmations in "
                            "[BENCHMARKS.md](BENCHMARKS.md#confirmed-structured-input-compression).")
-    if confirmed_double_fast_levels:
-        confirmed_note += (" Compression levels " +
-                           ", ".join(map(str, sorted(confirmed_double_fast_levels))) +
-                           " use six-trial current-candidate confirmations on all five inputs in "
+    if 3 in confirmed_double_fast_levels:
+        confirmed_note += (" Compression level 3 uses six-trial confirmations on all five inputs in "
+                           "[BENCHMARKS.md](BENCHMARKS.md#confirmed-level-3-double-rle-sequence-writer).")
+    guard_levels = sorted(level for level in confirmed_double_fast_levels if level != 3)
+    if guard_levels:
+        confirmed_note += (" Compression level" + ("s " if len(guard_levels) != 1 else " ") +
+                           ", ".join(map(str, guard_levels)) +
+                           (" use " if len(guard_levels) != 1 else " uses ") +
+                           "six-trial current-candidate confirmations on all five inputs in "
                            "[BENCHMARKS.md](BENCHMARKS.md#confirmed-double-fast-guard-compression).")
     if confirmed_greedy_inputs:
         confirmed_note += (" Greedy compression level 5 uses six-trial confirmations on " +
@@ -273,7 +278,7 @@ Measured {args.date} with optimized GCC 13 Release `-O3` workers from the curren
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 
-[README overview](README.md#performance) · [Current mixed-input measurements](BENCHMARKS.md#current-evaluation) · [Experiment history](PERFORMANCE_HISTORY.md)
+[README overview](README.md#performance) · [Mixed-input screening measurements](BENCHMARKS.md#mixed-input-screening-evaluation) · [Experiment history](PERFORMANCE_HISTORY.md)
 
 ## Compression
 
