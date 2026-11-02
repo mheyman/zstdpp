@@ -616,16 +616,17 @@ namespace sph::zstd
                             {
                                 // Ultra2 seeds entropy prices with a preliminary
                                 // first-block parse, then forgets only its history.
-                                parsed_ = detail::parse_optimal_block(match_state_, input, block_begin,
-                                    bytes.size(), compression_workspace_, std::move(parsed_), true,
+                                parsed_ = detail::parse_optimal_block<true>(match_state_, input, block_begin,
+                                    bytes.size(), compression_workspace_, std::move(parsed_),
                                     effective_parameters_.target_length);
                                 match_state_.reset();
                                 compression_workspace_.optimal.repeat_offsets = initial_optimal_repeats;
                             }
                         }
-                        parsed_ = detail::parse_optimal_block(match_state_, input, block_begin,
-                            bytes.size(), compression_workspace_, std::move(parsed_),
-                            effective_parameters_.strategy != compression_strategy::binary_tree_optimal,
+                        parsed_ = detail::parse_optimal_block<
+                            effective_parameters_.strategy != compression_strategy::binary_tree_optimal>(
+                            match_state_, input, block_begin, bytes.size(),
+                            compression_workspace_, std::move(parsed_),
                             effective_parameters_.target_length);
                     }
                     else

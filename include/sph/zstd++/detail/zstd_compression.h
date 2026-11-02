@@ -5091,12 +5091,13 @@ namespace sph::zstd::detail
     // immediately: `matches` is one reusable per-position scratch row, while
     // `paths` stores the dynamic-programming frontier.  This keeps the parser
     // allocation-free after compressor construction.
-    template <typename Matcher, bool AlignedLiterals>
+    template <bool Accurate, typename Matcher, bool AlignedLiterals>
     [[nodiscard]] inline auto parse_optimal_block(Matcher& matcher,
         std::span<std::uint8_t const> input, std::size_t block_begin,
         std::size_t block_size, basic_compression_workspace<AlignedLiterals>& workspace,
-        parsed_block result, bool accurate, std::size_t sufficient_length) -> parsed_block
+        parsed_block result, std::size_t sufficient_length) -> parsed_block
     {
+        constexpr bool accurate{Accurate};
         result.sequences.clear();
         result.input_begin = block_begin;
         result.trailing_literal_position = block_begin;
@@ -5328,6 +5329,19 @@ namespace sph::zstd::detail
         std::fprintf(stderr, "E %zu\n", result.trailing_literal_length);
 #endif
         return result;
+    }
+
+    template <typename Matcher, bool AlignedLiterals>
+    [[nodiscard]] inline auto parse_optimal_block(Matcher& matcher,
+        std::span<std::uint8_t const> input, std::size_t block_begin,
+        std::size_t block_size, basic_compression_workspace<AlignedLiterals>& workspace,
+        parsed_block result, bool accurate, std::size_t sufficient_length) -> parsed_block
+    {
+        if (accurate)
+            return parse_optimal_block<true>(matcher, input, block_begin, block_size,
+                workspace, std::move(result), sufficient_length);
+        return parse_optimal_block<false>(matcher, input, block_begin, block_size,
+            workspace, std::move(result), sufficient_length);
     }
 
     enum class sequence_table_mode : std::uint8_t
