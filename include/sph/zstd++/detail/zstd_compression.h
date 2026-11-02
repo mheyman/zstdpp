@@ -6113,6 +6113,17 @@ namespace sph::zstd::detail
                 match_state.encode(bits, match_code);
                 literal_state.encode(bits, literal_code);
             }
+            if constexpr (GroupFse && CollectedLiterals &&
+                std::is_same_v<ParsedView, compact_parsed_block_view>)
+            {
+                // No extra LL/OF bits are emitted for the common zero-literal,
+                // offBase-1 record. Its FSE state bits were already written.
+                if ((literal_code | offset_code) == 0U)
+                {
+                    bits.append(sequence.match_length - 3U, match_length_bits[match_code]);
+                    continue;
+                }
+            }
             if constexpr (PackedLengthBits)
             {
                 auto const ll_bits{literal_length_bits[literal_code]};

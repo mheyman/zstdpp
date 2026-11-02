@@ -4,6 +4,20 @@ These measurements compare optimized, isolated sph-zstd++ (`C++`) and bundled re
 
 The [current 22-level mixed-input evaluation](#current-evaluation) was run on 2026-11-01 from this checkout with GCC 13 Release. The [full current matrix](BENCHMARKS_INPUTS.md) covers mixed, zero-filled, repeated, structured, and seeded-random data from the same optimized build. The earlier focused tables further below are dated snapshots from prior changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
 
+## Confirmed level-1 common sequence writer
+
+The compact collected-literal writer skips LL and OF extra-bit appends for the common record whose literal and offset codes are both zero. Its FSE state bits are still emitted. A saved-binary comparison with exact reference frames gained 2.30% median on six alternating 3,000-frame structured pairs (5/6 wins) and 2.44% on seven 1,000-frame mixed pairs (7/7 wins). A larger bit-writer output chunk was tried separately and reverted after a 0.56% median loss on seven structured pairs. The optimized GCC acceptance suite passed 12/12. Raw reports are under `out/l1-common-bit-20261101/`.
+
+The table uses six alternating candidate/reference trials per input. Structured, mixed, and random used 3,000 frames per trial; zero and repeated used 10,000. Every compressed frame matched reference bytes, and both decoders recovered both encodings. The structured lead is narrow and sensitive to timing variation.
+
+| Input | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| zero | 41528.33 | 8534.57 | 486.59% | 5.11 | 5.87 | 87.12% | 131.25 | 628.16 | 20.89% |
+| repeated | 25518.54 | 9896.44 | 257.86% | 5.09 | 5.86 | 86.84% | 131.25 | 628.16 | 20.89% |
+| structured | 676.36 | 667.89 | 101.27% | 5.23 | 6.13 | 85.25% | 131.25 | 628.16 | 20.89% |
+| random | 3849.93 | 2972.76 | 129.51% | 6.08 | 5.99 | 101.50% | 131.25 | 628.16 | 20.89% |
+| mixed | 2407.44 | 2127.73 | 113.15% | 5.51 | 6.12 | 89.98% | 131.25 | 628.16 | 20.89% |
+
 ## Confirmed direct offBase level 5 compression
 
 The GCC 13 greedy parser now stores the encoded `offBase` in its existing 12-byte sequence record. The encoder reads that value in its code-gathering and reverse-bitstream passes. With the final source form, six alternating saved-binary old/new pairs gained 8.60% median on 3,000 structured frames and 6.23% on 10,000 mixed frames; both won 6/6. Repeated input was nearly unchanged (-0.05%, 3/6) over 10,000 frames, random was +0.13% (4/6) over 3,000, and zero lost 2.29% (1/6) over 10,000 while remaining more than twice as fast as reference. Every trial emitted the exact reference frame. Optimized GCC CTest passed 12/12, and a unit control checks the direct record against the logical sequence fields. The rebuilt level-6 worker's `.text` section matches its saved baseline exactly.
