@@ -98,7 +98,7 @@ def confirmed_pair(path, code_sizes):
             *code_sizes)
 
 
-def confirmed_decoder_pairs(directory, level, code_sizes):
+def confirmed_decoder_pairs(directory, level, code_sizes, expected_iterations=10000):
     samples = {"cpp": [], "reference": []}
     for trial in range(1, 7):
         for name in samples:
@@ -108,12 +108,13 @@ def confirmed_decoder_pairs(directory, level, code_sizes):
             if len(rows) != 1 or len(rows[0]) != 5:
                 raise ValueError(f"invalid decoder trial: {path}")
             elapsed, peak, input_bytes, output_bytes, iterations = map(int, rows[0])
-            if elapsed <= 0 or peak <= 0 or input_bytes <= 0 or output_bytes != 1048576 or iterations != 10000:
+            if elapsed <= 0 or peak <= 0 or input_bytes <= 0 or output_bytes != 1048576 or iterations != expected_iterations:
                 raise ValueError(f"unexpected decoder trial values: {path}")
             samples[name].append((elapsed, peak))
     cpp_elapsed = median(row[0] for row in samples["cpp"])
     reference_elapsed = median(row[0] for row in samples["reference"])
-    return (10000 * 1e9 / cpp_elapsed, 10000 * 1e9 / reference_elapsed,
+    return (expected_iterations * 1e9 / cpp_elapsed,
+            expected_iterations * 1e9 / reference_elapsed,
             median(row[1] for row in samples["cpp"]) / 1048576,
             median(row[1] for row in samples["reference"]) / 1048576,
             *code_sizes)
@@ -140,6 +141,8 @@ def main():
                         help="longer paired compression result for one input and level")
     parser.add_argument("--confirmed-structured-decode", type=Path,
                         help="six longer paired structured decoder trials for levels 16–22")
+    parser.add_argument("--confirmed-random-decode", type=Path,
+                        help="six paired 100,000-frame random decoder trials for levels 3 and 4")
     args = parser.parse_args()
     data = load_eval(args.mixed, "mixed")
     for name in KINDS[:-1]:
@@ -177,6 +180,11 @@ def main():
         for level in range(16, 23):
             key = "structured", level, "decompress"
             data[key] = confirmed_decoder_pairs(args.confirmed_structured_decode, level, data[key][4:])
+    if args.confirmed_random_decode:
+        for level in (3, 4):
+            key = "random", level, "decompress"
+            data[key] = confirmed_decoder_pairs(args.confirmed_random_decode, level,
+                                                data[key][4:], 100000)
 
     confirmation_note = ""
     if args.confirmed_l13:
@@ -209,9 +217,12 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
 
 ### Decompression (% of reference)
 
-""" + ("Structured levels 16–22 use six alternating 10,000-frame exact-output trials; "
-       "the other cells use the screening trials described above.\n\n"
-       if args.confirmed_structured_decode else "") + grid(data, "decompress") + """
+""" + ("Structured levels 16–22 use six alternating 10,000-frame exact-output trials.\n\n"
+       if args.confirmed_structured_decode else "") + (
+       "Random levels 3 and 4 use six alternating 100,000-frame exact-output "
+       "[confirmations](BENCHMARKS.md#confirmed-random-input-decompression); "
+       "their throughput ratios remain close and variable.\n\n"
+       if args.confirmed_random_decode else "") + grid(data, "decompress") + """
 
 <details>
 <summary>Absolute C++ and reference measurements for every level and input</summary>
@@ -236,6 +247,10 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
     structured_note = (" Structured decompression levels 16–22 below use six alternating "
                        "10,000-frame exact-output trials."
                        if args.confirmed_structured_decode else "")
+    random_decode_note = (" Random decompression levels 3 and 4 use six alternating "
+                          "100,000-frame exact-output trials in "
+                          "[BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-decompression)."
+                          if args.confirmed_random_decode else "")
     confirmed_levels = [str(level) for level, present in ((13, args.confirmed_l13),
                         (16, args.confirmed_l16)) if present]
     confirmed_note = (" The mixed-input level " + " and ".join(confirmed_levels) +
@@ -254,7 +269,7 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
                            "[BENCHMARKS.md](BENCHMARKS.md#confirmed-double-fast-guard-compression).")
     details = f"""# Current benchmark matrix: all input shapes
 
-Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results.{confirmed_note}{structured_note}
+Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results.{confirmed_note}{structured_note}{random_decode_note}
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 

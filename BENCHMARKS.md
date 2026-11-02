@@ -49,6 +49,15 @@ After changing the level-3/4 repeat-offset checks to match the reference's eager
 | 4 | Random | 3499.15 | 2760.78 | 126.75% | 8.47 | 7.99 | 106.07% | 127.38 | 628.16 | 20.28% |
 | 4 | Mixed | 2016.32 | 1693.72 | 119.05% | 7.72 | 8.00 | 96.48% | 127.38 | 628.16 | 20.28% |
 
+## Confirmed random-input decompression
+
+The short random-input decoder screen suggested a level-3/4 gap. Six alternating, CPU-pinned trials of 100,000 frames per level used the current reference-produced 1-MiB random frame and optimized workers. Both workers verified the decoded output, and the C++ worker checked for allocations after warmup. The longer medians are approximately even; individual trial ratios varied in both directions, so no repeatable random-decoder deficit or speedup is claimed. Raw CSVs are under `out/structured-gap-20261101/random-decode-confirm/`.
+
+| Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 3 | 42255.91 | 41975.51 | 100.67% | 13.18 | 13.18 | 100.00% | 123.28 | 202.89 | 60.76% |
+| 4 | 40776.99 | 40675.21 | 100.25% | 13.18 | 13.18 | 100.00% | 123.28 | 202.89 | 60.76% |
+
 ## Earlier focused measurements
 
 The following paired reports were collected with optimized builds on 2026-10-25. Each table is a measured snapshot from the named change, not a claim that all rows came from the same build. All nine throughput, memory, and code-size comparison columns are retained.
