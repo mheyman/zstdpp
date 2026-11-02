@@ -1571,18 +1571,26 @@ namespace
         for (std::size_t index{}; index < structured.size(); ++index)
             structured[index] = static_cast<std::uint8_t>((index / 16U + index % 7U) & 255U);
         auto const mixed{make_mixed_entropy_input()};
-        auto const structured_frame{reference_compress(structured, 18)};
+        auto const structured_frame_16{reference_compress(structured, 16)};
+        auto const structured_frame_17{reference_compress(structured, 17)};
+        auto const structured_frame_18{reference_compress(structured, 18)};
         auto const mixed_frame{reference_compress(mixed, 18)};
         std::vector<std::uint8_t> decoded(structured.size());
         auto decompressor = sph::zstd::zstd_decompress{
             [](std::span<std::uint8_t const>) {}};
-        std::array<std::vector<std::uint8_t> const*, 4> const inputs{
-            &structured, &structured, &mixed, &structured};
-        for (auto const* input : inputs)
+        std::array<std::pair<std::vector<std::uint8_t> const*,
+            std::vector<std::uint8_t> const*>, 7> const cases{{
+            {&structured_frame_16, &structured},
+            {&structured_frame_16, &structured},
+            {&structured_frame_17, &structured},
+            {&structured_frame_17, &structured},
+            {&structured_frame_18, &structured},
+            {&mixed_frame, &mixed},
+            {&structured_frame_16, &structured}}};
+        for (auto const& [frame, input] : cases)
         {
-            auto const& frame{input == &mixed ? mixed_frame : structured_frame};
             decompressor.reset();
-            decompressor.decompress_frame(frame, decoded);
+            decompressor.decompress_frame(*frame, decoded);
             check(decoded == *input,
                 "cached and changed sequence tables decode across frame resets");
         }

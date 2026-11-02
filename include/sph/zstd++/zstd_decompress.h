@@ -804,15 +804,49 @@ namespace sph::zstd
 
         struct sequence_cache_workspace
         {
+            struct extra_tables
+            {
+                std::array<sequence_table_cache, 3> entries{};
+                std::size_t next_entry{};
+                std::size_t frame_misses{};
+            };
+
             sequence_table_cache literal_length;
             sequence_table_cache offset;
             sequence_table_cache match_length;
+            extra_tables literal_length_extra;
+            extra_tables offset_extra;
+            extra_tables match_length_extra;
         };
+
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+        __attribute__((noinline))
+#endif
+        static auto find_extra_sequence_table(
+            sequence_cache_workspace::extra_tables const& extra,
+            std::span<std::uint8_t const> description,
+            detail::sequence_table& table) -> std::size_t
+        {
+            for (auto const& candidate : extra.entries)
+            {
+                if (candidate.description_size != 0U &&
+                    description.size() >= candidate.description_size &&
+                    std::memcmp(description.data(), candidate.description.data(), candidate.description_size) == 0)
+                {
+                    detail::copy_sequence_table(candidate.table, table);
+                    return candidate.description_size;
+                }
+            }
+            return 0U;
+        }
 
         template <std::size_t Count, std::size_t NormCount>
         void load_sequence_table(
             detail::sequence_table& table,
             sequence_table_cache& cache,
+            sequence_cache_workspace::extra_tables& extra,
             std::uint8_t mode,
             std::span<std::uint8_t const> source,
             std::size_t& offset,
@@ -846,8 +880,8 @@ namespace sph::zstd
             case 2:
             {
                 auto const description{source.subspan(offset)};
-                // Decoding this header is deterministic for the table kind, so
-                // the previously consumed byte prefix identifies the same table.
+                // Most frames reuse one description. Keep that lookup on the
+                // direct path; only alternating descriptions need more probes.
                 if (cache.description_size != 0U &&
                     description.size() >= cache.description_size &&
                     std::memcmp(description.data(), cache.description.data(), cache.description_size) == 0)
@@ -855,6 +889,15 @@ namespace sph::zstd
                     offset += cache.description_size;
                     detail::copy_sequence_table(cache.table, table);
                     return;
+                }
+                if (cache.description_size != 0U && extra.frame_misses++ != 0U)
+                {
+                    if (auto const extra_size{find_extra_sequence_table(extra, description, table)};
+                        extra_size != 0U)
+                    {
+                        offset += extra_size;
+                        return;
+                    }
                 }
                 auto const counts{detail::read_normalized_counts(source.subspan(offset),
                     static_cast<unsigned>(Count - 1U))};
@@ -866,9 +909,20 @@ namespace sph::zstd
                 detail::build_sequence_table(counts, bases, additional_bits, table);
                 if (counts.bytes_consumed <= cache.description.size())
                 {
-                    std::memcpy(cache.description.data(), description.data(), counts.bytes_consumed);
-                    cache.description_size = counts.bytes_consumed;
-                    detail::copy_sequence_table(table, cache.table);
+                    if (cache.description_size == 0U)
+                    {
+                        std::memcpy(cache.description.data(), description.data(), counts.bytes_consumed);
+                        cache.description_size = counts.bytes_consumed;
+                        detail::copy_sequence_table(table, cache.table);
+                    }
+                    else if (extra.frame_misses > 1U)
+                    {
+                        auto& destination{extra.entries[extra.next_entry]};
+                        std::memcpy(destination.description.data(), description.data(), counts.bytes_consumed);
+                        destination.description_size = counts.bytes_consumed;
+                        detail::copy_sequence_table(table, destination.table);
+                        extra.next_entry = (extra.next_entry + 1U) % extra.entries.size();
+                    }
                 }
                 return;
             }
@@ -1154,13 +1208,16 @@ namespace sph::zstd
                 throw detail::entropy_error{"reserved Zstandard sequence-header bits are set"};
             }
             load_sequence_table(literal_length_table_, sequence_caches_->literal_length,
+                sequence_caches_->literal_length_extra,
                 static_cast<std::uint8_t>(modes >> 6U), source, offset,
                 9U, detail::literal_length_base, detail::literal_length_bits,
                 detail::literal_length_default_norm, 6U);
             load_sequence_table(offset_table_, sequence_caches_->offset,
+                sequence_caches_->offset_extra,
                 static_cast<std::uint8_t>((modes >> 4U) & 3U), source, offset,
                 8U, detail::offset_base, detail::offset_bits, detail::offset_default_norm, 5U);
             load_sequence_table(match_length_table_, sequence_caches_->match_length,
+                sequence_caches_->match_length_extra,
                 static_cast<std::uint8_t>((modes >> 2U) & 3U), source, offset,
                 9U, detail::match_length_base, detail::match_length_bits,
                 detail::match_length_default_norm, 6U);
@@ -1449,6 +1506,9 @@ namespace sph::zstd
 
         void reset_frame_state()
         {
+            sequence_caches_->literal_length_extra.frame_misses = 0U;
+            sequence_caches_->offset_extra.frame_misses = 0U;
+            sequence_caches_->match_length_extra.frame_misses = 0U;
             history_.clear();
             huffman_table_.valid = false;
             huffman_table_.size = 0U;
