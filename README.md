@@ -1,16 +1,16 @@
 # sph-zstd++
 
-A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zstd/), built around compile-time compression settings and callback-driven streaming. This repository also contains the reference zstd implementation used for byte-level compatibility checks and matched performance comparisons.
+A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zstd/) with compile-time compression settings and callback-driven streaming. The bundled reference implementation is used to check compressed bytes and measure performance at matching levels.
 
-[Use it](#use-it) · [Build and verify](#build-and-verify) · [Performance](#performance) · [Full benchmark matrix](BENCHMARKS_INPUTS.md) · [Roadmap](PERFORMANCE_PLAN.md)
+[Get started](#get-started) · [Build and test](#build-and-test) · [Performance](#performance) · [Detailed measurements](BENCHMARKS_INPUTS.md) · [Development progress](PERFORMANCE_PLAN.md)
 
-## Project status
+## What it supports
 
-This is an active port, with streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and fast through binary-tree match parsing. Dictionary and multithreaded modes are still missing.
+The library provides streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and match parsing from fast through binary-tree strategies. It is an active port; dictionary and multithreaded modes are still missing.
 
-The current benchmark matrix confirms byte-for-byte identical compressed output at levels 1–22 on five deterministic inputs. The acceptance suite checks the public API and decoding in both directions. See the [performance work list](PERFORMANCE_PLAN.md) for current optimization targets and the [experiment history](PERFORMANCE_HISTORY.md) for earlier results.
+The current benchmark matrix checks byte-for-byte compressed output at levels 1–22 on five deterministic inputs. The acceptance tests also check decoding in both directions. Current optimization work and past experiments are tracked in the [performance plan](PERFORMANCE_PLAN.md) and [history](PERFORMANCE_HISTORY.md).
 
-## Use it
+## Get started
 
 Add `include` to your C++23 include path, or link the header-only `sph::zstdpp` CMake target. Output is delivered to a callback whose span remains valid for that invocation. Call `finish()` explicitly; destructors do not emit or validate output.
 
@@ -55,7 +55,7 @@ auto compressor = sph::zstd::make_zstd_compress<settings>(callback);
 
 For a complete borrowed input, `compress_frame(span)` avoids copying it into streaming history. The streams also provide `update`, `flush` (compression), `reset`, status, byte counters, and parsed frame information.
 
-## Build and verify
+## Build and test
 
 ```text
 cmake -S . -B out/build -DSPH_ZSTDPP_BUILD_TESTS=ON
@@ -75,7 +75,7 @@ The tests compare resolved compression parameters and compressed bytes, and chec
 
 ## Performance
 
-Measured 2026-11-02 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison. Expand the section below for all nine absolute C++ and reference measurements at every level and input. The [full benchmark matrix](BENCHMARKS_INPUTS.md) adds input definitions and longer confirmations.
+Measured 2026-11-02 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
 
 ### Compression (% of reference)
 
