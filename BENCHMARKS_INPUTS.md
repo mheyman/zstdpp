@@ -1,6 +1,6 @@
 # Current benchmark matrix: all input shapes
 
-Measured 2026-11-01 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and 16 compression rows use longer confirmed measurements; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report. Structured compression levels 1, 2, 16 use longer six-trial confirmations in [BENCHMARKS.md](BENCHMARKS.md#confirmed-structured-input-compression). Compression levels 3, 4 use six-trial current-candidate confirmations on all five inputs in [BENCHMARKS.md](BENCHMARKS.md#confirmed-double-fast-guard-compression). Greedy compression level 5 uses six-trial confirmations on zero, repeated, structured, random, mixed inputs in [BENCHMARKS.md](BENCHMARKS.md#confirmed-direct-offbase-level-5-compression). Additional longer paired compression confirmations apply to mixed level 1, random level 1, repeated level 1, zero level 1. Random compression level 15 uses a longer six-trial confirmation in [BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-level-15-compression). Structured decompression levels 16–22 below use six alternating 10,000-frame exact-output trials. Random decompression levels 3 and 4 use six alternating 100,000-frame exact-output trials in [BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-decompression).
+Measured 2026-11-01 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. The mixed-input level 13 and 16 compression rows use longer confirmed measurements; the [short-screen rows](BENCHMARKS.md#current-evaluation) remain in the evaluation report. Structured compression levels 1, 16 use longer six-trial confirmations in [BENCHMARKS.md](BENCHMARKS.md#confirmed-structured-input-compression). Compression levels 3, 4 use six-trial current-candidate confirmations on all five inputs in [BENCHMARKS.md](BENCHMARKS.md#confirmed-double-fast-guard-compression). Greedy compression level 5 uses six-trial confirmations on zero, repeated, structured, random, mixed inputs in [BENCHMARKS.md](BENCHMARKS.md#confirmed-direct-offbase-level-5-compression). Additional longer paired compression confirmations apply to mixed level 1, mixed level 2, random level 1, random level 2, repeated level 1, repeated level 2, structured level 2, zero level 1, zero level 2. Random compression level 15 uses a longer six-trial confirmation in [BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-level-15-compression). Structured decompression levels 16–22 below use six alternating 10,000-frame exact-output trials. Random decompression levels 3 and 4 use six alternating 100,000-frame exact-output trials in [BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-decompression).
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 
@@ -11,7 +11,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | zero | 1 | 41528.33 | 8534.57 | 486.59% | 5.11 | 5.87 | 87.12% | 131.25 | 628.16 | 20.89% |
-| zero | 2 | 36922.51 | 8341.96 | 442.61% | 5.25 | 6.09 | 86.20% | 127.40 | 628.16 | 20.28% |
+| zero | 2 | 41707.11 | 8591.99 | 485.42% | 5.23 | 6.09 | 85.89% | 127.72 | 628.16 | 20.33% |
 | zero | 3 | 19831.26 | 7743.44 | 256.10% | 6.00 | 6.62 | 90.62% | 127.38 | 628.16 | 20.28% |
 | zero | 4 | 20272.44 | 7796.91 | 260.01% | 7.50 | 7.87 | 95.31% | 127.38 | 628.16 | 20.28% |
 | zero | 5 | 9622.57 | 4675.01 | 205.83% | 7.50 | 8.38 | 89.58% | 127.27 | 628.16 | 20.26% |
@@ -33,7 +33,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | zero | 21 | 5904.43 | 1578.14 | 374.14% | 21.59 | 22.21 | 97.21% | 145.16 | 628.16 | 23.11% |
 | zero | 22 | 5898.72 | 1574.96 | 374.53% | 21.64 | 22.29 | 97.08% | 145.16 | 628.16 | 23.11% |
 | repeated | 1 | 25518.54 | 9896.44 | 257.86% | 5.09 | 5.86 | 86.84% | 131.25 | 628.16 | 20.89% |
-| repeated | 2 | 25483.47 | 9616.03 | 265.01% | 5.25 | 6.09 | 86.27% | 127.40 | 628.16 | 20.28% |
+| repeated | 2 | 26415.17 | 9842.97 | 268.37% | 5.21 | 6.13 | 84.94% | 127.72 | 628.16 | 20.33% |
 | repeated | 3 | 14913.67 | 8860.90 | 168.31% | 6.00 | 6.53 | 91.87% | 127.38 | 628.16 | 20.28% |
 | repeated | 4 | 14826.18 | 8689.39 | 170.62% | 7.47 | 7.86 | 95.05% | 127.38 | 628.16 | 20.28% |
 | repeated | 5 | 8248.76 | 4925.82 | 167.46% | 7.51 | 8.38 | 89.67% | 127.27 | 628.16 | 20.26% |
@@ -55,7 +55,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | repeated | 21 | 1749.60 | 1601.32 | 109.26% | 21.68 | 22.27 | 97.34% | 145.16 | 628.16 | 23.11% |
 | repeated | 22 | 1745.66 | 1598.75 | 109.19% | 21.72 | 22.23 | 97.68% | 145.16 | 628.16 | 23.11% |
 | structured | 1 | 676.36 | 667.89 | 101.27% | 5.23 | 6.13 | 85.25% | 131.25 | 628.16 | 20.89% |
-| structured | 2 | 808.59 | 831.79 | 97.21% | 5.36 | 6.24 | 85.80% | 127.40 | 628.16 | 20.28% |
+| structured | 2 | 853.39 | 836.53 | 102.02% | 5.34 | 6.23 | 85.71% | 127.72 | 628.16 | 20.33% |
 | structured | 3 | 713.90 | 718.78 | 99.32% | 6.11 | 6.73 | 90.69% | 127.38 | 628.16 | 20.28% |
 | structured | 4 | 664.99 | 663.14 | 100.28% | 7.75 | 7.99 | 97.09% | 127.38 | 628.16 | 20.28% |
 | structured | 5 | 1040.24 | 1014.27 | 102.56% | 7.72 | 8.47 | 91.08% | 127.27 | 628.16 | 20.26% |
@@ -77,7 +77,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | structured | 21 | 227.56 | 194.19 | 117.18% | 21.73 | 22.25 | 97.67% | 145.16 | 628.16 | 23.11% |
 | structured | 22 | 229.76 | 201.35 | 114.11% | 21.67 | 22.29 | 97.20% | 145.16 | 628.16 | 23.11% |
 | random | 1 | 3849.93 | 2972.76 | 129.51% | 6.08 | 5.99 | 101.50% | 131.25 | 628.16 | 20.89% |
-| random | 2 | 3535.82 | 2863.19 | 123.49% | 6.14 | 6.18 | 99.34% | 127.40 | 628.16 | 20.28% |
+| random | 2 | 3715.75 | 3089.79 | 120.26% | 6.23 | 6.21 | 100.35% | 127.72 | 628.16 | 20.33% |
 | random | 3 | 3565.87 | 2846.17 | 125.29% | 6.98 | 6.68 | 104.47% | 127.38 | 628.16 | 20.28% |
 | random | 4 | 3499.15 | 2760.78 | 126.75% | 8.47 | 7.99 | 106.07% | 127.38 | 628.16 | 20.28% |
 | random | 5 | 2373.86 | 1704.49 | 139.27% | 8.50 | 8.47 | 100.37% | 127.27 | 628.16 | 20.26% |
@@ -99,7 +99,7 @@ Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `stru
 | random | 21 | 12.99 | 11.38 | 114.15% | 22.84 | 22.39 | 102.00% | 145.16 | 628.16 | 23.11% |
 | random | 22 | 14.79 | 10.93 | 135.32% | 22.79 | 22.34 | 102.05% | 145.16 | 628.16 | 23.11% |
 | mixed | 1 | 2407.44 | 2127.73 | 113.15% | 5.51 | 6.12 | 89.98% | 131.25 | 628.16 | 20.89% |
-| mixed | 2 | 2736.67 | 2464.94 | 111.02% | 5.63 | 6.28 | 89.67% | 127.40 | 628.16 | 20.28% |
+| mixed | 2 | 2951.10 | 2562.09 | 115.18% | 5.59 | 6.24 | 89.64% | 127.72 | 628.16 | 20.33% |
 | mixed | 3 | 1996.26 | 1736.54 | 114.96% | 6.25 | 6.72 | 93.05% | 127.38 | 628.16 | 20.28% |
 | mixed | 4 | 2016.32 | 1693.72 | 119.05% | 7.72 | 8.00 | 96.48% | 127.38 | 628.16 | 20.28% |
 | mixed | 5 | 2231.56 | 1877.98 | 118.83% | 7.85 | 8.49 | 92.44% | 127.27 | 628.16 | 20.26% |

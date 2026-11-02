@@ -182,7 +182,7 @@ def main():
         key = kind, level, "compress"
         if kind not in KINDS or level not in range(1, 23) or key in confirmed_keys:
             raise ValueError(f"invalid or repeated compression confirmation: {kind}, {level}")
-        data[key] = confirmed_pair(Path(path_text), data[key][4:], level == 5)
+        data[key] = confirmed_pair(Path(path_text), data[key][4:], level in (2, 5))
         confirmed_keys.add(key)
         if level in (3, 4):
             confirmed_double_fast_levels.add(level)

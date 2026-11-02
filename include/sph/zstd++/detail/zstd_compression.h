@@ -5765,6 +5765,32 @@ namespace sph::zstd::detail
         bits.append(last.literal_length, literal_length_bits[last_ll]);
         bits.append(last.match_length - 3U, match_length_bits[last_ml]);
         bits.append(last_offset, last_of);
+        if constexpr (Wide && Grouped)
+        {
+            // Dense fast blocks commonly have fixed LL and OF codes. Their
+            // run-length tables emit no state bits; keep the ML-only loop hot.
+            if (literal_table.mode == sequence_table_mode::run_length &&
+                offset_table.mode == sequence_table_mode::run_length) [[likely]]
+            {
+                for (std::size_t index{last_index}; index-- > 0U;)
+                {
+                    auto const& sequence{parsed.sequences[index]};
+                    auto const ll{workspace.literal_codes[index]};
+                    auto const of{workspace.offset_codes[index]};
+                    auto const ml{workspace.match_codes[index]};
+                    auto const ml_bits{match_state.template encode_bits<true>(ml)};
+                    bits.append_unchecked(ml_bits.value, ml_bits.count);
+                    bits.append(sequence.literal_length, literal_length_bits[ll]);
+                    bits.append(sequence.match_length - 3U, match_length_bits[ml]);
+                    auto const encoded_offset{sequence.repeat_code != 0U ?
+                        static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
+                    bits.append(encoded_offset, of);
+                }
+                match_state.flush(bits);
+                bits.finish_into(output);
+                return;
+            }
+        }
         for (std::size_t index{last_index}; index-- > 0U;)
         {
             auto const& sequence{parsed.sequences[index]};

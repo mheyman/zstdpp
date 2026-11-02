@@ -4,6 +4,20 @@ These measurements compare optimized, isolated sph-zstd++ (`C++`) and bundled re
 
 The [current 22-level mixed-input evaluation](#current-evaluation) was run on 2026-11-01 from this checkout with GCC 13 Release. The [full current matrix](BENCHMARKS_INPUTS.md) covers mixed, zero-filled, repeated, structured, and seeded-random data from the same optimized build. The earlier focused tables further below are dated snapshots from prior changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
 
+## Confirmed level-2 double-RLE sequence writer
+
+The dense grouped writer now uses a block-level path when both literal-length and offset FSE tables are run-length. Those states emit no bits, so the path advances only the match-length FSE state and keeps the same extra-bit output. A phase trace found the double run-length shape in most structured level-2 blocks. The hinted production build gained 6.03% median against the saved optimized C++ binary on six alternating 3,000-frame structured pairs (6/6 wins); mixed gained 4.12% (6/6). Equal-work `perf` counters found 5.65% fewer instructions and cycles on structured input. Zero-filled input lost 3.50% in old/new pairs but remains far faster than reference. The unhinted layout was rejected after a 0.47% median structured loss. Reports and counters are under `out/l2-double-rle-likely-20261101/` and `out/l2-double-rle-20261101/`.
+
+The table uses six alternating candidate/reference trials per input. Structured, mixed, and random used 3,000 frames per trial; zero and repeated used 10,000. Every compressed frame matched the reference, both decoders recovered both encodings, and optimized GCC CTest passed 12/12. The structured lead over reference is narrow and should be repeated on other machines.
+
+| Input | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| zero | 41707.11 | 8591.99 | 485.42% | 5.23 | 6.09 | 85.89% | 127.72 | 628.16 | 20.33% |
+| repeated | 26415.17 | 9842.97 | 268.37% | 5.21 | 6.13 | 84.94% | 127.72 | 628.16 | 20.33% |
+| structured | 853.39 | 836.53 | 102.02% | 5.34 | 6.23 | 85.71% | 127.72 | 628.16 | 20.33% |
+| random | 3715.75 | 3089.79 | 120.26% | 6.23 | 6.21 | 100.35% | 127.72 | 628.16 | 20.33% |
+| mixed | 2951.10 | 2562.09 | 115.18% | 5.59 | 6.24 | 89.64% | 127.72 | 628.16 | 20.33% |
+
 ## Confirmed level-1 common sequence writer
 
 The compact collected-literal writer skips LL and OF extra-bit appends for the common record whose literal and offset codes are both zero. Its FSE state bits are still emitted. A saved-binary comparison with exact reference frames gained 2.30% median on six alternating 3,000-frame structured pairs (5/6 wins) and 2.44% on seven 1,000-frame mixed pairs (7/7 wins). A larger bit-writer output chunk was tried separately and reverted after a 0.56% median loss on seven structured pairs. The optimized GCC acceptance suite passed 12/12. Raw reports are under `out/l1-common-bit-20261101/`.
