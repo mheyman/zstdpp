@@ -591,6 +591,10 @@ namespace sph::zstd
                         parsed_ = match_state_.parse_collecting(input, block_begin, bytes.size(),
                             std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt,
                             compression_workspace_.literals);
+                    else if constexpr (effective_parameters_.strategy == compression_strategy::greedy &&
+                        Parameters.compression_level == 5)
+                        parsed_ = match_state_.template parse<true>(input, block_begin, bytes.size(),
+                            std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt);
                     else
 #elif defined(_MSC_VER)
                     // For the measured level-1 specialization, gather the
@@ -758,6 +762,12 @@ namespace sph::zstd
 #endif
 #endif
                             , compact_double_fast_index_tags_
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                            , (effective_parameters_.strategy == compression_strategy::greedy &&
+                               Parameters.compression_level == 5)
+#else
+                            , false
+#endif
                             >(
                             input, parsed_, compression_workspace_, compressed);
 #ifdef SPH_ZSTDPP_TRACE_PHASES

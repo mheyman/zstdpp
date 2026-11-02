@@ -317,6 +317,32 @@ namespace
         }
     }
 
+    void test_greedy_direct_offbase()
+    {
+        using namespace sph::zstd::detail;
+        std::vector<std::uint8_t> input(4096U);
+        for (std::size_t index{}; index < input.size(); ++index)
+            input[index] = static_cast<std::uint8_t>((index / 16U + index % 7U) & 255U);
+        using matcher_type = greedy_match_state<0U, false, 15U, 10U, 10U, 5U, 5U, true>;
+        matcher_type logical{15U, 10U, 10U, 5U, 5U};
+        matcher_type direct{15U, 10U, 10U, 5U, 5U};
+        auto const expected{logical.parse(input, 0U, input.size())};
+        auto const actual{direct.parse<true>(input, 0U, input.size())};
+        check(!expected.sequences.empty() && expected.sequences.size() == actual.sequences.size(),
+            "greedy direct-offBase parser preserves sequence count");
+        for (std::size_t index{}; index < expected.sequences.size(); ++index)
+        {
+            auto const& left{expected.sequences[index]};
+            auto const& right{actual.sequences[index]};
+            auto const offbase{left.repeat_code != 0U ?
+                static_cast<std::uint32_t>(left.repeat_code) : left.offset + 3U};
+            check(left.literal_length == right.literal_length &&
+                left.match_length == right.match_length && right.repeat_code == 0U &&
+                right.offset == offbase,
+                "greedy direct-offBase parser preserves each encoded sequence");
+        }
+    }
+
     template <unsigned MinimumMatch>
     void check_double_fast_tag_storage()
     {
@@ -3057,6 +3083,7 @@ int main()
         test_row_hash_cache();
         test_row_hash_salt_state();
         test_row_match_state();
+        test_greedy_direct_offbase();
         test_row_parser_workspace();
         check_row_batch_boundaries<4U>();
         check_row_batch_boundaries<5U>();

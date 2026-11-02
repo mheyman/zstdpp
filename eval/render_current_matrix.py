@@ -202,7 +202,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) explains inputs and confirmed rows. Expand the absolute tables below for all nine measurements.
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and links to longer confirmations. The collapsed tables below give all nine absolute measurements for every row.
 
 ### Compression (% of reference)
 
@@ -259,7 +259,7 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
         confirmed_note += (" Greedy compression level 5 uses six-trial confirmations on " +
                            ", ".join(kind for kind in KINDS if kind in confirmed_greedy_inputs) +
                            " inputs in [BENCHMARKS.md]"
-                           "(BENCHMARKS.md#confirmed-greedy-level-5-compression).")
+                           "(BENCHMARKS.md#confirmed-direct-offbase-level-5-compression).")
     if other_confirmed_compression:
         confirmed_note += (" Additional longer paired compression confirmations apply to " +
                            ", ".join(f"{kind} level {level}"

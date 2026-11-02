@@ -2482,6 +2482,7 @@ namespace sph::zstd::detail
             next_to_update3_ = next_to_update_;
         }
 
+        template <bool StoreOffBase = false>
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
             parsed_block result = {}, std::optional<bool> known_rle = std::nullopt) -> parsed_block
@@ -2505,7 +2506,10 @@ namespace sph::zstd::detail
                 if (block_size >= 1024U &&
                     (known_rle.has_value() ? *known_rle : is_rle(input.subspan(block_begin, block_size))))
                 {
-                    result.sequences.push_back(parsed_sequence{1U, block_size - 1U, 1U, 0U});
+                    if constexpr (StoreOffBase)
+                        result.sequences.push_back(parsed_sequence{1U, block_size - 1U, 4U, 0U});
+                    else
+                        result.sequences.push_back(parsed_sequence{1U, block_size - 1U, 1U, 0U});
                     result.trailing_literal_position = block_begin + block_size;
                     result.trailing_literal_length = 0U;
                     repeat_offsets_ = {1U, 4U, 8U};
@@ -2517,7 +2521,10 @@ namespace sph::zstd::detail
                 if (block_size >= 1024U &&
                     (known_rle.has_value() ? *known_rle : is_rle(input.subspan(block_begin, block_size))))
                 {
-                    result.sequences.push_back(parsed_sequence{1U, block_size - 1U, 1U, 0U});
+                    if constexpr (StoreOffBase)
+                        result.sequences.push_back(parsed_sequence{1U, block_size - 1U, 4U, 0U});
+                    else
+                        result.sequences.push_back(parsed_sequence{1U, block_size - 1U, 1U, 0U});
                     result.trailing_literal_position = block_begin + block_size;
                     result.trailing_literal_length = 0U;
                     repeat_offsets_ = {1U, 4U, 8U};
@@ -2529,9 +2536,19 @@ namespace sph::zstd::detail
                 if (block_size >= 1024U && is_rle(input.subspan(block_begin, block_size)))
                 {
                     if (block_begin == 0U)
-                        result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 1U});
+                    {
+                        if constexpr (StoreOffBase)
+                            result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 0U});
+                        else
+                            result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 1U});
+                    }
                     else
-                        result.sequences.push_back(parsed_sequence{0U, block_size, 1U, 0U});
+                    {
+                        if constexpr (StoreOffBase)
+                            result.sequences.push_back(parsed_sequence{0U, block_size, 4U, 0U});
+                        else
+                            result.sequences.push_back(parsed_sequence{0U, block_size, 1U, 0U});
+                    }
                     result.trailing_literal_position = block_begin + block_size;
                     result.trailing_literal_length = 0U;
                     repeat_offsets_ = {1U, 4U, 8U};
@@ -2542,7 +2559,10 @@ namespace sph::zstd::detail
             {
                 if (block_size >= 1024U && is_rle(input.subspan(block_begin, block_size)))
                 {
-                    result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 1U});
+                    if constexpr (StoreOffBase)
+                        result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 0U});
+                    else
+                        result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 1U});
                     result.trailing_literal_position = block_begin + block_size;
                     result.trailing_literal_length = 0U;
                     repeat_offsets_ = {1U, 4U, 8U};
@@ -2724,8 +2744,13 @@ namespace sph::zstd::detail
                     repeat_two = repeat_one;
                     repeat_one = offset;
                 }
-                result.sequences.push_back(parsed_sequence{
-                    match_start - anchor, match_length, offset, repeat_code});
+                if constexpr (StoreOffBase)
+                    result.sequences.push_back(parsed_sequence{
+                        match_start - anchor, match_length,
+                        repeat_code != 0U ? repeat_code : offset + 3U, 0U});
+                else
+                    result.sequences.push_back(parsed_sequence{
+                        match_start - anchor, match_length, offset, repeat_code});
                 position = match_start + match_length;
                 anchor = position;
                 if constexpr (RowMatch)
@@ -2740,8 +2765,11 @@ namespace sph::zstd::detail
                     auto const repeat_length{count_match(
                         input, position, position - repeat_two, block_end, 4U)};
                     std::swap(repeat_one, repeat_two);
-                    result.sequences.push_back(parsed_sequence{
-                        0U, repeat_length, repeat_one, 1U});
+                    if constexpr (StoreOffBase)
+                        result.sequences.push_back(parsed_sequence{0U, repeat_length, 1U, 0U});
+                    else
+                        result.sequences.push_back(parsed_sequence{
+                            0U, repeat_length, repeat_one, 1U});
                     position += repeat_length;
                     anchor = position;
                 }
@@ -5781,7 +5809,7 @@ namespace sph::zstd::detail
         bool DeferredCodes = false, bool WideSequenceBits = false,
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
-        bool ValidateCodesOnce = false,
+        bool ValidateCodesOnce = false, bool DirectOffBase = false,
         bool AlignedLiterals,
         typename ParsedView = parsed_block_view>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
@@ -5791,6 +5819,7 @@ namespace sph::zstd::detail
         static_assert(!WideSequenceBits || GroupedStateWrites);
         static_assert(!AdaptiveWideWrites || AdaptiveGroupedWrites);
         static_assert(!PackedLengthBits || GroupedStateWrites);
+        static_assert(!DirectOffBase || std::is_same_v<ParsedView, parsed_block_view>);
         output.clear();
         if (parsed.sequences.empty())
         {
@@ -5840,9 +5869,12 @@ namespace sph::zstd::detail
             else
             {
                 auto const& sequence{parsed.sequences[index]};
-                return {sequence.literal_length, sequence.match_length,
-                    sequence.repeat_code != 0U ?
-                        static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
+                if constexpr (DirectOffBase)
+                    return {sequence.literal_length, sequence.match_length, sequence.offset};
+                else
+                    return {sequence.literal_length, sequence.match_length,
+                        sequence.repeat_code != 0U ?
+                            static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
             }
         }};
         for (std::size_t index{}; index < parsed.sequences.size(); ++index)
@@ -6116,7 +6148,7 @@ namespace sph::zstd::detail
         bool DeferredCodes = false, bool WideSequenceBits = false,
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
-        bool ValidateCodesOnce = false,
+        bool ValidateCodesOnce = false, bool DirectOffBase = false,
         bool AlignedLiterals>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         compact_parsed_block const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
@@ -6125,7 +6157,7 @@ namespace sph::zstd::detail
         encode_sequences_block<CarefulSelection, GroupFse, CollectedLiterals,
             OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, WideSequenceBits,
             PackedLengthBits, GroupedStateWrites, AdaptiveGroupedWrites, AdaptiveWideWrites,
-            ValidateCodesOnce,
+            ValidateCodesOnce, DirectOffBase,
             AlignedLiterals, compact_parsed_block_view>(
                 input, compact_parsed_block_view{parsed}, workspace, output);
     }

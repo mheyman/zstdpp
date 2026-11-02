@@ -71,7 +71,7 @@ The tests compare resolved compression parameters and compressed bytes, and chec
 
 ## Performance
 
-Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) explains inputs and confirmed rows. Expand the absolute tables below for all nine measurements.
+Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; the [benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and links to longer confirmations. The collapsed tables below give all nine absolute measurements for every row.
 
 ### Compression (% of reference)
 
@@ -81,7 +81,7 @@ Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five 
 | 2 | 442.6% / 86.2% / 20.3% | 265.0% / 86.3% / 20.3% | 97.2% / 85.8% / 20.3% | 123.5% / 99.3% / 20.3% | 111.0% / 89.7% / 20.3% |
 | 3 | 256.1% / 90.6% / 20.3% | 168.3% / 91.9% / 20.3% | 99.3% / 90.7% / 20.3% | 125.3% / 104.5% / 20.3% | 115.0% / 93.1% / 20.3% |
 | 4 | 260.0% / 95.3% / 20.3% | 170.6% / 95.1% / 20.3% | 100.3% / 97.1% / 20.3% | 126.7% / 106.1% / 20.3% | 119.0% / 96.5% / 20.3% |
-| 5 | 205.8% / 89.9% / 20.3% | 167.3% / 89.6% / 20.3% | 94.7% / 91.0% / 20.3% | 141.1% / 100.9% / 20.3% | 113.7% / 92.2% / 20.3% |
+| 5 | 205.8% / 89.6% / 20.3% | 167.5% / 89.7% / 20.3% | 102.6% / 91.1% / 20.3% | 139.3% / 100.4% / 20.3% | 118.8% / 92.4% / 20.3% |
 | 6 | 366.9% / 89.3% / 19.6% | 183.1% / 88.7% / 19.6% | 144.9% / 90.6% / 19.6% | 111.4% / 100.1% / 19.6% | 130.7% / 89.6% / 19.6% |
 | 7 | 384.3% / 91.2% / 19.6% | 174.5% / 92.5% / 19.6% | 129.4% / 92.2% / 19.6% | 118.7% / 100.4% / 19.6% | 135.6% / 92.9% / 19.6% |
 | 8 | 327.1% / 90.9% / 19.6% | 172.2% / 91.8% / 19.6% | 133.4% / 91.8% / 19.6% | 134.0% / 98.9% / 19.6% | 112.7% / 93.3% / 19.6% |
@@ -138,7 +138,7 @@ Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five 
 | zero | 2 | 36922.51 | 8341.96 | 442.61% | 5.25 | 6.09 | 86.20% | 127.40 | 628.16 | 20.28% |
 | zero | 3 | 19831.26 | 7743.44 | 256.10% | 6.00 | 6.62 | 90.62% | 127.38 | 628.16 | 20.28% |
 | zero | 4 | 20272.44 | 7796.91 | 260.01% | 7.50 | 7.87 | 95.31% | 127.38 | 628.16 | 20.28% |
-| zero | 5 | 9903.09 | 4811.06 | 205.84% | 7.50 | 8.35 | 89.85% | 127.27 | 628.16 | 20.26% |
+| zero | 5 | 9622.57 | 4675.01 | 205.83% | 7.50 | 8.38 | 89.58% | 127.27 | 628.16 | 20.26% |
 | zero | 6 | 8229.55 | 2242.83 | 366.93% | 7.46 | 8.36 | 89.26% | 122.84 | 628.16 | 19.56% |
 | zero | 7 | 8144.32 | 2119.37 | 384.28% | 9.91 | 10.86 | 91.24% | 122.84 | 628.16 | 19.56% |
 | zero | 8 | 4556.28 | 1392.73 | 327.15% | 9.89 | 10.88 | 90.88% | 122.84 | 628.16 | 19.56% |
@@ -160,7 +160,7 @@ Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five 
 | repeated | 2 | 25483.47 | 9616.03 | 265.01% | 5.25 | 6.09 | 86.27% | 127.40 | 628.16 | 20.28% |
 | repeated | 3 | 14913.67 | 8860.90 | 168.31% | 6.00 | 6.53 | 91.87% | 127.38 | 628.16 | 20.28% |
 | repeated | 4 | 14826.18 | 8689.39 | 170.62% | 7.47 | 7.86 | 95.05% | 127.38 | 628.16 | 20.28% |
-| repeated | 5 | 8599.83 | 5140.86 | 167.28% | 7.50 | 8.37 | 89.64% | 127.27 | 628.16 | 20.26% |
+| repeated | 5 | 8248.76 | 4925.82 | 167.46% | 7.51 | 8.38 | 89.67% | 127.27 | 628.16 | 20.26% |
 | repeated | 6 | 4376.64 | 2389.80 | 183.14% | 7.46 | 8.42 | 88.68% | 122.84 | 628.16 | 19.56% |
 | repeated | 7 | 4278.26 | 2451.24 | 174.53% | 10.00 | 10.81 | 92.49% | 122.84 | 628.16 | 19.56% |
 | repeated | 8 | 2692.18 | 1563.20 | 172.22% | 9.97 | 10.86 | 91.78% | 122.84 | 628.16 | 19.56% |
@@ -182,7 +182,7 @@ Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five 
 | structured | 2 | 808.59 | 831.79 | 97.21% | 5.36 | 6.24 | 85.80% | 127.40 | 628.16 | 20.28% |
 | structured | 3 | 713.90 | 718.78 | 99.32% | 6.11 | 6.73 | 90.69% | 127.38 | 628.16 | 20.28% |
 | structured | 4 | 664.99 | 663.14 | 100.28% | 7.75 | 7.99 | 97.09% | 127.38 | 628.16 | 20.28% |
-| structured | 5 | 974.38 | 1028.87 | 94.70% | 7.75 | 8.53 | 90.95% | 127.27 | 628.16 | 20.26% |
+| structured | 5 | 1040.24 | 1014.27 | 102.56% | 7.72 | 8.47 | 91.08% | 127.27 | 628.16 | 20.26% |
 | structured | 6 | 2752.53 | 1898.97 | 144.95% | 7.50 | 8.27 | 90.63% | 122.84 | 628.16 | 19.56% |
 | structured | 7 | 2260.97 | 1747.80 | 129.36% | 10.00 | 10.84 | 92.23% | 122.84 | 628.16 | 19.56% |
 | structured | 8 | 1504.85 | 1127.85 | 133.43% | 9.97 | 10.86 | 91.82% | 122.84 | 628.16 | 19.56% |
@@ -204,7 +204,7 @@ Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five 
 | random | 2 | 3535.82 | 2863.19 | 123.49% | 6.14 | 6.18 | 99.34% | 127.40 | 628.16 | 20.28% |
 | random | 3 | 3565.87 | 2846.17 | 125.29% | 6.98 | 6.68 | 104.47% | 127.38 | 628.16 | 20.28% |
 | random | 4 | 3499.15 | 2760.78 | 126.75% | 8.47 | 7.99 | 106.07% | 127.38 | 628.16 | 20.28% |
-| random | 5 | 2443.77 | 1732.20 | 141.08% | 8.47 | 8.40 | 100.86% | 127.27 | 628.16 | 20.26% |
+| random | 5 | 2373.86 | 1704.49 | 139.27% | 8.50 | 8.47 | 100.37% | 127.27 | 628.16 | 20.26% |
 | random | 6 | 2074.75 | 1862.35 | 111.41% | 8.48 | 8.47 | 100.09% | 122.84 | 628.16 | 19.56% |
 | random | 7 | 1622.80 | 1367.08 | 118.71% | 10.99 | 10.94 | 100.45% | 122.84 | 628.16 | 19.56% |
 | random | 8 | 1812.76 | 1352.64 | 134.02% | 10.88 | 11.00 | 98.92% | 122.84 | 628.16 | 19.56% |
@@ -226,7 +226,7 @@ Measured 2026-11-01 with optimized GCC 13 against the bundled reference on five 
 | mixed | 2 | 2736.67 | 2464.94 | 111.02% | 5.63 | 6.28 | 89.67% | 127.40 | 628.16 | 20.28% |
 | mixed | 3 | 1996.26 | 1736.54 | 114.96% | 6.25 | 6.72 | 93.05% | 127.38 | 628.16 | 20.28% |
 | mixed | 4 | 2016.32 | 1693.72 | 119.05% | 7.72 | 8.00 | 96.48% | 127.38 | 628.16 | 20.28% |
-| mixed | 5 | 2426.89 | 2134.02 | 113.72% | 7.88 | 8.54 | 92.23% | 127.27 | 628.16 | 20.26% |
+| mixed | 5 | 2231.56 | 1877.98 | 118.83% | 7.85 | 8.49 | 92.44% | 127.27 | 628.16 | 20.26% |
 | mixed | 6 | 2347.37 | 1795.94 | 130.70% | 7.61 | 8.49 | 89.60% | 122.84 | 628.16 | 19.56% |
 | mixed | 7 | 2195.34 | 1619.27 | 135.58% | 10.25 | 11.03 | 92.92% | 122.84 | 628.16 | 19.56% |
 | mixed | 8 | 1352.46 | 1200.27 | 112.68% | 10.24 | 10.98 | 93.28% | 122.84 | 628.16 | 19.56% |
