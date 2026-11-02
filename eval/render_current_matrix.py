@@ -64,7 +64,7 @@ def detailed_table(data, operation, kinds=KINDS):
     return "\n".join(lines)
 
 
-def confirmed_pair(path, code_sizes):
+def confirmed_pair(path, code_sizes, allow_cpp_code_size_change=False):
     report = path.read_text(encoding="utf-8")
     rows = [line for line in report.splitlines()
             if line.startswith("| ") and line[2:3].isdigit()]
@@ -73,9 +73,11 @@ def confirmed_pair(path, code_sizes):
     values = [float(value.strip()) for value in rows[0].strip("|").split("|")]
     if len(values) != 9:
         raise ValueError(f"expected nine benchmark metrics: {path}")
-    if any(abs(values[index] - code_sizes[position]) > 0.01
-           for position, index in enumerate((6, 7))):
+    if abs(values[7] - code_sizes[1]) > 0.01 or (
+            not allow_cpp_code_size_change and abs(values[6] - code_sizes[0]) > 0.01):
         raise ValueError(f"confirmed worker code sizes differ from the matrix: {path}")
+    if allow_cpp_code_size_change:
+        code_sizes = values[6], code_sizes[1]
     with (path.parent / "trials.csv").open(newline="") as stream:
         trials = list(csv.DictReader(stream))
     if len(trials) < 2 or any(row["exact_bytes"] != "true" for row in trials):
@@ -172,15 +174,22 @@ def main():
         data[key] = confirmed_pair(Path(path_text), data[key][4:])
         structured_levels.append(level)
         confirmed_keys.add(key)
-    confirmed_compression_levels = set()
+    confirmed_double_fast_levels = set()
+    confirmed_greedy_inputs = set()
+    other_confirmed_compression = set()
     for kind, level_text, path_text in args.confirmed_compression:
         level = int(level_text)
         key = kind, level, "compress"
         if kind not in KINDS or level not in range(1, 23) or key in confirmed_keys:
             raise ValueError(f"invalid or repeated compression confirmation: {kind}, {level}")
-        data[key] = confirmed_pair(Path(path_text), data[key][4:])
+        data[key] = confirmed_pair(Path(path_text), data[key][4:], level == 5)
         confirmed_keys.add(key)
-        confirmed_compression_levels.add(level)
+        if level in (3, 4):
+            confirmed_double_fast_levels.add(level)
+        elif level == 5:
+            confirmed_greedy_inputs.add(kind)
+        else:
+            other_confirmed_compression.add((kind, level))
     if args.confirmed_structured_decode:
         for level in range(16, 23):
             key = "structured", level, "decompress"
@@ -241,11 +250,20 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
                            ", ".join(map(str, sorted(structured_levels))) +
                            " use longer six-trial confirmations in "
                            "[BENCHMARKS.md](BENCHMARKS.md#confirmed-structured-input-compression).")
-    if confirmed_compression_levels:
+    if confirmed_double_fast_levels:
         confirmed_note += (" Compression levels " +
-                           ", ".join(map(str, sorted(confirmed_compression_levels))) +
+                           ", ".join(map(str, sorted(confirmed_double_fast_levels))) +
                            " use six-trial current-candidate confirmations on all five inputs in "
                            "[BENCHMARKS.md](BENCHMARKS.md#confirmed-double-fast-guard-compression).")
+    if confirmed_greedy_inputs:
+        confirmed_note += (" Greedy compression level 5 uses six-trial confirmations on " +
+                           ", ".join(kind for kind in KINDS if kind in confirmed_greedy_inputs) +
+                           " inputs in [BENCHMARKS.md]"
+                           "(BENCHMARKS.md#confirmed-greedy-level-5-compression).")
+    if other_confirmed_compression:
+        confirmed_note += (" Additional longer paired compression confirmations apply to " +
+                           ", ".join(f"{kind} level {level}"
+                                     for kind, level in sorted(other_confirmed_compression)) + ".")
     if args.confirmed_random_l15:
         confirmed_note += (" Random compression level 15 uses a longer six-trial confirmation in "
                            "[BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-level-15-compression).")

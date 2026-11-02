@@ -12,6 +12,18 @@ The two-trial 100-frame screen reported 78.0% of reference, but a longer pinned-
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | 183.52 | 165.29 | 111.03% | 21.89 | 21.98 | 99.63% | 122.88 | 628.16 | 19.56% |
 
+## Confirmed greedy level 5 compression
+
+GCC 13's level-5 greedy row matcher now uses a simple one-word match counter. Six alternating saved-binary old/new pairs of 10,000 frames each produced byte-identical reference frames on every input. Median changes on the final GCC-only build were structured +0.86% (6/6 wins), mixed +1.15% (3/6, with one large timing outlier), repeated -0.69% (2/6), random +5.25% (5/6), and zero +0.82% (5/6). The repeated path remains well ahead of reference; the structured path remains below it. The optimized GCC acceptance suite passed 12/12. The following independent C++/reference comparisons used six alternating 3,000-frame trials per input and checked exact frames plus both decoding directions. Raw reports are under `out/greedy-count-loop-20261101/`.
+
+| Input | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| zero | 9903.09 | 4811.06 | 205.84% | 7.50 | 8.35 | 89.85% | 127.27 | 628.16 | 20.26% |
+| repeated | 8599.83 | 5140.86 | 167.28% | 7.50 | 8.37 | 89.64% | 127.27 | 628.16 | 20.26% |
+| structured | 974.38 | 1028.87 | 94.70% | 7.75 | 8.53 | 90.95% | 127.27 | 628.16 | 20.26% |
+| random | 2443.77 | 1732.20 | 141.08% | 8.47 | 8.40 | 100.86% | 127.27 | 628.16 | 20.26% |
+| mixed | 2426.89 | 2134.02 | 113.72% | 7.88 | 8.54 | 92.23% | 127.27 | 628.16 | 20.26% |
+
 ## Confirmed mixed-input level 13 compression
 
 Short level-13 screens have varied widely. A pinned-core follow-up used six alternating trials of 1,000 frames each on the current optimized workers and 1-MiB mixed input. Every trial passed exact compressed-byte comparison and both decoding directions. The README uses this longer result for its level-13 mixed-input compression cell; the current short screen remains below for provenance. Raw paired trials are under `out/optimal-price-delta-split-20261101/confirm-l13-mixed/`.

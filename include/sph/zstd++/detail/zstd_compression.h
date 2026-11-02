@@ -988,6 +988,51 @@ namespace sph::zstd::detail
         return static_cast<std::size_t>(position - start);
     }
 
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__x86_64__)
+    // GCC's greedy row matcher benefits from the reference's one-word loop.
+    // Keep other parsers and compilers on their existing counter.
+    [[nodiscard]] inline auto count_matching_bytes_simple(std::uint8_t const* position,
+        std::uint8_t const* match_position, std::uint8_t const* end) noexcept -> std::size_t
+    {
+        auto const* const start{position};
+        auto const* const word_limit{end - (sizeof(std::uint64_t) - 1U)};
+        while (position < word_limit)
+        {
+            auto difference{load_native_u64(position) ^ load_native_u64(match_position)};
+            if (difference != 0U)
+            {
+                if constexpr (std::endian::native == std::endian::big)
+                    difference = std::byteswap(difference);
+                return static_cast<std::size_t>(position - start) +
+                    static_cast<std::size_t>(std::countr_zero(difference) >> 3U);
+            }
+            position += sizeof(std::uint64_t);
+            match_position += sizeof(std::uint64_t);
+        }
+        if (position + sizeof(std::uint32_t) <= end &&
+            load_native_u32(position) == load_native_u32(match_position))
+        {
+            position += sizeof(std::uint32_t);
+            match_position += sizeof(std::uint32_t);
+        }
+        if (position + sizeof(std::uint16_t) <= end)
+        {
+            std::uint16_t left{};
+            std::uint16_t right{};
+            std::memcpy(&left, position, sizeof(left));
+            std::memcpy(&right, match_position, sizeof(right));
+            if (left == right)
+            {
+                position += sizeof(std::uint16_t);
+                match_position += sizeof(std::uint16_t);
+            }
+        }
+        if (position < end && *position == *match_position)
+            ++position;
+        return static_cast<std::size_t>(position - start);
+    }
+#endif
+
     [[nodiscard]] inline auto count_matching_bytes(std::span<std::uint8_t const> input,
         std::size_t position, std::size_t match_position, std::size_t end,
         std::size_t initial) noexcept -> std::size_t
@@ -2908,8 +2953,18 @@ namespace sph::zstd::detail
                     if (equal_four_bytes(input.data() + match + best.length - 3U,
                         input.data() + current + best.length - 3U))
                     {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13 && defined(__x86_64__)
+                        std::size_t length{};
+                        if constexpr (LazyDepth == 0U)
+                            length = count_matching_bytes_simple(input.data() + current,
+                                input.data() + match, input.data() + block_end);
+                        else
+                            length = count_matching_bytes(input.data() + current,
+                                input.data() + match, input.data() + block_end);
+#else
                         auto const length{count_matching_bytes(input.data() + current,
                             input.data() + match, input.data() + block_end)};
+#endif
                         if (length > best.length)
                         {
                             best.length = static_cast<std::uint32_t>(length);
