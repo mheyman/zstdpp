@@ -122,6 +122,26 @@ def confirmed_decoder_pairs(directory, level, code_sizes, expected_iterations=10
             *code_sizes)
 
 
+def confirmed_decoder_pair_directory(directory, code_sizes, expected_iterations=100000):
+    samples = {"cpp": [], "reference": []}
+    for trial in range(1, 7):
+        for name in samples:
+            path = directory / f"{name}-{trial}.csv"
+            with path.open(newline="") as stream:
+                rows = list(csv.reader(stream))
+            if len(rows) != 1 or len(rows[0]) != 5:
+                raise ValueError(f"invalid decoder trial: {path}")
+            elapsed, peak, input_bytes, output_bytes, iterations = map(int, rows[0])
+            if elapsed <= 0 or peak <= 0 or input_bytes <= 0 or output_bytes != 1048576 or iterations != expected_iterations:
+                raise ValueError(f"unexpected decoder trial values: {path}")
+            samples[name].append((elapsed, peak))
+    return (expected_iterations * 1e9 / median(row[0] for row in samples["cpp"]),
+            expected_iterations * 1e9 / median(row[0] for row in samples["reference"]),
+            median(row[1] for row in samples["cpp"]) / 1048576,
+            median(row[1] for row in samples["reference"]) / 1048576,
+            *code_sizes)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mixed", type=Path, required=True)
@@ -147,6 +167,9 @@ def main():
                         help="six longer paired structured decoder trials for levels 16–22")
     parser.add_argument("--confirmed-random-decode", type=Path,
                         help="six paired 100,000-frame random decoder trials for levels 3 and 4")
+    parser.add_argument("--confirmed-random-decode-pair", action="append", nargs=2,
+                        metavar=("LEVEL", "DIRECTORY"), default=[],
+                        help="six paired 100,000-frame random decoder trials in DIRECTORY")
     args = parser.parse_args()
     data = load_eval(args.mixed, "mixed")
     for name in KINDS[:-1]:
@@ -199,10 +222,22 @@ def main():
             key = "random", level, "decompress"
             data[key] = confirmed_decoder_pairs(args.confirmed_random_decode, level,
                                                 data[key][4:], 100000)
+    confirmed_random_decode_levels = set()
+    for level_text, directory_text in args.confirmed_random_decode_pair:
+        level = int(level_text)
+        if level not in range(1, 23) or level in confirmed_random_decode_levels or (
+                args.confirmed_random_decode and level in (3, 4)):
+            raise ValueError(f"invalid or repeated random decoder confirmation level: {level}")
+        key = "random", level, "decompress"
+        data[key] = confirmed_decoder_pair_directory(Path(directory_text), data[key][4:])
+        confirmed_random_decode_levels.add(level)
 
+    near_parity_note = (" For example, level-20 random decompression's independent medians "
+                        "favor C++, while its paired median favors reference."
+                        if 20 in confirmed_random_decode_levels else "")
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive.{near_parity_note} Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
 
 ### Compression (% of reference)
 
@@ -239,6 +274,11 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
                           "100,000-frame exact-output trials in "
                           "[BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-decompression)."
                           if args.confirmed_random_decode else "")
+    if confirmed_random_decode_levels:
+        random_decode_note += (" Random decompression levels " +
+                               ", ".join(map(str, sorted(confirmed_random_decode_levels))) +
+                               " use six alternating 100,000-frame exact-output trials in "
+                               "[BENCHMARKS.md](BENCHMARKS.md#confirmed-random-input-decompression-levels-12-and-20).")
     confirmed_levels = [str(level) for level, present in ((13, args.confirmed_l13),
                         (16, args.confirmed_l16)) if present]
     confirmed_note = (" The mixed-input level " + " and ".join(confirmed_levels) +
