@@ -202,7 +202,7 @@ def main():
 
     performance = f"""## Performance
 
-Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison. Expand the section below for all nine absolute measurements at every level and input. The [full benchmark matrix](BENCHMARKS_INPUTS.md) adds input definitions and longer confirmations.
+Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell shows **throughput / peak resident memory / complete worker executable size** as C++ percentages of reference. A throughput value above 100% is faster; a memory or code-size value below 100% is smaller. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison. The [full benchmark matrix](BENCHMARKS_INPUTS.md) provides all nine absolute C++ and reference measurements for every level and input, input definitions, and longer confirmations.
 
 ### Compression (% of reference)
 
@@ -211,19 +211,6 @@ Measured {args.date} with optimized GCC 13 against the bundled reference on five
 ### Decompression (% of reference)
 
 """ + grid(data, "decompress") + """
-
-<details>
-<summary>Absolute C++ and reference measurements for every level and input</summary>
-
-#### Compression
-
-""" + detailed_table(data, "compress") + """
-
-#### Decompression
-
-""" + detailed_table(data, "decompress") + """
-
-</details>
 
 """
     readme = args.readme.read_text(encoding="utf-8")
