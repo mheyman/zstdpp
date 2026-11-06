@@ -1259,7 +1259,16 @@ namespace sph::zstd
                 throw detail::entropy_error{"Zstandard sequence section has no bitstream"};
             }
 
+#if defined(_MSC_VER)
+            auto bits = [&] {
+                if constexpr (MediumMatchCopy)
+                    return detail::scheduled_sequence_reader{source.subspan(offset)};
+                else
+                    return detail::reverse_bit_reader{source.subspan(offset)};
+            }();
+#else
             detail::reverse_bit_reader bits{source.subspan(offset)};
+#endif
             auto const literal_table_log{literal_length_table_.table_log};
             auto const offset_table_log{offset_table_.table_log};
             auto const match_table_log{match_length_table_.table_log};
@@ -1269,6 +1278,9 @@ namespace sph::zstd
                 static_cast<std::size_t>(bits.read_fast(offset_table_log))};
             auto match_state{match_table_log == 0U ? std::size_t{0} :
                 static_cast<std::size_t>(bits.read_fast(match_table_log))};
+#if defined(_MSC_VER)
+            if constexpr (MediumMatchCopy) bits.reload();
+#endif
             auto const* const literal_entries{literal_length_table_.entries.data()};
             auto const* const offset_entries{offset_table_.entries.data()};
             auto const* const match_entries{match_length_table_.entries.data()};
@@ -1355,6 +1367,9 @@ namespace sph::zstd
                 {
                     if (match_entry.additional_bits != 0U)
                         match_length += read_sequence_bits(match_entry.additional_bits);
+                    if (static_cast<unsigned>(offset_entry.additional_bits) +
+                        match_entry.additional_bits + literal_entry.additional_bits >= 31U)
+                        bits.reload();
                     if (literal_entry.additional_bits != 0U)
                         literal_length += read_sequence_bits(literal_entry.additional_bits);
                 }
@@ -1484,6 +1499,9 @@ namespace sph::zstd
                     }
                     offset_state = static_cast<std::size_t>(offset_entry.next_state) +
                         (offset_entry.state_bits == 0U ? 0U : read_sequence_bits(offset_entry.state_bits));
+#endif
+#if defined(_MSC_VER)
+                    if constexpr (MediumMatchCopy) bits.reload();
 #endif
                 }
             }

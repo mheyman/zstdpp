@@ -1,5 +1,23 @@
 # Benchmark results
 
+## MSVC scheduled sequence reservoir, 2026-11-06
+
+The medium-block MSVC decoder now uses a byte-aligned 64-bit reservoir with a consumed-bit count. It reloads after initial FSE states and after each non-final sequence, with an extra reload between match/literal extras when their combined widths require it. The validated table-width bounds keep interior reads within the reservoir; short input heads retain per-read truncation checks. This implements the reference's x64 refill schedule rather than preparing the previous absolute-bit-position reader. No allocations are added.
+
+Six alternating CPU2-pinned 30,000-frame old/new pairs measured **+7.56%** on structured level 18 (6/6 wins), **−0.87%** on structured level 16 (2/6 wins), and **−3.02%** on mixed level 3 (0/6 wins). The tradeoff targets the larger level-18 deficit. Final executable size increases from **102.00 to 103.00 KiB** (the initial prototype was 103.50 KiB). Final formatting and an explicit unsigned conversion preserved all 18,785 instruction addresses/opcodes/operands except RIP-relative data addresses; current/reference measurements use the finalized worker.
+
+MSVC unit, reservoir, and byte-parity acceptance tests passed (247.05 seconds for parity). After a signed-conversion warning was fixed, all 13 GCC tests passed; the final permanent reservoir test also passed ASan/UBSan. Its differential coverage includes 32,768 random streams, short heads, exact exhaustion, zero-width reads, and missing markers. The GCC decoder retains SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`, so the GCC performance matrix is preserved. Artifacts are under `out/msvc-scheduled-reader-20261106/`.
+
+The [current native matrix](BENCHMARKS_NATIVE.md) and README contain all nine metrics for 22 levels and five inputs, from 678 worker trials. The three longer comparisons below use six 30,000-frame pairs; other rows use three 1,000-frame screening pairs. Every worker checked exact output at warmup, and C++ workers checked output size and ordinary allocations during timing. Trial data and worker/frame hashes are in `out/msvc-scheduled-reader-20261106/current-matrix/`.
+
+| Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| structured | 16 | 17974.65 | 18106.13 | 99.27% | 6.91 | 6.82 | 101.32% | 103.00 | 113.50 | 90.75% |
+| structured | 18 | 14517.80 | 14896.12 | 97.46% | 6.91 | 6.82 | 101.32% | 103.00 | 113.50 | 90.75% |
+| mixed | 3 | 8448.74 | 5427.22 | 155.67% | 7.19 | 7.09 | 101.38% | 103.00 | 113.50 | 90.75% |
+
+Both structured rows remain below reference, so the all-level goal remains open. Absolute speeds vary between measurement sessions; the paired old/new experiment establishes the improvement, while these contemporaneous C++/reference pairs describe the remaining gap.
+
 ## MSVC paired literal/match state reads, 2026-11-06
 
 The medium-block decoder now reads the adjacent literal-length and match-length FSE state fields together under MSVC, then reads the offset state separately. This removes one checked reader operation per sequence without the splitting work of the previously rejected three-field grouping. Validated table logs bound the paired field to 18 bits; the existing reader retains overflow detection. No buffer, allocation, or unchecked-input mode is added.

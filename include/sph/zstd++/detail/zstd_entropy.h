@@ -242,6 +242,88 @@ namespace sph::zstd::detail
         bool overflow_{};
     };
 
+    // Sequence-only reservoir. Call reload() after initial FSE states and after
+    // each non-final sequence; also reload between ML and LL extras when their
+    // combined OF/ML/LL width is at least 31. With validated table widths this
+    // bounds every interior read to the 64-bit container. At the input head,
+    // individual reads retain truncation detection instead of overreading.
+    class scheduled_sequence_reader
+    {
+        std::span<std::uint8_t const> bytes_;
+        std::size_t position_{};
+        std::uint64_t container_{};
+        unsigned consumed_{};
+        bool overflow_{};
+
+        void load() noexcept
+        {
+            if (bytes_.size() >= 8U)
+            {
+                std::memcpy(&container_, bytes_.data() + position_, 8U);
+                if constexpr (std::endian::native == std::endian::big)
+                    container_ = std::byteswap(container_);
+            }
+            else
+            {
+                container_ = 0U;
+                for (std::size_t index{}; index < bytes_.size(); ++index)
+                    container_ |= std::uint64_t{bytes_[index]} << (8U * index);
+            }
+        }
+
+    public:
+        explicit scheduled_sequence_reader(std::span<std::uint8_t const> bytes) : bytes_{bytes}
+        {
+            if (bytes.empty() || bytes.back() == 0U)
+                throw entropy_error{"Zstandard bitstream has no end marker"};
+            consumed_ = 9U - static_cast<unsigned>(std::bit_width(bytes.back()));
+            if (bytes.size() >= 8U)
+                position_ = bytes.size() - 8U;
+            else
+                consumed_ += static_cast<unsigned>((8U - bytes.size()) * 8U);
+            load();
+        }
+
+        void reload() noexcept
+        {
+            if (position_ == 0U) return;
+            auto const move{std::min(position_, std::size_t{consumed_ / 8U})};
+            position_ -= move;
+            consumed_ -= static_cast<unsigned>(move * 8U);
+            load();
+        }
+
+        [[nodiscard]] auto read_fast(unsigned count) noexcept -> std::uint32_t
+        {
+            if (count == 0U) return 0U;
+            if (position_ == 0U && count > 64U - consumed_)
+            {
+                consumed_ = 64U;
+                overflow_ = true;
+                return 0U;
+            }
+            auto const result{static_cast<std::uint32_t>(
+                (container_ << consumed_) >> (64U - count))};
+            consumed_ += count;
+            return result;
+        }
+
+        [[nodiscard]] auto read_fast_trusted(unsigned count) noexcept -> std::uint32_t
+        {
+            return read_fast(count);
+        }
+
+        [[nodiscard]] auto remaining() const noexcept -> std::size_t
+        {
+            return position_ * 8U + 64U - consumed_;
+        }
+        [[nodiscard]] auto overflowed() const noexcept -> bool { return overflow_; }
+        [[nodiscard]] auto at_end() const noexcept -> bool
+        {
+            return position_ == 0U && consumed_ == 64U && !overflow_;
+        }
+    };
+
     class forward_lsb_reader
     {
     public:
