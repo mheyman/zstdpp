@@ -1,5 +1,30 @@
 # Benchmark results
 
+## MSVC exact tiny matches and overlap seeds, 2026-11-06
+
+MSVC now uses the existing noinline exact-width helper for 1–7-byte nonoverlapping matches and the initial seed of overlapping matches in the medium-block decoder. The helper writes only the requested bytes, and subsequent doubling copies are unchanged. No buffer or allocation is added. Rebuilding the GCC 13 worker produced the same SHA-256 as before, so the GCC matrix remains applicable.
+
+Six alternating CPU2-pinned 30,000-frame old/new native pairs measured structured level 18 **+6.94%** and level 16 **+1.39%**, both with six wins. Mixed level 3 regressed **2.74%** (one win); the retained tradeoff improves the larger structured deficit while mixed still substantially leads reference. Enabling only nonoverlapping tiny matches gained 1.95% at level 18; adding overlap seeds produced the larger improvement.
+
+The refreshed [native matrix](BENCHMARKS_NATIVE.md) covers all 22 frame levels and five inputs. Longer candidate/reference rows are below; other rows use three 1,000-frame screening pairs. These current/reference ratios are distinct from the paired old/new improvement above.
+
+| Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| structured | 16 | 19767.12 | 19679.12 | 100.45% | 6.90 | 6.82 | 101.26% | 102.00 | 113.50 | 89.87% |
+| structured | 18 | 13798.76 | 16341.31 | 84.44% | 6.90 | 6.82 | 101.20% | 102.00 | 113.50 | 89.87% |
+| mixed | 3 | 8201.80 | 5390.77 | 152.15% | 7.18 | 7.09 | 101.27% | 102.00 | 113.50 | 89.87% |
+
+All 12 GCC tests and MSVC unit/byte-parity acceptance tests passed. Every native benchmark worker checked exact output at warmup, and C++ workers checked output size and no ordinary allocations during timing. The full native matrix used the same reference frames as the GCC matrix; it does not claim a new native compression measurement. Old/new trials, matrix provenance, and commands are under `out/msvc-tiny-match-20261106/` and `out/msvc-tiny-seed-20261106/`.
+
+To reproduce native decoder measurements after building the optimized workers and generating the reference-frame matrix, run PowerShell 7 with an empty output directory. Rendering requires Python 3 (shown as `python`; WSL `python3` also works from the repository root):
+
+```powershell
+./eval/benchmark_native_decoders.ps1 -CppWorker ./out/build/msvc-release-eval/eval/bin/sph_decompress_l1.exe -ReferenceWorker ./out/build/msvc-release-eval/eval/bin/reference_decompress_l1.exe -MatrixDirectory ./out/overlap-seed-helper-20261106/matrix -OutputDirectory ./out/native-decoder-matrix
+python eval/render_native_decoder_matrix.py ./out/native-decoder-matrix/matrix-trials.csv --date YYYY-MM-DD
+```
+
+The report renderer checks complete coverage, distinct trials, equal work, and the documented trial counts before publishing. The GCC renderer preserves the separate native README section. Older native results below predate this helper port.
+
 ## Native MSVC decoder recheck, 2026-11-06
 
 Rebuilt the native decoder worker from current source using the existing MSVC Release `/O2 /Ob3` evaluation configuration. Six alternating 30,000-frame pairs, pinned to Windows logical CPU 2, decoded the same structured reference frames used in the GCC matrix. The generic level-1 decoder executable was used for both frame levels; decoding settings do not depend on its filename. Workers passed exact warmup output and allocation checks. These native results are separate from the GCC README matrix and are not a claimed implementation improvement.

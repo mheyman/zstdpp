@@ -974,11 +974,16 @@ namespace sph::zstd
             std::memcpy(destination, source, count);
         }
 
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+#if defined(_MSC_VER) || (defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13)
         // Medium compressed blocks commonly produce tiny nonoverlapping matches.
         // A separate exact-width helper avoids a libc call without enlarging the
         // shared sequence loop used by other block shapes.
-        __attribute__((noinline)) static void copy_small_match(
+#if defined(_MSC_VER)
+        __declspec(noinline)
+#else
+        __attribute__((noinline))
+#endif
+        static void copy_small_match(
             std::uint8_t* destination,
             std::uint8_t const* source,
             std::size_t count) noexcept
@@ -1078,7 +1083,7 @@ namespace sph::zstd
             }
             if constexpr (MediumMatchCopy)
             {
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+#if defined(_MSC_VER) || (defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13)
                 if (count >= 1U && count <= 7U)
                 {
                     copy_small_match(destination, source, count);
@@ -1186,7 +1191,7 @@ namespace sph::zstd
             auto const copy_overlap_step = [](std::uint8_t* step_destination,
                 std::uint8_t const* source, std::size_t count)
             {
-#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+#if defined(_MSC_VER) || (defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13)
                 if constexpr (MediumMatchCopy)
                 {
                     if (count >= 1U && count <= 7U)

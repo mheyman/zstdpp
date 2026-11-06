@@ -278,6 +278,9 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
     readme = args.readme.read_text(encoding="utf-8")
     start = readme.index("## Performance\n")
     end = readme.index("## More information\n", start)
+    native_start = readme.find("## Native Windows decompression\n", start, end)
+    if native_start != -1:
+        end = native_start
     updated = readme[:start] + performance + readme[end:]
     args.readme.write_text(updated, encoding="utf-8", newline="\n")
 
