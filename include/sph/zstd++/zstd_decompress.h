@@ -1461,10 +1461,27 @@ namespace sph::zstd
                     offset_state = static_cast<std::size_t>(offset_entry.next_state) +
                         (state_value & ((std::uint32_t{1} << offset_state_bits) - 1U));
 #else
-                    literal_state = static_cast<std::size_t>(literal_entry.next_state) +
-                        (literal_entry.state_bits == 0U ? 0U : read_sequence_bits(literal_entry.state_bits));
-                    match_state = static_cast<std::size_t>(match_entry.next_state) +
-                        (match_entry.state_bits == 0U ? 0U : read_sequence_bits(match_entry.state_bits));
+#if defined(_MSC_VER)
+                    if constexpr (MediumMatchCopy)
+                    {
+                        // Pair the adjacent LL/ML fields, leaving OF independent
+                        // to limit splitting work and live values in MSVC's loop.
+                        auto const match_bits{match_entry.state_bits};
+                        auto const pair_bits{static_cast<unsigned>(literal_entry.state_bits) + match_bits};
+                        auto const pair_value{read_sequence_bits(pair_bits)};
+                        literal_state = static_cast<std::size_t>(literal_entry.next_state) +
+                            (pair_value >> match_bits);
+                        match_state = static_cast<std::size_t>(match_entry.next_state) +
+                            (pair_value & ((std::uint32_t{1} << match_bits) - 1U));
+                    }
+                    else
+#endif
+                    {
+                        literal_state = static_cast<std::size_t>(literal_entry.next_state) +
+                            (literal_entry.state_bits == 0U ? 0U : read_sequence_bits(literal_entry.state_bits));
+                        match_state = static_cast<std::size_t>(match_entry.next_state) +
+                            (match_entry.state_bits == 0U ? 0U : read_sequence_bits(match_entry.state_bits));
+                    }
                     offset_state = static_cast<std::size_t>(offset_entry.next_state) +
                         (offset_entry.state_bits == 0U ? 0U : read_sequence_bits(offset_entry.state_bits));
 #endif

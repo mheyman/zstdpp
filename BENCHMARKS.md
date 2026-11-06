@@ -1,5 +1,23 @@
 # Benchmark results
 
+## MSVC paired literal/match state reads, 2026-11-06
+
+The medium-block decoder now reads the adjacent literal-length and match-length FSE state fields together under MSVC, then reads the offset state separately. This removes one checked reader operation per sequence without the splitting work of the previously rejected three-field grouping. Validated table logs bound the paired field to 18 bits; the existing reader retains overflow detection. No buffer, allocation, or unchecked-input mode is added.
+
+Six alternating CPU2-pinned 30,000-frame old/new comparisons measured **+3.45%** on structured level 18 (6/6 wins), **−0.10%** on structured level 16 (2/6 wins, effectively flat), and **+2.02%** on mixed level 3 (6/6 wins). The executable remains **102.00 KiB**. These paired improvements compare the immediate prior implementation, not the reference library.
+
+MSVC unit and byte-parity acceptance tests passed (262.76 seconds for parity), as did all 12 GCC tests. The rebuilt GCC decoder retains SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`, preserving the existing GCC matrix. Native comparison artifacts are under `out/msvc-paired-state-20261106/`.
+
+The refreshed [native matrix](BENCHMARKS_NATIVE.md) and README include all nine metrics for 22 levels and five inputs (678 worker trials). Longer current/reference comparisons are below. Other rows use three 1,000-frame pairs and remain screening measurements; the three rows below use six 30,000-frame pairs. Every worker checked exact decoded bytes at warmup, and C++ workers checked output size and ordinary allocations during timing.
+
+| Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| structured | 16 | 19906.24 | 19537.48 | 101.89% | 6.91 | 6.82 | 101.26% | 102.00 | 113.50 | 89.87% |
+| structured | 18 | 14701.70 | 16434.07 | 89.46% | 6.91 | 6.82 | 101.26% | 102.00 | 113.50 | 89.87% |
+| mixed | 3 | 8775.28 | 5647.84 | 155.37% | 7.19 | 7.10 | 101.29% | 102.00 | 113.50 | 89.87% |
+
+Raw trials and worker/frame hashes are in `out/msvc-paired-state-20261106/current-matrix/`. Native structured level 18 remains below reference; this improvement does not complete the all-level performance goal. The older measurements below are dated snapshots.
+
 ## MSVC exact tiny matches and overlap seeds, 2026-11-06
 
 MSVC now uses the existing noinline exact-width helper for 1–7-byte nonoverlapping matches and the initial seed of overlapping matches in the medium-block decoder. The helper writes only the requested bytes, and subsequent doubling copies are unchanged. No buffer or allocation is added. Rebuilding the GCC 13 worker produced the same SHA-256 as before, so the GCC matrix remains applicable.
