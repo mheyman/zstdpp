@@ -1,5 +1,15 @@
 # Benchmark results
 
+## Random-input confirmation, 2026-11-06
+
+Six CPU2-pinned alternating 1,000-frame optimized GCC 13 compression pairs at level 14 measured **143.51/133.31 MiB/s (C++/reference), or 107.65%** using median elapsed times. The median paired ratio was 105.95%, with C++ ahead in five of six pairs. Every compressed frame matched reference bytes and both decoders recovered both encodings. This replaces the earlier 88.86% short-screen result; it is a measurement correction, not a new implementation speedup. Absolute rates varied substantially across trials.
+
+Six alternating 100,000-frame decoder pairs measured random level 1 at **40,782.13/41,364.18 MiB/s (98.59%)** and level 2 at **41,359.54/42,768.83 MiB/s (96.70%)**. Exact output and ordinary-allocation guards passed. The README and current matrix include these measurements with their measured process RSS and unchanged executable sizes; other rows retain their dated measurements.
+
+SHA-256 checks show that random reference frames at levels 2–22 are identical, and that all 22 C++ decoder executables are identical to each other, as are all 22 reference decoder executables. Level 1 has a different frame header. Thus the random decoder timing differences among levels 2–22 cannot indicate distinct level-specific decoder algorithms. They are repeated measurements of the same executable/input pair under varying conditions. The next target is their shared raw-block path, not separate optimizations for individual random-input levels. Peak RSS is the whole process and varies with the measurement launcher; the longer Python-driven decoder runs report approximately 13 MiB for both workers.
+
+Raw compression trials and equivalence hashes: `out/l14-random-confirm-20261106/`. Decoder trials and the matrix refresh script: `out/random-decode-confirm-20261106/`. The full matrix's original run date remains November 2; these three rows were confirmed November 6.
+
 These measurements compare optimized, isolated sph-zstd++ (`C++`) and bundled reference-zstd (`Reference`) workers at the same level and on the same input. Throughput is MiB/s (higher is better); memory is peak resident set size and code is the complete worker executable (lower is better). Percentages are `C++ / Reference × 100`. Compression outputs are byte-compared and both decoders check both encodings in paired runs.
 
 The [22-level mixed-input screening evaluation](#mixed-input-screening-evaluation) was run on 2026-11-02 with GCC 13 Release. Its level-3 row predates the double-RLE writer below; use the confirmed table and [full current matrix](BENCHMARKS_INPUTS.md) for the current level-3 result. The full matrix covers mixed, zero-filled, repeated, structured, and seeded-random data. Other focused tables further below are dated snapshots from prior changes; their compilers and trial counts differ. The [experiment history](PERFORMANCE_HISTORY.md) preserves prior reports and rejected trials.
