@@ -8,11 +8,18 @@ A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zst
 
 The library provides streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and match parsing from fast through binary-tree strategies. It is an active port; dictionary and multithreaded modes are still missing.
 
-The current benchmark matrix checks byte-for-byte compressed output at levels 1–22 on five deterministic inputs. The acceptance tests also check decoding in both directions. Current optimization work and past experiments are tracked in the [performance plan](PERFORMANCE_PLAN.md) and [history](PERFORMANCE_HISTORY.md).
+The current benchmark matrix checks byte-for-byte compressed output at levels 1–22 on five deterministic inputs. The acceptance tests also check decoding in both directions.
 
 ## Get started
 
 Add `include` to your C++23 include path, or link the header-only `sph::zstdpp` CMake target. Output is delivered to a callback whose span remains valid for that invocation. Call `finish()` explicitly; destructors do not emit or validate output.
+
+For a CMake project, place this repository at `external/zstdpp` and link your application:
+
+```cmake
+add_subdirectory(external/zstdpp)
+target_link_libraries(your_app PRIVATE sph::zstdpp)
+```
 
 ```cpp
 #include <sph/zstd++/zstd.h>
@@ -57,6 +64,8 @@ For a complete borrowed input, `compress_frame(span)` avoids copying it into str
 
 ## Build and test
 
+Use a C++23 compiler and CMake 3.28 or newer.
+
 ```text
 cmake -S . -B out/build -DSPH_ZSTDPP_BUILD_TESTS=ON
 cmake --build out/build
@@ -76,6 +85,8 @@ The tests compare resolved compression parameters and compressed bytes, and chec
 ## Performance
 
 Measured 2026-11-02 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
+
+Memory is whole-process peak resident set size (RSS), including the benchmark worker; code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
 
 ### Compression (% of reference)
 
@@ -368,10 +379,12 @@ Measured 2026-11-02 with optimized GCC 13 against the bundled reference on five 
 
 ## More information
 
-- [Benchmark methodology and paired results](BENCHMARKS.md)
-- [Full benchmark matrix with absolute measurements](BENCHMARKS_INPUTS.md)
-- [Current performance work](PERFORMANCE_PLAN.md)
-- [Experiment history and earlier results](PERFORMANCE_HISTORY.md)
-- [Bundled reference implementation](reference_zstd/README.md)
+| Document | Contents |
+| --- | --- |
+| [Current benchmark matrix](BENCHMARKS_INPUTS.md) | Absolute measurements for every level and input, input definitions, and measurement conditions. |
+| [Benchmark report](BENCHMARKS.md) | Reproduction instructions, focused comparisons, and dated measurements. |
+| [Performance work list](PERFORMANCE_PLAN.md) | Current priorities, completed tasks, and recent experiment outcomes. |
+| [Development history](PERFORMANCE_HISTORY.md) | Archived progress notes and earlier results formerly kept in this README. |
+| [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
 
-The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/). To benchmark a 1 MiB input, build the optimized `msvc-pair` or `gcc-pair` target and run `zstdpp_pair --level 3 --input path/to/file --iterations 1000 --trials 6`. The tool checks exact compressed bytes and both decoders.
+The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/). To benchmark a 1 MiB input, use the optimized `msvc-pair` or `gcc-pair` build preset and run `zstdpp_pair --level 3 --input path/to/file --iterations 1000 --trials 6`. The tool checks exact compressed bytes and both decoders.

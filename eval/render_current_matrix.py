@@ -236,6 +236,8 @@ def main():
 
 Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
 
+Memory is whole-process peak resident set size (RSS), including the benchmark worker; code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
+
 ### Compression (% of reference)
 
 """ + grid(data, "compress") + """

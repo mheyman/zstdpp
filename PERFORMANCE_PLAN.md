@@ -1,5 +1,7 @@
 # Performance work list
 
+Track ongoing optimization tasks and new experiment results here; keep the [README](README.md) focused on using the library and its current performance tables. Older progress notes are preserved in [development history](PERFORMANCE_HISTORY.md), and detailed measurements belong in the [benchmark report](BENCHMARKS.md).
+
 ## Current performance work
 
 ### Latest status and experiment history (newest first)
