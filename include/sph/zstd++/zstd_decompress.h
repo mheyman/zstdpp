@@ -1183,7 +1183,22 @@ namespace sph::zstd
                     match_destination + match_length - 32U - match_offset, 32U);
                 return;
             }
-            std::memcpy(match_destination, output_data + source_position, match_offset);
+            auto const copy_overlap_step = [](std::uint8_t* step_destination,
+                std::uint8_t const* source, std::size_t count)
+            {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                if constexpr (MediumMatchCopy)
+                {
+                    if (count >= 1U && count <= 7U)
+                    {
+                        copy_small_match(step_destination, source, count);
+                        return;
+                    }
+                }
+#endif
+                std::memcpy(step_destination, source, count);
+            };
+            copy_overlap_step(match_destination, output_data + source_position, match_offset);
             auto written{match_offset};
             while (written < match_length)
             {

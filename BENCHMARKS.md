@@ -1,5 +1,19 @@
 # Benchmark results
 
+## Exact tiny overlap seeds, 2026-11-06
+
+The GCC 13 medium-block decoder now uses its existing exact-width tiny-copy helper for the initial 1–7-byte seed of an overlapping match. The seed source ends at the destination, so this copy does not overlap. Subsequent doubling copies retain `memcpy`; no buffer or allocation is added. Other compiler paths retain the previous behavior.
+
+Three alternating 100,000-frame counter pairs on level-3 mixed input measured **2.93% fewer cycles** and **2.27% higher throughput** against the saved previous C++ decoder, with all three cycle pairs improving. Instructions/frame were essentially unchanged (2,139,763 versus 2,139,755), suggesting a code-generation/layout effect rather than fewer executed instructions. Level-21 structured cycle cost was effectively neutral at 100.21% of the previous decoder. The counter tool labels the old worker `reference`; these diagnostic comparisons are against old C++, not bundled zstd.
+
+Applying the helper to both the seed and doubling steps improved structured level 18 but lost 6.71% on the short mixed level-3 control. Applying it only to doubling steps was neutral. Only the seed change is retained. Its six 30,000-frame old/new pairs measured mixed level 3 +2.84% (6/6 wins), structured level 18 +0.13% (3/6), and structured level 21 +1.20% (4/6).
+
+The fresh five-input, 22-level matrix passed. Six longer alternating decoder pairs measured structured levels 16–22 at **99.74%, 100.37%, 101.66%, 97.88%, 102.54%, 102.87%, and 99.23%** of bundled-reference throughput. Random levels 1 and 2 measured **102.04% and 98.23%**. These near-parity measurements do not establish superiority at every level. The README and [current matrix](BENCHMARKS_INPUTS.md) contain all nine speed, RSS, and executable-size metrics for every level/input. Longer confirmations use 10,000 frames for structured data and 100,000 for random; unchanged compression retains existing longer confirmations. Older sections below are dated snapshots.
+
+Validation: all 12 optimized GCC tests and the MSVC unit and compression-parity tests passed. Focused ASan/UBSan checks passed guarded output bounds, truncated frames, reset after errors, and an exact overlapping-copy oracle. The C++ decoder workers validate exact output during warmup and check output size and ordinary allocation counts during measurement; this is not a byte comparison of every timed frame.
+
+All 22 rebuilt C++ decoder workers have SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`, matching the counter experiment. Raw trials, counter provenance, and report scripts: `out/overlap-seed-helper-20261106/`.
+
 ## Random-input confirmation, 2026-11-06
 
 Six CPU2-pinned alternating 1,000-frame optimized GCC 13 compression pairs at level 14 measured **143.51/133.31 MiB/s (C++/reference), or 107.65%** using median elapsed times. The median paired ratio was 105.95%, with C++ ahead in five of six pairs. Every compressed frame matched reference bytes and both decoders recovered both encodings. This replaces the earlier 88.86% short-screen result; it is a measurement correction, not a new implementation speedup. Absolute rates varied substantially across trials.
