@@ -1,5 +1,16 @@
 # Benchmark results
 
+## Native MSVC decoder recheck, 2026-11-06
+
+Rebuilt the native decoder worker from current source using the existing MSVC Release `/O2 /Ob3` evaluation configuration. Six alternating 30,000-frame pairs, pinned to Windows logical CPU 2, decoded the same structured reference frames used in the GCC matrix. The generic level-1 decoder executable was used for both frame levels; decoding settings do not depend on its filename. Workers passed exact warmup output and allocation checks. These native results are separate from the GCC README matrix and are not a claimed implementation improvement.
+
+| Frame level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 16 | 19382.69 | 19775.56 | 98.01% | 6.90 | 6.82 | 101.20% | 102.00 | 113.50 | 89.87% |
+| 18 | 13178.06 | 16373.06 | 80.49% | 6.90 | 6.82 | 101.14% | 102.00 | 113.50 | 89.87% |
+
+Level 18 provides a larger optimization target than the recent near-parity GCC controls. A concrete implementation difference to investigate is the exact tiny-match helper: GCC 13 uses it for short nonoverlapping matches and overlap seeds, while MSVC currently does not. This is a hypothesis requiring profiling or a controlled port, not attribution established by these timing measurements. Commands, raw worker metrics, and executable hashes: `out/native-decoder-recheck-20261106/`.
+
 ## Structured levels 7 and 14 confirmed, 2026-11-06
 
 The earlier short-screen decoder ratios of 92.38% and 92.73% did not persist. Three alternating 100,000-frame `perf stat` pairs measured level 7 at 95.15% of reference cycle cost and 103.94% of reference throughput, and level 14 at 94.81% cycle cost and 106.13% throughput. Every worker passed its output and allocation checks.
