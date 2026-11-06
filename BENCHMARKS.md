@@ -1,5 +1,20 @@
 # Benchmark results
 
+## Structured levels 7 and 14 confirmed, 2026-11-06
+
+The earlier short-screen decoder ratios of 92.38% and 92.73% did not persist. Three alternating 100,000-frame `perf stat` pairs measured level 7 at 95.15% of reference cycle cost and 103.94% of reference throughput, and level 14 at 94.81% cycle cost and 106.13% throughput. Every worker passed its output and allocation checks.
+
+Six further alternating 100,000-frame pairs without the profiler measured the following medians. These are measurement corrections for the unchanged implementation, not new algorithmic speedups. The README and current matrix now use these two rows.
+
+| Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 7 | 26829.32 | 25872.45 | 103.70% | 12.97 | 12.97 | 100.00% | 125.31 | 202.89 | 61.76% |
+| 14 | 27669.58 | 26308.71 | 105.17% | 12.97 | 12.97 | 100.00% | 125.31 | 202.89 | 61.76% |
+
+Hash checks show identical structured frames within levels 6–7, 8–10, 11–15, 16–17, and 19–22; levels 3–4 also match. All 22 decoder executables are identical within each implementation. Differences among short-screen decoder rows within these groups are measurement variation, not different decoder algorithms. The report preserves individual measurements rather than replacing unmeasured rows with another level's timing.
+
+`eval/render_current_matrix.py --confirmed-decoder-pair structured 7 DIRECTORY` now accepts six alternating 100,000-frame decoder CSV pairs for any supported input and level. Files are named `cpp-1.csv` through `cpp-6.csv` and `reference-1.csv` through `reference-6.csv`. Duplicate overrides, unsupported inputs/levels, and conflicts with existing decoder-confirmation options are rejected before writing reports. Raw trials, executable/frame hashes, verification, and the complete refresh command are under `out/structured-mid-gap-20261106/`.
+
 ## Exact tiny overlap seeds, 2026-11-06
 
 The GCC 13 medium-block decoder now uses its existing exact-width tiny-copy helper for the initial 1–7-byte seed of an overlapping match. The seed source ends at the destination, so this copy does not overlap. Subsequent doubling copies retain `memcpy`; no buffer or allocation is added. Other compiler paths retain the previous behavior.

@@ -170,6 +170,9 @@ def main():
     parser.add_argument("--confirmed-random-decode-pair", action="append", nargs=2,
                         metavar=("LEVEL", "DIRECTORY"), default=[],
                         help="six paired 100,000-frame random decoder trials in DIRECTORY")
+    parser.add_argument("--confirmed-decoder-pair", action="append", nargs=3,
+                        metavar=("INPUT", "LEVEL", "DIRECTORY"), default=[],
+                        help="six paired 100,000-frame decoder trials for any input and level")
     args = parser.parse_args()
     data = load_eval(args.mixed, "mixed")
     for name in KINDS[:-1]:
@@ -232,6 +235,18 @@ def main():
         data[key] = confirmed_decoder_pair_directory(Path(directory_text), data[key][4:])
         confirmed_random_decode_levels.add(level)
 
+    confirmed_decoder_keys = set()
+    for kind, level_text, directory_text in args.confirmed_decoder_pair:
+        level = int(level_text)
+        key = kind, level, "decompress"
+        if (kind not in KINDS or level not in range(1, 23) or key in confirmed_decoder_keys
+                or (kind == "structured" and args.confirmed_structured_decode and level in range(16, 23))
+                or (kind == "random" and (level in confirmed_random_decode_levels
+                    or (args.confirmed_random_decode and level in (3, 4))))):
+            raise ValueError(f"invalid or repeated decoder confirmation: {kind}, {level}")
+        data[key] = confirmed_decoder_pair_directory(Path(directory_text), data[key][4:])
+        confirmed_decoder_keys.add(key)
+
     performance = f"""## Performance
 
 Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
@@ -280,6 +295,11 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
                                "see the [benchmark report](BENCHMARKS.md).")
     confirmed_levels = [str(level) for level, present in ((13, args.confirmed_l13),
                         (16, args.confirmed_l16)) if present]
+    if confirmed_decoder_keys:
+        random_decode_note += (" Additional six-pair, 100,000-frame decoder confirmations apply to " +
+                               ", ".join(f"{kind} level {level}"
+                                         for kind, level, _ in sorted(confirmed_decoder_keys)) +
+                               "; decoded bytes are checked at warmup. See the [benchmark report](BENCHMARKS.md).")
     confirmed_note = (" The mixed-input level " + " and ".join(confirmed_levels) +
                       " compression rows use longer confirmed measurements; the "
                       "[short-screen rows](BENCHMARKS.md#mixed-input-screening-evaluation) remain in the evaluation report."
