@@ -414,6 +414,19 @@ Compression workers receive identical input. Decompression workers both consume 
 
 ## How to reproduce
 
+For Linux/WSL decoder diagnostics, `eval/compare_decoder_cycles.py` alternates two optimized workers on one CPU and records elapsed time alongside hardware cycle, instruction and branch counts. It saves executable/input SHA-256 hashes, raw counters, worker metrics and a summary, and rejects unavailable counters or event scheduling below 99%. Example from the repository root (use an empty output directory):
+
+```sh
+python3 eval/compare_decoder_cycles.py --perf /usr/local/bin/perf \
+  --cpp out/build/gcc13-all-levels/eval/bin/sph_decompress_l18 \
+  --reference out/build/gcc13-all-levels/eval/bin/reference_decompress_l18 \
+  --encoded out/large-match-wildcopy-20261102/matrix/structured/reference_l18.zst \
+  --expected out/large-match-wildcopy-20261102/matrix/structured/corpus.bin \
+  --iterations 100000 --trials 6 --cpu 2 --output out/decoder-cycle-comparison
+```
+
+Use your own encoded and expected files if those local benchmark artifacts are absent. Counters cover the whole worker process, while worker elapsed time excludes setup and warmup. Each worker validates decoded output at warmup; a nonzero worker exit fails the comparison. Keep these diagnostic ratios separate from unprofiled throughput measurements. Parser validation tests run with `python3 -m unittest eval.test_compare_decoder_cycles`.
+
 The full evaluator builds separate optimized workers for each implementation, operation, and configured level. On Windows:
 
 ```text
