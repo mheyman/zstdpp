@@ -2,6 +2,34 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-9 plain/counter measurement control, 2026-11-07
+
+The earlier varied level-9 plain confirmation reported 91.73% of reference throughput, but a subsequent counter pair and cycle profile reversed that ordering. Rechecked the same current workers and 1-MiB corpus with six rounds, alternating both implementation order and plain/counter mode order. Each worker processes 500 frames on CPU2. All 24 workers emit the same frame and pass allocation guards; identities and full results are archived in `out/l9-measurement-control-20261107/`.
+
+| Measurement mode | C++ median MiB/s | Reference median MiB/s | Ratio of medians | Median paired ratio | C++ pair wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Plain | 180.64 | 183.18 | 98.61% | 101.01% | 4/6 |
+| perf stat counters | 182.80 | 181.64 | 100.64% | 100.21% | 3/6 |
+
+Plain ranges overlap: C++ 178.76–189.06 and reference 178.46–184.73 MiB/s. Counter-run ranges also overlap: C++ 177.26–188.38 and reference 180.35–184.05. Pair-ratio medians and ratios of independent throughput medians differ materially; neither should be substituted for the other.
+
+Counter medians over 500 frames are C++/reference cycles 12.399/12.472B, instructions 43.265/40.143B, branches 4.923/5.547B, and branch misses 14.449/26.745M. Thus C++ retires about 7.78% more instructions but does not show a cycle penalty in this run. The earlier roughly 8% throughput gap is not reproducible under these controls. This is measurement variability, not a source speedup or proof of an enduring C++ win. Preserve the dated earlier results; do not target a supposed 8% row-matcher cycle deficit without renewed evidence. README performance values are unchanged because no code improvement occurred.
+
+## Grouped Huffman validation rejected, 2026-11-07
+
+Audited reference BMI2 dispatch and the existing experiment history before changing code. The previous narrow writer dispatch, whole-writer cloning, and target-attributed wrapper trials already produced real BMI2 instructions without reliable gains; this turn did not repeat them.
+
+A distinct isolated trial loads all four Huffman codes in the current four-symbol loop, combines their width validity predicates, then emits the codes in the existing order. The scalar tail, code validation, output layout, flush schedule, and workspace stay unchanged. Unlike the rejected once-per-table validation policy, this adds no table scan and still checks every used symbol. GCC lowers the combined condition to two validation branches, not the single branch hoped for, and spills the carried bit container to stack at `0x8(%rsp)`.
+
+| Input | Median paired throughput change | Candidate pair wins | Production median MiB/s | Candidate median MiB/s |
+| --- | ---: | ---: | ---: | ---: |
+| Varied, 1 MiB | -3.07% | 1/6 | 3466.45 | 3371.32 |
+| Mixed, 1 MiB | -0.57% | 2/6 | 2957.10 | 2916.67 |
+
+Six alternating CPU2 optimized GCC13 level-2 pairs per input, each 10,000 frames, pass exact reference-frame and allocation guards (24 workers). Changes are median pair ratios. Rejected before broader invalid-code/sanitizer qualification; no production change or README refresh. Artifacts: `out/huffman-group-validation-20261107/`, including scripts, isolated source, disassembly, reference frames and raw measurements. Avoid further validation batching based only on fewer source-level branches; the code lifetime and generated memory traffic matter.
+
+NEXT: prioritize gaps that survive repeated unprofiled controls. Level-2 varied remains a demonstrated deficit, whereas level-9 is now near parity. The varied level-18 screen used only two frames per worker and still needs a longer confirmation before selecting a high-level parser target.
+
 ## Level-2 instruction sampling and encoder mask lookup, 2026-11-07
 
 Collected matched optimized GCC13 level-2 instruction profiles on 10,000 varied 1-MiB frames. Initial period-100,003 captures reported zero lost samples but contained PERF_RECORD_THROTTLE events: sampled periods represented only 20.95B C++ and 15.41B reference instructions, versus approximately 46.33B and 39.68B from counters. Zero lost samples alone is not sufficient evidence of complete sampling coverage.
