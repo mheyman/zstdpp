@@ -42,6 +42,12 @@ if(SPH_ZSTDPP_BUILD_TESTS)
     sph_zstdpp_enable_strict_warnings(scheduled_sequence_reader_tests)
     add_test(NAME scheduled_sequence_reader_tests COMMAND scheduled_sequence_reader_tests)
 
+    add_executable(scheduled_decoder_validation_tests scheduled_decoder_validation_tests.cpp)
+    target_link_libraries(scheduled_decoder_validation_tests PRIVATE sph::zstdpp libzstd_static)
+    target_compile_features(scheduled_decoder_validation_tests PRIVATE cxx_std_23)
+    sph_zstdpp_enable_strict_warnings(scheduled_decoder_validation_tests)
+    add_test(NAME scheduled_decoder_validation_tests COMMAND scheduled_decoder_validation_tests)
+
     add_executable(literal_sampling_tests literal_sampling_tests.cpp)
     target_link_libraries(literal_sampling_tests PRIVATE sph::zstdpp libzstd_static)
     target_include_directories(literal_sampling_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/reference_zstd/lib/common")
