@@ -2,6 +2,25 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-2 1-MiB profile and Huffman-description reuse audit, 2026-11-07
+
+The generic GCC13 optimized 1-MiB level-2 worker resolves to `fast_match_state<20,16,6,0>`, unlike the 256-KiB collected-literal double-fast path. Three alternating, CPU-2-pinned 10,000-frame counter pairs on the varied corpus measured these medians:
+
+| Counter | C++ | Reference |
+| --- | ---: | ---: |
+| User cycles | 13,307,382,185 | 12,254,917,235 |
+| Instructions | 46,333,428,003 | 39,684,406,097 |
+| Branches | 6,773,951,186 | 5,156,446,955 |
+| Branch misses | 5,909,903 | 31,815,900 |
+
+The ratio of median cycle counts is 108.59%. Fewer branch misses do not offset the C++ execution cost. Separate cycle profiles lost zero samples: C++ fast parsing accounts for 50.49%, the broad sequence encoder 20.54%, Huffman literal encoding 6.70%, tree construction 4.91%, and Huffman stream writing 4.77%. Reference fast parsing accounts for 57.54%, sequence writing 13.77%, tree construction 6.89%, and sequence-code conversion 5.37%. These function boundaries differ, so percentages must not be interpreted as matched stage timings.
+
+The C++ phase trace over 1,000 frames plus warmup reports 142.44 ms parsing, 149.32 ms entropy encoding, 58.08 ms literal encoding, and 14.43 ms Huffman weight work. It builds 7,008 weight FSE tables and reuses 1,000. These instrumented nested timings are diagnostic, not production throughput measurements. All nine counter/profile/trace frames were verified byte-identical (SHA-256 `94ac0296385fa966b5b7579854fe80c64792fb514b98e7c0814beee7366bda85`). Artifacts: `out/l2-1m-profile-20261107/`.
+
+An isolated header copy then logged exact Huffman serializer keys (explicit weight count and every explicit weight). The first 128 descriptions contain eight distinct keys in a repeating eight-block order. Simulated LRU capacities 1, 2, and 4 yield zero hits; capacity 8 yields 120/128 hits, entirely from subsequent identical frames. Its output matches reference. This is a reuse diagnostic, not a speed experiment: no cache or production change was retained. Artifacts and reproduction script: `out/weight-description-reuse-20261107/`.
+
+A serialized-description cache therefore has no demonstrated within-frame benefit on this target. Any larger cross-frame cache must first show value on changing-frame workloads and account for key comparison, copying, and workspace cost; repeated identical benchmark frames alone are insufficient. Next inspect sequence-encoding instruction/dataflow costs against reference before adding state. Existing early-repeat selection and Huffman writer experiments remain rejected unless new evidence distinguishes a proposed change. Published throughput tables are unchanged.
+
 ## Current all-level varied compression screen and confirmations, 2026-11-07
 
 Rebuilt the optimized GCC13 evaluation workers from the current checkout (`Release`, `-O3 -DNDEBUG`, pledged size 1 MiB), then compared all 22 levels on the existing varied corpus, pinned to CPU2. Each level used one calibration frame per implementation followed by three alternating pairs with equal iteration counts, targeting roughly 350 ms per timed worker. The three lowest screen ratios (levels2/9/8) then received six longer pairs targeting roughly two seconds per worker. Slow high-level screen rows contain very few frames and must not be treated as confirmed wins.
