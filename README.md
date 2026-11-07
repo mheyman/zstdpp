@@ -402,7 +402,7 @@ The main matrix covers zero-filled, repeated, structured, pseudo-random, and mix
 <details>
 <summary>Varied-input compression at all 22 levels</summary>
 
-Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 2, 8, and 9 use six longer alternating trials; other levels use three screening trials. High levels have very few frames, so these screening results are not confirmed performance wins. Every compression trial matched reference bytes, and both decoders recovered the input at each level. A corresponding varied-input decompression performance matrix has not been measured in this report. See the [measurement report](BENCHMARKS.md#current-all-level-varied-compression-screen-and-confirmations-2026-11-07) for corpus identity and conditions.
+Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 2, 8, 9, and 18 use six longer alternating trials; other levels use three screening trials. High levels have very few frames, so these screening results are not confirmed performance wins. Every compression trial matched reference bytes, and both decoders recovered the input at each level. Level 18 uses the [30-frame confirmation](BENCHMARKS.md#level-18-varied-confirmation-and-child-link-prefetch-2026-11-07). A corresponding varied-input decompression performance matrix has not been measured in this report. See the [measurement report](BENCHMARKS.md#current-all-level-varied-compression-screen-and-confirmations-2026-11-07) for corpus identity and conditions.
 
 | Level | Trials × frames | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -423,7 +423,7 @@ Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 2, 8,
 | 15 | 3 × 17 | 61.47 | 46.00 | 133.63% | 21.09 | 21.85 | 96.55% | 123.23 | 632.52 | 19.48% |
 | 16 | 3 × 3 | 9.48 | 8.45 | 112.22% | 21.32 | 21.75 | 98.04% | 149.02 | 632.52 | 23.56% |
 | 17 | 3 × 4 | 9.51 | 8.55 | 111.26% | 21.29 | 21.81 | 97.60% | 149.02 | 632.52 | 23.56% |
-| 18 | 3 × 2 | 5.96 | 6.05 | 98.48% | 21.78 | 22.32 | 97.60% | 145.41 | 632.52 | 22.99% |
+| 18 | 6 × 30 | 6.19 | 6.20 | 99.86% | 21.82 | 22.21 | 98.23% | 145.41 | 632.52 | 22.99% |
 | 19 | 3 × 1 | 2.95 | 1.83 | 160.76% | 21.81 | 22.32 | 97.72% | 145.41 | 632.52 | 22.99% |
 | 20 | 3 × 1 | 3.03 | 1.83 | 165.63% | 21.80 | 22.25 | 97.98% | 145.41 | 632.52 | 22.99% |
 | 21 | 3 × 1 | 2.94 | 1.81 | 162.39% | 21.78 | 22.29 | 97.70% | 145.41 | 632.52 | 22.99% |

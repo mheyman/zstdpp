@@ -2,6 +2,29 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-18 varied confirmation and child-link prefetch, 2026-11-07
+
+Replaced the two-frame level-18 varied screening observation with six longer rounds of 30 frames, alternating both implementation order and plain/perf-stat mode order on CPU2. All 24 current/reference workers match compressed bytes and pass allocation guards. Plain medians are C++ 6.19027 and reference 6.19913 MiB/s (99.86%); median paired ratio is 99.87%, with 3/6 C++ wins. Counter-run medians are 6.21194/6.13323 MiB/s, paired ratio 100.58%, with 4/6 wins. These results establish near parity, not a repeatable C++ win or a significant deficit.
+
+Current plain measurements, also copied to the README varied-input row:
+
+| Level | Trials × frames | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 18 | 6 × 30 | 6.19 | 6.20 | 99.86% | 21.82 | 22.21 | 98.23% | 145.41 | 632.52 | 22.99% |
+
+Counter medians C++/reference: cycles 22.873/22.794B, instructions 58.976/67.085B, branches 10.683/11.914B, branch misses 78.302/78.240M. C++ already retires fewer instructions while spending approximately the same cycles. Separate 30-frame cycle profiles have zero lost samples and matching frames. C++ spends 96.94% in the fused binary-tree collector; reference spends 91.47% in `ZSTD_insertBt1` plus 6.48% in all-match collection. C++ optimal-statistics update is 1.02%, so price bookkeeping is not the dominant target on this input. Artifacts, identities, scripts and all raw measurements: `out/l18-varied-confirm-20261107/`.
+
+Tested a distinct memory-latency candidate: prefetch the current candidate node's child links immediately after calculating their masked slot, before comparing the current strings. The address stays inside the existing child table. This affects GCC13 x86-64 forward insertion without the adjacent-comparison cache; traversal order, candidate bounds, output, and allocation policy remain unchanged. Disassembly confirms `prefetcht0` at the intended insertion loop.
+
+| Input | Frames per trial | Median paired throughput change | Candidate pair wins | Production median MiB/s | Candidate median MiB/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Varied, 1 MiB | 30 | -2.35% | 1/6 | 6.1323 | 5.9911 |
+| Mixed, 1 MiB | 300 | -0.41% | 2/6 | 74.4793 | 72.9085 |
+
+Each uses six alternating current/candidate pairs on CPU2. All 24 timed workers match separately generated reference frames and pass allocation guards. Percent changes are medians of pair ratios, not ratios of independent throughput medians. The prefetch is rejected before broader correctness gates; production headers were never changed. Candidate source, executables, assembly and scripts remain under `out/tree-child-prefetch-20261107/`. The README update reflects stronger baseline measurement, not this rejected candidate.
+
+NEXT: avoid targeting an assumed level-18 instruction deficit or adding more child prefetches. Current varied levels 9 and 18 are near parity; level 2 remains the clearer compression deficit. Reassess remaining structured/mixed deficits with longer current-worker controls before choosing another architectural change, and preserve input-dependent tradeoffs rather than relying on one corpus.
+
 ## Level-9 plain/counter measurement control, 2026-11-07
 
 The earlier varied level-9 plain confirmation reported 91.73% of reference throughput, but a subsequent counter pair and cycle profile reversed that ordering. Rechecked the same current workers and 1-MiB corpus with six rounds, alternating both implementation order and plain/counter mode order. Each worker processes 500 frames on CPU2. All 24 workers emit the same frame and pass allocation guards; identities and full results are archived in `out/l9-measurement-control-20261107/`.
