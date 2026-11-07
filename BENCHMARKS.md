@@ -2,6 +2,25 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Short level-2 confirmation and folded match comparison, 2026-11-07
+
+Reconfirmed the current106bfd7 short256-KiB varied worker against optimized reference with six alternating60,000-frame trials, GCC13 `-O3 -DNDEBUG`, CPU2. Current/reference median throughput is3543.95/3569.72MiB/s (99.28% by ratio of medians); the paired median is98.59%, with2/6 wins. Median RSS is4.4765625/4.466796875MiB and worker size133.2890625/632.515625KiB. All12 frames match and both decoders recover the input. README replaces only this row's nine metrics and trial description with the longer confirmation; this is stronger baseline measurement, not a source speedup. The mixed short row remains from the retained Huffman report.
+
+Matched120,000-frame profiles have zero lost samples and zero throttle records. Approximate totals are38.442B C++ and37.968B reference cycles. The actual C++ parser is `double_fast_match_state<18,14,14,5>`, not the1-MiB fast parser. C++ shares: collecting parser37.15%, outlined delayed-SIMD match counter9.20%, broad frame7.65%, Huffman literals6.73%, FSE transitions6.59%, chunk splitting6.18%, Huffman stream4.89%, Huffman tree4.88%. Reference: double-fast parser48.89%, sequence writer13.67%, split block7.11%, Huffman tree6.47%, sequence-to-codes5.85%, fingerprint3.04%, Huffman stream3.04%. C++ parser plus counter is about17.82B versus reference parser18.56B, but differing inlining and literal-gathering boundaries prevent strict phase attribution. Broad frame time must not be labeled entirely as sequence writing.
+
+Tested a distinct counter change after the existing two scalar-word checks: load four bounded16-byte comparison masks, AND them into one all-equal mask, and perform one common-case test per64 bytes. On a mismatch, inspect original masks in address order to return the exact first differing byte. The existing32/16-byte and scalar tails remain intact. This uses SSE2 and retains the previous preset/compiler scope; it is not another AVX-width or eager-SIMD entry change.
+
+An exact-allocation ASan/UBSan oracle passes4,218,912 cases: lengths0–512, sixteen differing left/right alignments, every mismatch position, equal buffers, and an additional later mismatch. No trailing padding is available in either buffer. Six rotating40,000-frame baseline/candidate/reference triples per input pass all36 exact frames and four decoder checks, including C++ allocation guards.
+
+| Input | Current MiB/s | Candidate MiB/s | Reference MiB/s | Paired candidate change | Wins vs current |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| varied | 3557.48 | 3523.48 | 3589.11 | -0.08% | 3/6 |
+| mixed | 2143.71 | 2099.88 | 2113.58 | -1.91% | 2/6 |
+
+Varied is neutral, while mixed regresses and falls below reference (98.84% paired,2/6 wins). Three additional alternating60,000-frame varied counter pairs also match reference and pass guards. Median current/candidate cycles19.255691B/19.267534B, instructions66.542568B/66.439185B, branches8.405587B/7.983059B, branch misses41.268M/38.764M. Branches fall5.03%, but instructions only0.16% and cycles rise0.06%: the reduced branch count does not produce a net cycle saving. The candidate is rejected; production headers/tests remain unchanged.
+
+Artifacts: `out/short-l2-confirm-20261107/` (longer baseline, hashes, cycle profiles, annotations, throttle audit) and `out/short-match-fold-20261107/` (isolated source, oracle, trials and counters). Next obtain matched block-stage timing boundaries for parsing, literal entropy, sequence preparation/table building and bit emission on this short workload, so the remaining small gap can be assigned without conflating inlined scopes. Do not repeat vector folds, vector-width tuning, or the previously rejected in-place FSE/table-spread changes without distinct evidence. The wider all-level goal remains open.
+
 ## Actual-width Huffman batching retained, 2026-11-07
 
 Fresh equal-work30,000-frame varied2 cycle profiles of commit5d5d5f7 and reference have zero lost samples and zero throttle records. Sampled totals are37.806B/36.613B cycles. C++ parsing accounts for52.56% (~19.87B) versus reference56.43% (~20.66B); Huffman stream symbols account for5.19% (~1.96B) versus3.10% (~1.14B). These are directional symbol-scope comparisons, not instrumented phase timings. A diagnostic code-width audit finds every varied stream's maximum width is10 bits, with stream sizes651–693 bytes; mixed emits only a71-byte stream at maximum width7. Thus merely selecting a wider fixed batch repeats the earlier unsuccessful five-symbol experiment.
@@ -258,7 +277,7 @@ These notes record which measurements populate the current README tables. Keep f
 
 Measured 2026-11-06 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
 
-Level-2 compression was refreshed on 2026-11-07 with six rotating trials per input after [actual-width Huffman batching](#actual-width-huffman-batching-retained-2026-11-07): 10,000 frames per trial except structured (2,000) and random (4,000). Varied uses 30,000; the additional 256 KiB level-2 rows use 12,000.
+Level-2 compression was refreshed on 2026-11-07 with six rotating trials per input after [actual-width Huffman batching](#actual-width-huffman-batching-retained-2026-11-07): 10,000 frames per trial except structured (2,000) and random (4,000). Varied uses 30,000; the additional 256 KiB level-2 mixed row uses 12,000, while varied now uses six alternating 60,000-frame [confirmation trials](#short-level-2-confirmation-and-folded-match-comparison-2026-11-07).
 
 Level-3 compression was refreshed on 2026-11-07. Levels 3 and 4 use six alternating 3,000-frame compression trials per input.
 
