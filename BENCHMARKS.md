@@ -2,6 +2,27 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Current level-2 varied-input cycle and branch profiles, 2026-11-07
+
+Rebuilt the current level-2/256-KiB C++ worker with GCC13 `-O3 -g -DNDEBUG`; compared it with the optimized reference worker on the same varied input, pinned to CPU2. Three alternating 40,000-frame counter pairs confirm a remaining deficit:
+
+| Metric (whole-process counters, median) | C++ | Reference |
+| --- | ---: | ---: |
+| User cycles (billions) | 13.044 | 12.490 |
+| User instructions (billions) | 47.115 | 47.138 |
+| User branches (billions) | 5.932 | 5.692 |
+| User branch misses (millions) | 21.713 | 5.534 |
+
+Worker timings were 3.097/2.899/2.909 seconds for C++ and 2.823/2.751/2.794 for reference. The median paired cycle excess is 4.81%; instruction counts are almost equal. These are counter-enabled diagnostic timings, not replacement README benchmark rows. All counter/profile frames matched reference bytes, and both optimized decoders recovered the original input.
+
+Separate cycle profiles had zero lost samples. C++ self samples: collecting double-fast parser 38.73%, separately outlined match counter 7.50%, enclosing compression function 20.08%, Huffman literal selector 6.61%, Huffman stream writer 5.04%, Huffman tree builder 4.19%. Reference: double-fast parser 50.87%, sequence writer 12.66%, block splitting 6.78%, Huffman tree builder 6.33%, sequence-to-code conversion 5.53%. Different inlining/function boundaries prevent treating these as matched phase times.
+
+A separate 3,000-frame instrumented run measured parse 100.01 ms and encode 132.14 ms; nested encoding buckets included gather 16.60 ms, literals 44.97 ms, tables 40.44 ms, and bits 29.49 ms. Histogram/max-symbol work was 27.52 ms, dominated by offset-table selection. Offset codes selected RLE in 3,001 of 6,002 blocks; LL and ML selected compressed tables throughout. Instrumentation perturbs timing, and these clocks overlap; do not add all buckets or compare their absolutes directly to uninstrumented profiles. Prior RLE-prescan and bounded-histogram experiments must be audited before proposing another scan.
+
+Matched branch-miss profiles isolate a stronger next lead: 59.81% of C++ misses sampled in the collecting parser and 13.26% in match counting, versus 11.51% in the reference's broader parser. Reference misses instead concentrate in block splitting (34.05%) and Huffman tree construction (22.34%). Source/assembly annotation has clusters around candidate handling and post-match hash updates, including nonbranch instructions; sampling skid means these are regions to investigate, not proof of a particular bad branch. Both implementations already perform the same post-match insertion positions (+2, end-2 long, end-1 short), so deleting those updates is not justified.
+
+Next: audit the collecting parser's candidate/repeat/catch-up and match-count control flow against reference, then test a scoped reduction in branches or dependent work with counter evidence and mixed/random/repeated controls. Preserve exact insertion order and bounds; do not repeat pointer-only, tag-removal, or Huffman batching variants already rejected. Raw profiles, annotated assembly, trace, counters, binary/input hashes and reciprocal checks: `out/l2-current-profile-20261107/`. No production changes or new speedup claimed.
+
 ## Aligned sequence-code slab diagnostic rejected, 2026-11-07
 
 Following the tag-placement audit, an isolated GCC 13 level-2/256-KiB prototype replaced three LL/OF/ML byte vectors with one 64-byte-aligned owning vector. Each region's stride rounds up to 64 bytes; views are computed from the current owner, with no stored spans. A second variant also omits the unused fixed-minimum-match-5 tag allocations. Production headers were unchanged. The reference reserves its three code arrays from its shared workspace (`reference_zstd/lib/compress/zstd_compress.c`, `ZSTD_cwksp_reserve_buffer` calls); this prototype consolidates only the code arrays, not that entire workspace design.
