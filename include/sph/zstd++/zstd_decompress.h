@@ -1091,6 +1091,24 @@ namespace sph::zstd
             std::memcpy(destination, source, count);
         }
 
+#if defined(_MSC_VER)
+        // The caller proves count >= 64 and offset >= 1024. Each chunk is
+        // disjoint even when the complete match overlaps its source.
+        __declspec(noinline) static void copy_long_overlap(
+            std::uint8_t* destination, std::size_t count, std::size_t offset) noexcept
+        {
+            auto const* source{destination - offset};
+            auto* const tail{destination + count - 32U};
+            while (destination < tail)
+            {
+                std::memcpy(destination, source, 32U);
+                destination += 32U;
+                source += 32U;
+            }
+            std::memcpy(tail, tail - offset, 32U);
+        }
+#endif
+
         template <bool MediumMatchCopy = false>
         static void copy_match(
             std::uint8_t* destination,
@@ -1203,11 +1221,24 @@ namespace sph::zstd
             {
                 // Each 32-byte source chunk precedes its destination chunk,
                 // even when the complete match overlaps itself.
+#if defined(_MSC_VER)
+                // Outline long copies for the general decoder; keeping this
+                // loop inline is faster in the medium-block specialization.
+                if constexpr (!MediumMatchCopy)
+                {
+                    copy_long_overlap(match_destination, match_length, match_offset);
+                }
+                else
+                {
+#endif
                 for (std::size_t position{}; position + 32U < match_length; position += 32U)
                     std::memcpy(match_destination + position,
                         match_destination + position - match_offset, 32U);
                 std::memcpy(match_destination + match_length - 32U,
                     match_destination + match_length - 32U - match_offset, 32U);
+#if defined(_MSC_VER)
+                }
+#endif
                 return;
             }
             auto const copy_overlap_step = [](std::uint8_t* step_destination,

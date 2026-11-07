@@ -1,5 +1,32 @@
 # Benchmark results
 
+## Scoped MSVC long-overlap helper, 2026-11-06
+
+The general decoder now uses an outlined 32-byte pointer-copy loop for long overlapping matches. The medium-block specialization retains its original inline loop: outlining that specialization regressed the isolated first-block control by 4.23%. Chunk width, the exact final chunk, and the caller's offset/length checks are unchanged; this adds no allocations or output padding requirements. GCC keeps its original implementation.
+
+The screening comparison uses four fresh executable copies per version and two rotating-order pairs per case, pinned to Windows CPU 2. These percentages compare the candidate with the previous **C++ implementation**, not reference zstd. Each worker verifies decoded bytes at warmup and checks that ordinary allocations do not increase during timing.
+
+| Input / frame level | Median paired throughput change | Faster pairs |
+| --- | ---: | ---: |
+| Structured 6 | +2.86% | 8/8 |
+| Structured 8 | +3.34% | 8/8 |
+| Structured 11 | +1.85% | 6/8 |
+| Mixed 3 | +5.95% | 8/8 |
+| Structured 2 | +0.09% | 4/8 |
+| Structured 16 | -0.73% | 1/8 |
+| Structured 18 | -0.22% | 3/8 |
+| Structured 19 | -0.22% | 4/8 |
+| Structured 18, first block only | -0.67% | 2/8 |
+| Random 2 | +0.84% | 4/8 |
+
+The level-16 tradeoff remains a follow-up target. Level 19 also has variable per-copy changes (approximately -3.14% to +0.58%); its near-neutral paired median does not establish a universal gain. Raw-input per-copy changes span -5.90% to +10.73%, so its median is not evidence of a stable improvement. The existing native timing caveat still applies.
+
+All 160 screening workers completed successfully. Trials use 30,000 decodes, except random2 at 100,000. The first-block frame produces 128 KiB; other inputs produce 1 MiB. Sources, binaries, hashes and measurements are in `out/msvc-scoped-overlap-helper-20261106/{multi-image,extended}` and the parent directory's reproduction scripts. The warning-clean final build differs from the screened build in one of 18,622 decoded instructions: an equivalent `lea` adds the same registers in reverse operand order at the same address. Both `.text` sections are 70,961 bytes, 112 fewer than the previous C++ build; complete executable size remains 102.50 KiB. The final `.text` hash is `5cf369a2e8487d18df438c54c90a03c0be7183f230f8d05a6e914acad3e4a838`.
+
+Final-source validation passed: MSVC unit tests, 36,578 malformed-frame cases, and compression/interoperability acceptance (288.99 seconds total); all 14 GCC tests (26.56 seconds). The final GCC worker remains byte-identical to the previous implementation, SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`. Test logs are preserved beside the trial artifacts.
+
+The final 678-trial native refresh updates all 110 level/input rows and all nine metrics in README and [BENCHMARKS_NATIVE.md](BENCHMARKS_NATIVE.md); GCC tables are preserved. Mixed3 measures 8,936.74/5,523.74 MiB/s (161.79% of reference), with C++/reference memory 7.18/7.09 MiB (101.27%) and executable size 102.50/113.50 KiB (90.31%). Structured6 and structured11 measure 101.48% and 101.74% of reference; structured8/16/19 remain at 98.91%/98.77%/98.90%. Structured18 is near parity at 100.27%. These results retain a useful improvement without satisfying the all-level objective. Full trials and worker/frame provenance are in `out/msvc-scoped-overlap-helper-20261106/current-matrix/`.
+
 ## Native raw-buffer placement control, 2026-11-06
 
 To investigate raw-copy regressions caused by changes outside the raw decoder path, a separate diagnostic worker records encoded-input and output addresses before timing. It uses the retained decoder header and MSVC `/O2 /Ob3`, with ordinary allocation or a caller-owned output span at a controlled offset from a 4 KiB boundary. Four byte-identical executable copies each ran two rotated trials per offset, pinned to CPU 2, decoding the same random level-2 frame 100,000 times per trial. All 40 workers passed warmup exact-output and timed ordinary-allocation checks.
