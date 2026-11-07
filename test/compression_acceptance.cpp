@@ -449,6 +449,10 @@ int main()
     auto const medium_mixed_matches{check_sized_level<2, 262144U>(medium_mixed, "mixed")};
     auto const medium_varied_matches{check_sized_level<2, 262144U>(
         std::span<std::uint8_t const>{varied_text}.first(262144U), "varied text")};
+    auto const medium_level3_matches{std::array{
+        check_sized_level<3, 262144U>(medium_mixed, "mixed"),
+        check_sized_level<3, 262144U>(
+            std::span<std::uint8_t const>{varied_text}.first(262144U), "varied text")}};
     std::cout << "varied-text corpus:\n";
     auto const varied_row_matches{std::array{
         check_level<5>(varied_text), check_level<6>(varied_text),
@@ -476,6 +480,7 @@ int main()
         sph::zstd::eval::make_optimal_presplit_corpus(11U))};
     if (!short_mixed_matches || !short_varied_matches || !medium_mixed_matches ||
         !medium_varied_matches || !huffman_history_matches ||
+        !std::ranges::all_of(medium_level3_matches, std::identity{}) ||
         !std::ranges::all_of(presplit_matches, std::identity{}) ||
         !std::ranges::all_of(transition_matches, std::identity{}) ||
         !std::ranges::all_of(varied_row_matches, std::identity{}) ||

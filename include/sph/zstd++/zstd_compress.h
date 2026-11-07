@@ -774,7 +774,8 @@ namespace sph::zstd
                                 (Parameters.compression_level == 3 || Parameters.compression_level == 4)))
                             , (effective_parameters_.strategy == compression_strategy::double_fast &&
                                Parameters.compression_level == 3 &&
-                               effective_parameters_.pledged_source_size == 1048576U)
+                               (effective_parameters_.pledged_source_size == 1048576U ||
+                                effective_parameters_.pledged_source_size == 262144U))
 #else
                             , false
                             , false

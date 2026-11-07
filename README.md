@@ -396,14 +396,14 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 <details>
 <summary>Level-3 compression on short mixed and varied-text inputs</summary>
 
-Measured 2026-11-07 using optimized GCC 13 workers, six rotating old/current/reference trials per input, 50,000 frames at 64 KiB and 12,000 at 256 KiB. Values below use median elapsed time and peak RSS. Every trial matched reference bytes; both decoders recovered the input. Mixed inputs contain all four patterns at each size. These additional inputs expose remaining performance gaps not visible in the 1 MiB matrix. See [benchmark details](BENCHMARKS.md).
+Measured 2026-11-07 using optimized GCC 13 workers, six rotating old/current/reference trials per input, 50,000 frames at 64 KiB and 12,000 at 256 KiB. The 256 KiB rows were subsequently refreshed with six alternating current/reference pairs of 12,000 frames after enabling the double-RLE shortcut. Values below use median elapsed time and peak RSS. Every trial matched reference bytes; both decoders recovered the input. Mixed inputs contain all four patterns at each size. These additional inputs expose remaining performance gaps not visible in the 1 MiB matrix. See [benchmark details](BENCHMARKS.md).
 
 | Input | Size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | mixed | 64 | 1648.60 | 1603.12 | 102.84% | 4.66 | 4.38 | 106.33% | 123.64 | 632.52 | 19.55% |
 | varied | 64 | 3291.77 | 3214.24 | 102.41% | 4.60 | 4.32 | 106.33% | 123.64 | 632.52 | 19.55% |
-| mixed | 256 | 1807.45 | 2010.89 | 89.88% | 5.17 | 4.88 | 106.00% | 127.73 | 632.52 | 20.19% |
-| varied | 256 | 2444.44 | 2904.91 | 84.15% | 4.97 | 4.83 | 102.99% | 127.73 | 632.52 | 20.19% |
+| mixed | 256 | 1818.66 | 1995.64 | 91.13% | 5.17 | 4.90 | 105.62% | 127.73 | 632.52 | 20.19% |
+| varied | 256 | 2468.76 | 2868.97 | 86.05% | 4.97 | 4.84 | 102.70% | 127.73 | 632.52 | 20.19% |
 
 </details>
 
