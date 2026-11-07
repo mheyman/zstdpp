@@ -1,5 +1,29 @@
 # Benchmark results
 
+## Identical-binary control and weight FSE batching (2026-11-07)
+
+Ran the exact same short level2 production executable under both timing labels, using the same path (not two differently named copies), CPU2, six alternating100,000-frame pairs per input. SHA256 is `e86dfb36868d5ec92e548f8aa5955de555d42c780f116582fcd6f6a9385785a6`. The labels produced apparent paired changes with no implementation difference:
+
+| Input | Median apparent change | Positive pairs / 6 | Individual pair changes |
+| --- | ---: | ---: | --- |
+| varied | +0.69% | 4 | +0.259%, +1.111%, +3.500%, +2.129%, -1.818%, -1.397% |
+| mixed | -0.80% | 2 | -1.254%, +0.612%, +0.330%, -2.674%, -1.361%, -0.342% |
+
+All24 workers produced identical per-input frames and passed allocation guards; four decoder checks recovered the inputs. These observations explain why a sub-percent six-pair result alone is weak evidence, including the preceding fused-weight varied result. They are not a universal noise threshold, proof of a particular OS/cache cause, or justification for discarding unfavorable trials. Evidence: `out/short-identical-control-20261107/`.
+
+Next tested a distinct weight-only FSE writer specialization. After the existing odd/pair prefix, remaining input length is divisible by four. It encodes the same alternating states in order, combines four emitted payloads, and appends once. With table log<=6, each emission is at most6 bits and the combined payload at most24; initial states, scalar prefix, final state flushes and marker remain unchanged. Generic callers retain the scalar writer. The reference similarly groups four symbols per flush, but that does not establish that the C++ dataflow will improve.
+
+The scalar/grouped oracle passed33,024 bitstream comparisons under ASan/UBSan:128 randomized tables at logs5/6 and alphabet sizes2–12, lengths0–255 including every prefix/tail class, plus256 RLE cases. Six rotating baseline/candidate/reference triples per input,40,000 frames, generic GCC13, CPU2, gave:
+
+| Input | Previous C++ MiB/s | Candidate MiB/s | Reference MiB/s | Paired change vs previous | Wins / 6 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| varied | 3519.01 | 3431.82 | 3572.75 | -1.96% | 1 |
+| mixed | 2112.29 | 2105.13 | 2102.85 | -0.39% | 2 |
+
+All36 compression workers matched reference bytes and passed allocation guards; four decoder checks recovered inputs. Candidate executable133.1484375 KiB versus baseline133.2890625 KiB. Reject this version: no target gain is demonstrated, and varied remains95.62% of reference by paired ratio with zero wins. This is a rejection screen, not broad cross-level qualification. Evidence: `out/weight-fse-four-20261107/`. Production code and README metrics remain unchanged.
+
+Next prepare a diagnostic comparison harness that alternates short batches within one process, first verifying identical-function controls before comparing candidate code. Isolate implementations to prevent ODR/symbol collisions, preserve matched compression parameters, warmup/allocation and byte-equality checks, and record batch order and timings. This can reduce temporal drift but cannot by itself eliminate code/data placement effects. Keep isolated workers for published throughput confirmation, RSS, and executable size; do not substitute combined-process RSS/code size for the existing metrics. The full all-level goal remains open.
+
 ## Weight-stage audit and fused preparation screen (2026-11-07)
 
 Added isolated diagnostic timers around weight preparation, histogramming, normalization, normalized-header writing, and the intermediate-buffer join. Three20,000-frame runs per short input, CPU2, optimized GCC13 with existing phase tracing enabled, produced reference-identical frames and passed allocation guards. Medians below divide accumulated time by20,001 calls (warmup included). Nested timers add overhead; these are attribution measurements, not throughput claims or directly equivalent reference scopes.
