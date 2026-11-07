@@ -2,6 +2,22 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Combined histogram metadata scans rejected, 2026-11-07
+
+Tested three isolated alternatives to `select_sequence_table`'s maximum-symbol scan followed by `max_element`: (1) accumulate both results in one loop, (2) express the highest nonzero symbol as an explicit maximum-index reduction, and (3) implement the combined scan with SSE2. These do not change histogram collection, table-selection rules, normalized counts, or allocation. Fresh optimized GCC13 level-2/256-KiB baselines were used with six alternating CPU2 20,000-frame pairs per input and variant.
+
+| Variant | Varied median paired change | Wins | Mixed median paired change | Wins |
+| --- | ---: | ---: | ---: | ---: |
+| Combined scalar scan | +0.14% | 4/6 | -0.61% | 3/6 |
+| Explicit maximum-index reduction | -0.22% | 2/6 | -3.97% | 1/6 |
+| Explicit SSE2 scan | +0.40% | 4/6 | -0.06% | 2/6 |
+
+All 72 timed workers matched optimized reference compressed bytes and passed allocation guards. GCC's vectorization reports reject both scalar forms with an unsupported-use diagnostic; the maximum-index rewrite did not deliver automatic SIMD. The explicit SSE2 version maintains four maximum-count lanes and four last-nonzero-index lanes, then reduces those lanes and handles the alphabet tail. Unsigned comparison uses sign-bit bias, preserving full uint32 histogram values. An independent scalar oracle passed 40,000 ASan/UBSan cases over alphabet sizes32/36/53/256, including zero/tied, sparse, and full-width random counts.
+
+None demonstrates a reliable end-to-end improvement worth retaining. Production, README measurements, and normal build artifacts remain unchanged; the isolated candidates did not advance to all-level acceptance or broader performance qualification. Artifacts: `out/histogram-metadata-20261107/`, `out/histogram-metadata-vector-20261107/`, and `out/histogram-metadata-sse2-20261107/` contain source snapshots/generators, compiler reports, oracle and raw trials.
+
+Next: refresh the all-level compression comparison on the existing 1-MiB varied corpus, then confirm the largest remaining deficits with longer runs. Earlier varied results exposed lazy-parser gaps beyond the short level-2 case; current five-pattern README tables and old varied checkpoints should not be treated as proof that those paths now beat reference. Prioritize a repeated substantial deficit over further metadata-loop microvariants.
+
 ## Grouped FSE state-mask lookup rejected, 2026-11-07
 
 An isolated GCC13 medium-block decoder replaced only the two shift/subtract masks used to split the grouped FSE state value with a ten-entry constexpr mask table. The reverse bit reader, reloads, checks, table representation, and allocation behavior were unchanged. Source audit confirms sequence tables are validated at maximum logs 9 (literal/match) and 8 (offset); generated state widths cannot exceed those logs, and RLE uses zero. Thus the proposed mask indices are 0–9. Disassembly verifies two indexed memory-AND instructions against the new table, so the source change reached the hot code.
