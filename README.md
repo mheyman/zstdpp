@@ -2,13 +2,15 @@
 
 A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zstd/) with compile-time compression settings and callback-driven streaming. The bundled reference implementation is used to check compressed bytes and measure performance at matching levels.
 
-[Get started](#get-started) · [Build and test](#build-and-test) · [Run a benchmark](#run-a-benchmark) · [Performance](#performance) · [Windows performance](#native-windows-decompression) · [Development progress](PERFORMANCE_PLAN.md)
+[Get started](#get-started) · [Build and test](#build-and-test) · [Run a benchmark](#run-a-benchmark) · [Performance](#performance) · [Windows performance](#native-windows-decompression) · [Documentation](#documentation-and-development)
 
 ## What it supports
 
 The library provides streaming compression and decompression, Huffman and FSE entropy coding, checksums, concatenated and skippable frames, and match parsing from fast through binary-tree strategies. It is an active port; dictionary and multithreaded modes are still missing.
 
 The current benchmark matrix checks byte-for-byte compressed output at levels 1–22 on five deterministic inputs. The acceptance tests also check decoding in both directions.
+
+For optimization priorities and completed work, see the [performance work list](PERFORMANCE_PLAN.md). The [development history](PERFORMANCE_HISTORY.md) preserves the progress notes and experiments previously tracked in this README.
 
 ## Get started
 
@@ -560,7 +562,7 @@ Each cell gives **speed / peak memory / executable size** as C++ percentages of 
 
 </details>
 
-## More information
+## Documentation and development
 
 | Document | Contents |
 | --- | --- |
@@ -571,4 +573,6 @@ Each cell gives **speed / peak memory / executable size** as C++ percentages of 
 | [Development history](PERFORMANCE_HISTORY.md) | Archived progress notes and earlier results formerly kept in this README. |
 | [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
 
-The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/). Ongoing task status and experiment outcomes belong in the performance work list; this front page presents usage and the current benchmark tables.
+The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/).
+
+Keep this README focused on library capabilities, getting started, and current performance. Record task status and next steps in the performance work list, and dated experiments—including rejected changes and their measurements—in the benchmark report. The development history is the archive of the former working README. When a retained change updates published performance, refresh the corresponding README tables and detailed benchmark matrix together.

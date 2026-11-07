@@ -1,5 +1,7 @@
 # Benchmark results
 
+This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
+
 ## Tag allocation and buffer-placement diagnostic, 2026-11-07
 
 The audit confirms that fixed minimum-match-5 GCC13 ordinary, collecting and direct-offBase parser entry points do not use byte tags. Runtime minimum-match selection, other compilers and the ordinary minimum-match-4 parser still require them. History already rejected both empty tag members and merely skipping their resizes after cross-input regressions; this turn therefore investigated placement rather than repeating an uninstrumented removal claim.
