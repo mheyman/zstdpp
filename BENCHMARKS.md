@@ -1,5 +1,22 @@
 # Benchmark results
 
+## GCC medium-block profiles and tiny-copy controls, 2026-11-06
+
+Three alternating 100,000-frame CPU2 `perf stat` pairs reproduced the outer-dispatch candidate's structured19 regression against retained C++: median cycle cost 102.56%, throughput 97.84%. Median instructions/frame fell from 1,121,906.45 to 1,118,200.41; branch misses/frame rose from 19.40 to 29.80. These aggregate counters do not isolate a cause. The diagnostic report's `reference` label denotes the saved C++ baseline.
+
+Sequential 300,000-frame cycle profiles (`cycles:u`, period 100003) put baseline/candidate sampled shares at 55.84%/56.35% in the padded medium decoder, 30.13%/29.72% in frame parsing, and 9.44%/10.07% in the tiny-match helper. Worker elapsed times were 20.6343/20.8500 seconds: the candidate remained slower, but the profiles do not reproduce the full counter-run gap. Seven-byte copy instructions account for substantial samples inside the helper, motivating two bounded-copy experiments rather than proving a root cause. Recording directly to the Windows-mounted directory failed with `Bad address`; recording under a fresh Linux `/tmp` directory succeeded, with data copied back afterwards and no lost samples reported.
+
+Both following candidates include the saved outer zero-literal dispatch. Six alternating 30,000-frame pairs compare against the retained C++ decoder:
+
+| Tiny-copy variant | Structured19 | Mixed3 |
+| --- | ---: | ---: |
+| Seven-byte branch before switch | -0.79% (1/6 wins) | -0.50% (1/6) |
+| Range-based exact copies | -0.26% (2/6) | +0.47% (4/6) |
+
+The range version selects two bounded four-byte copies for lengths 4–7, a two-byte copy and final byte for lengths 2–3, and a single byte for length 1, preserving no-op behavior outside 1–7. Longer structured19 pairs (100,000 frames, six pairs) still lose 0.82% (1/6). Structured18 is neutral at -0.08% (3/6), while structured16 retains +11.33% (6/6). Further 30,000-frame controls measure structured6 -0.81% (1/6), repeated3 +0.35% (4/6), zero3 -1.07% (3/6), and random2 +1.38% (4/6; variable). Crucially, a direct six-pair 100,000-frame comparison against reference zstd measures structured19 at 99.22% median paired throughput, winning only one pair. These results do not establish an acceptable all-level improvement.
+
+Neither helper variant retained. All workers passed exact-output warmup and allocation guards; comprehensive malformed-input tests were not run for rejected variants. Restored source and rebuilt production exactly match baseline SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`. README metrics remain unchanged. Profiles, annotations, counters, binaries, scripts and trial CSVs are in `out/gcc-zero-outer-20261106/`. Next profile reference decoding of the same structured19 frame and compare sequence/copy work with retained C++, before further zero-literal compiler tuning.
+
 ## GCC outer zero-literal dispatch controls, 2026-11-06
 
 Moved GCC's zero-literal selection to `decode_sequences`, before entering the general implementation. The specialized decoder still performs all header/table checks. Medium blocks bypass this dispatch. Six alternating CPU2-pinned 30,000-frame old/new pairs improved structured16 by 12.54% (6/6); mixed3 was nearly neutral at -0.24% (2/6). Six longer 100,000-frame mixed pairs confirmed -0.07% (3/6), resolving the preceding prototype's repeatable mixed regression.
