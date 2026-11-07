@@ -1,5 +1,22 @@
 # Benchmark results
 
+## GCC raw-copy width and helper-sharing controls, 2026-11-06
+
+Compared bounded 32-, 64- and 128-byte forward loops in the frame-shaped copy diagnostic: eight 128 KiB copies with three-byte input gaps, 1 MiB output, six rotating triples per output offset. Median paired changes for 64/128 versus 32 bytes were +0.55%/+5.95% at offset0, +0.93%/+0.29% at16, +4.03%/+1.31% at64, and +9.25%/+8.49% at2048. Several cases split three wins out of six; these results justify full-decoder trials, not retention by themselves.
+
+Six alternating CPU2 old/new decoder pairs produced the following results. Raw2 uses 100,000 frames per worker; other controls use 30,000. Percentages compare candidates against retained C++, not reference zstd.
+
+| Candidate | Random2 | Mixed3 | Structured19 |
+| --- | ---: | ---: | ---: |
+| 128-byte class helper | +5.11% (3/6 wins) | -2.30% (0/6) | -2.44% (0/6) |
+| 64-byte class helper | +2.29% (3/6) | +1.80% (6/6) | -0.38% (2/6) |
+
+The 64-byte candidate warranted longer raw controls: six 300,000-frame counter pairs showed 95.83% median cycle cost and 108.39% throughput, with five cycle wins and six throughput wins. Instructions/frame fell from 296,047.86 to 214,127.59. However, further structured16/18 controls lost 3.46% (0/6) and 2.05% (1/6); repeated3 and zero3 were near neutral at +0.35%/+0.71%. Same-address full-decoder diagnostics confirmed that the 64-byte version still avoids the severe output-offset64 slowdown. None of this removes its structured-input tradeoff.
+
+A structural alternative moved the 64-byte helper outside the decoder class template into a shared inline/noinline detail function, eliminating per-instantiation helper duplication. Six-pair screens gained mixed3 +3.96% (6/6) and random2 +15.61% (5/6, variable), but structured16 still lost 3.91% (0/6). Reject all three variants; their raw gains do not justify worsening the near-parity structured path. Complete executable size stayed 128,400 bytes for both class-helper widths. Generated-code/placement effects remain a possible explanation for movement on compressed inputs, not a proven cause.
+
+All timed workers passed exact-output warmup and allocation guards. Comprehensive correctness tests were not run for the rejected candidates; the provisional tail-test expansion was reverted along with the code. Restored production executable exactly matches SHA-256 `12da3a33d974ed0978f510f52705f9af4b32724cdd7898fb172a2c3a2e2ae9b5`. README metrics unchanged. Sources, binaries, trials, placement controls and counters are in `out/gcc-raw-width-20261106/`. Next run consistent-duration confirmations across the 30 distinct workload groups, identifying repeatable reference deficits before further changes. Keep these raw-copy candidates available if a later decoder change removes the structured tradeoff.
+
 ## Decoder workload identity and structured15 confirmation, 2026-11-06
 
 The short matrix reported structured15 decompression at 95.67% of reference. Six alternating CPU2-pinned 100,000-frame `perf stat` pairs on the retained decoder instead measured median paired throughput **106.89%** and cycle cost **93.65%**, with C++ faster in all six pairs. Median instructions/frame were C++/reference 587,641.09/565,285.55 and branch misses/frame 116.66/29.77. More instructions and branch misses did not imply slower decoding. The short-screen deficit is not confirmed; no code change is justified by it. These counter-instrumented results do not replace the uninstrumented README measurements.
