@@ -1,5 +1,36 @@
 # Benchmark results
 
+## Double-fast splitter arithmetic and merged scan rejected (2026-11-07)
+
+Audited `chunk_split_size<43,8>` against reference `ZSTD_splitBlock` and tested two isolated GCC 13 Release candidates on genuine 256-KiB varied and mixed inputs. Production remains unchanged.
+
+**Narrow distance arithmetic.** Each 8-KiB chunk records 191 actual samples, while preserving reference's event-count value of 190. Before a comparison there are at most 15 accumulated chunks: either histogram/count product is bounded by `15 * 191 * 190 = 544350`, and the sum of absolute differences by 1088700. Thus signed 32-bit products/differences and an unsigned 32-bit reduction are sufficient for this specialization. The threshold remains 64-bit. All callers invoke this splitter only on the maximum 128-KiB block; other sampling rates retain their original types.
+
+An isolated test exposes the private splitter only in a separate test include tree. Both C++ and the reference splitter are sanitizer-instrumented. Across 1,024 full blocks covering every chunk-boundary transition, uniform/disjoint alphabets, random and periodic patterns, all split positions match under ASan/UBSan. The measured worker uses the normal private interface.
+
+Six rotating 40,000-frame baseline/candidate/reference triples initially measured paired varied +1.52% (6/6 wins), but mixed -1.77% (0/6). Six longer alternating 100,000-frame baseline/candidate pairs did not confirm the gain:
+
+| Input | Baseline MiB/s | Candidate MiB/s | Paired change | Wins |
+| --- | ---: | ---: | ---: | ---: |
+| varied, 256 KiB | 3518.64 | 3517.82 | +0.13% | 3/6 |
+| mixed, 256 KiB | 2118.78 | 2108.71 | -0.62% | 2/6 |
+
+Three additional 60,000-frame varied counter pairs measured median baseline/candidate cycles 19,326,121,299 / 18,956,191,212 and instructions 66,542,567,755 / 65,170,824,747. The reduction in counted work did not produce a repeatable throughput gain; no retention is justified. Both executables remain 133.289 KiB. Longer-trial baseline/candidate RSS medians are 4.479/4.469 MiB varied and 4.715/4.725 MiB mixed; there is no new allocation or workspace.
+
+**Merged comparison and histogram update.** A separate candidate retains the original 64-bit arithmetic but adds each new histogram bin to the old one immediately after computing its distance contribution. It computes the threshold from original event counts, then updates the count. If a split is selected, the modified local histogram is discarded; otherwise the next iteration uses it without a second merge scan. The old separate merge becomes a no-op only for sampling rate 43. This also passes all 1,024 sanitized reference split comparisons.
+
+Six rotating 40,000-frame triples do not establish a useful benefit:
+
+| Input | Baseline MiB/s | Candidate MiB/s | Reference MiB/s | Paired change | Wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| varied, 256 KiB | 3486.10 | 3511.06 | 3580.77 | +0.34% | 3/6 |
+| mixed, 256 KiB | 2116.16 | 2100.22 | 2108.09 | -1.63% | 2/6 |
+
+Executable size remains 133.289 KiB; candidate/baseline RSS is 4.500/4.500 MiB varied and 4.680/4.705 MiB mixed. Rejected without further qualification. Across both candidates, all 102 compression worker runs matched reference frames and passed allocation guards; eight decoder checks recovered the original inputs. The two direct splitter oracles add 2,048 successful reference comparisons.
+
+Artifacts: `out/split-distance32-20261107/` and `out/split-fused-merge-20261107/`, including isolated headers, sanitizer oracles, scripts, raw measurements, and disassembly. No README numbers changed because neither candidate was retained. Next: move away from short level-2 scheduling variants and confirm the current 1-MiB varied level-8 deficit with longer alternating current/reference runs. If reproducible, collect matched cycle profiles before selecting a row-matcher or entropy change. The all-level objective remains open.
+
+
 ## Balanced Huffman pairs rejected after confirmation (2026-11-07)
 
 Tested a different dependency structure inside the retained adaptive eight-symbol writer. Each four-symbol group formed two independent two-symbol payloads, then merged them; code checks, widths, 63-bit combined flush decision, tail handling, output bounds, and allocations stayed unchanged. This is not the older two-reservoir writer that flushed each lane independently. Isolated GCC 13 `-O3 -DNDEBUG` assembly confirms changed pair construction; production was untouched.
