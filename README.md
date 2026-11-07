@@ -393,6 +393,20 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 
 </details>
 
+<details>
+<summary>Level-3 compression on short mixed and varied-text inputs</summary>
+
+Measured 2026-11-07 using optimized GCC 13 workers, six rotating old/current/reference trials per input, 50,000 frames at 64 KiB and 12,000 at 256 KiB. Values below use median elapsed time and peak RSS. Every trial matched reference bytes; both decoders recovered the input. Mixed inputs contain all four patterns at each size. These additional inputs expose remaining performance gaps not visible in the 1 MiB matrix. See [benchmark details](BENCHMARKS.md).
+
+| Input | Size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| mixed | 64 | 1648.60 | 1603.12 | 102.84% | 4.66 | 4.38 | 106.33% | 123.64 | 632.52 | 19.55% |
+| varied | 64 | 3291.77 | 3214.24 | 102.41% | 4.60 | 4.32 | 106.33% | 123.64 | 632.52 | 19.55% |
+| mixed | 256 | 1807.45 | 2010.89 | 89.88% | 5.17 | 4.88 | 106.00% | 127.73 | 632.52 | 20.19% |
+| varied | 256 | 2444.44 | 2904.91 | 84.15% | 4.97 | 4.83 | 102.99% | 127.73 | 632.52 | 20.19% |
+
+</details>
+
 ## Native Windows decompression
 
 Measured 2026-11-06 using MSVC Release `/O2 /Ob3` decoder workers on Windows logical CPU 2, on the same five 1 MiB inputs and reference frames as the GCC matrix. Levels refer to the compression settings that produced each frame. Most rows use three alternating 1,000-frame trials; structured levels 16 and 18 and mixed level 3 use six 30,000-frame trials. Throughput uses median worker elapsed time. Memory is median process peak working set, and code size is the complete worker executable. Both workers check exact decoded bytes at warmup; the C++ worker also rejects ordinary allocations during timing. Short-screen and near-parity results remain timing-sensitive. These are native decompression measurements; the [GCC compression/decompression matrix](BENCHMARKS_INPUTS.md) remains a separate comparison. Native speed comparisons are provisional: an [identical-binary control](BENCHMARKS.md#native-identical-binary-control-2026-11-06) showed substantial timing differences between executable copies.

@@ -1,5 +1,24 @@
 # Benchmark results
 
+## Level-3 short-input controls and remaining gaps, 2026-11-07
+
+Built isolated optimized GCC 13 `-O3 -DNDEBUG` workers for the pre-direct-offset source and retained source at 64 and 256 KiB. Baseline headers exactly match the Git blobs in `a8b9b94`; production files and binaries were not modified. Mixed inputs contain zero, repeated, structured and pseudo-random quarters generated at each size, rather than a prefix of the 1 MiB mixed input. Varied text uses the established varied corpus prefixes.
+
+Six rotating old/current/reference triples per case used 50,000 frames at 64 KiB and 12,000 at 256 KiB. All 72 timed workers matched reference frames; both decoders recovered every case. Median paired current/old changes: 64-KiB mixed +2.05% (5/6 wins), varied -0.29% (3/6); 256-KiB mixed +1.73% (5/6), varied -0.29% (3/6). Thus the retained direct-offset policy improves mixed inputs with no consistent varied regression in this run. It does not solve the larger 256-KiB deficits: current/reference throughput is 89.88% mixed and 84.15% varied. README now includes these additional nine-metric measurements so the 1 MiB matrix does not conceal them. Table throughput uses median elapsed time; paired changes use median per-round speed ratios.
+
+| Input | Size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| mixed | 64 | 1648.60 | 1603.12 | 102.84% | 4.66 | 4.38 | 106.33% | 123.64 | 632.52 | 19.55% |
+| varied | 64 | 3291.77 | 3214.24 | 102.41% | 4.60 | 4.32 | 106.33% | 123.64 | 632.52 | 19.55% |
+| mixed | 256 | 1807.45 | 2010.89 | 89.88% | 5.17 | 4.88 | 106.00% | 127.73 | 632.52 | 20.19% |
+| varied | 256 | 2444.44 | 2904.91 | 84.15% | 4.97 | 4.83 | 102.99% | 127.73 | 632.52 | 20.19% |
+
+Matched CPU2 `perf record` captures on 30,000 frames per worker used user cycles with period 100,003 and had zero lost samples. Mixed reference/current times were 5.037/5.454 s; sampled cycle totals were approximately 16.701/16.633 billion, so elapsed differences there must not be explained solely by excess cycle counts. Varied times were 3.391/4.026 s and sampled cycles approximately 10.346/12.284 billion, reproducing its deficit in both measures. Profiled frames matched exactly.
+
+Varied C++ self samples: double-fast parser 49.13%, match counter 6.27%, broad sequence encoder 16.64%, enclosing frame 6.00%, Huffman literal selection 5.28%, Huffman stream 3.66%, Huffman tree 3.29%. Reference: parser 60.81%, sequence writer 8.98%, sequence-to-codes 4.29%, splitter 5.41%, Huffman table builder 5.12%. These functions include different work; shares are leads, not like-for-like phase ratios. The 256-KiB C++ parser resolves to window/hash/chain/minMatch 18/16/16/4 and uses tags, unlike the 1 MiB minMatch-5 direct-candidate specialization. The broad encoder needs phase attribution before choosing between parser, gathering, table selection or bit writing.
+
+NEXT: collect 256-KiB level-3 encoder subphase timings and LL/OF/ML table modes on mixed and varied input. The double-RLE shortcut is currently selected only for 1 MiB level 3; verify mode frequency before extending it, and keep the varied-input deficit as a required control. Review prior phase/dispatch experiments before changing generic policies. All artifacts, source snapshots, hashes, per-worker metrics and profiles are under `out/l3-short-offbase-20261107/`. No library change in this step; overall goal remains incomplete.
+
 ## GCC level-3 direct encoded offsets retained, 2026-11-07
 
 Extended the measured direct-offBase parser policy to GCC 13 level 3. Its double-RLE and adaptive sequence writers now receive the same representation policy as the main encoder, including last-sequence extra bits and both reverse loops. Logical-offset callers retain the existing behavior. Levels 2 and 4 were rebuilt and their complete executable hashes exactly match saved production workers.
