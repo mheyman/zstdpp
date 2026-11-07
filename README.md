@@ -394,16 +394,20 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 </details>
 
 <details>
-<summary>Level-3 compression on short mixed and varied-text inputs</summary>
+<summary>Level-3 compression on short inputs</summary>
 
-Measured 2026-11-07 using optimized GCC 13 workers, six rotating old/current/reference trials per input, 50,000 frames at 64 KiB and 12,000 at 256 KiB. The 256 KiB rows were subsequently refreshed with six alternating current/reference pairs of 12,000 frames after enabling the double-RLE shortcut. Values below use median elapsed time and peak RSS. Every trial matched reference bytes; both decoders recovered the input. Mixed inputs contain all four patterns at each size. These additional inputs expose remaining performance gaps not visible in the 1 MiB matrix. See [benchmark details](BENCHMARKS.md).
+Measured 2026-11-07 using optimized GCC 13 workers. The 64 KiB rows use six rotating old/current/reference trials of 50,000 frames; the 256 KiB rows use six alternating current/reference trials of 12,000 frames. Values use median elapsed time and peak RSS. Every trial matched reference bytes; both decoders recovered the input. Mixed inputs contain all four patterns at each size. See [benchmark details](BENCHMARKS.md).
 
 | Input | Size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | mixed | 64 | 1648.60 | 1603.12 | 102.84% | 4.66 | 4.38 | 106.33% | 123.64 | 632.52 | 19.55% |
 | varied | 64 | 3291.77 | 3214.24 | 102.41% | 4.60 | 4.32 | 106.33% | 123.64 | 632.52 | 19.55% |
-| mixed | 256 | 1818.66 | 1995.64 | 91.13% | 5.17 | 4.90 | 105.62% | 127.73 | 632.52 | 20.19% |
-| varied | 256 | 2468.76 | 2868.97 | 86.05% | 4.97 | 4.84 | 102.70% | 127.73 | 632.52 | 20.19% |
+| zero | 256 | 27419.66 | 9644.32 | 284.31% | 4.94 | 4.82 | 102.47% | 127.73 | 632.52 | 20.19% |
+| repeated | 256 | 17222.19 | 8343.33 | 206.42% | 4.96 | 4.89 | 101.36% | 127.73 | 632.52 | 20.19% |
+| structured | 256 | 822.10 | 798.56 | 102.95% | 5.07 | 4.99 | 101.49% | 127.73 | 632.52 | 20.19% |
+| random | 256 | 3396.88 | 2681.81 | 126.66% | 5.17 | 4.99 | 103.64% | 127.73 | 632.52 | 20.19% |
+| mixed | 256 | 2235.34 | 2008.15 | 111.31% | 5.19 | 4.85 | 107.05% | 127.73 | 632.52 | 20.19% |
+| varied | 256 | 2962.61 | 2896.33 | 102.29% | 4.94 | 4.90 | 100.76% | 127.73 | 632.52 | 20.19% |
 
 </details>
 

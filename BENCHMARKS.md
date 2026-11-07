@@ -1,5 +1,17 @@
 # Benchmark results
 
+## GCC minimum-match-4 direct comparisons retained, 2026-11-07
+
+The history audit ruled out repeating canonical-code caching at commit and a two-container Huffman rewrite: both had already passed byte checks but failed throughput confirmation. Instead, the current profile identified the tagged double-fast parser as about half of 256-KiB level-3 samples. Its 18/16/16/4 window/hash/chain/minMatch specialization differed from the already direct minimum-match-5 path.
+
+The GCC13 direct-offBase parser now uses full candidate comparisons for that measured specialization, eliminating its byte-tag reads, writes and rejection checks while retaining candidate-index, window and full-match validation. A single policy applies throughout the frame. Other configurations retain their existing selection. Six alternating CPU2 old/new pairs of 12,000 frames each gained mixed +20.82% (6/6 wins), varied +18.30% (6/6), structured +25.01% (6/6) and random +9.31% (6/6). Zero was near neutral at -0.24% (2/6), and repeated lost -1.22% (1/6); the repeated regression is an explicit retained tradeoff. All 72 worker frames matched reference and passed worker guards.
+
+Extended the sequence oracle to compare tagged logical records against direct encoded-offset records with the actual 18/16/16/4 parameters over four input shapes, eight blocks, window expiry and reset epochs. Optimized unit tests and all-level acceptance passed in 18.07 seconds. Rebuilt 64-KiB and 1-MiB level-3 binaries exactly match saved production executables; the integrated 256-KiB binary exactly matches the measured isolated candidate.
+
+Independent six alternating current/reference pairs on all six 256-KiB input types passed byte parity and both decoders. Current/reference throughput: mixed 111.31%, varied 102.29%, structured 102.95%, random 126.66%, repeated 206.42%, zero 284.31%. README now publishes all nine metrics for these six rows, preserving the 64 KiB and main 1 MiB matrices and native Windows results. The narrow varied/structured leads are measurement snapshots, not universal completion. Artifacts and source snapshots: `out/l3-min4-direct-20261107/`.
+
+NEXT: audit unused tag-buffer construction in compile-time direct parser paths. The minimum-match-5 GCC path already selects direct parsing for ordinary, collected and encoded-offset views, but still allocates tag storage; validate every entry point before eliding buffers, especially runtime-parameter and other compiler paths. Treat the newly direct minimum-match-4 view separately because its ordinary logical parser still uses tags. Measure memory and throughput on all affected inputs rather than assuming allocation removal improves steady-state speed. The 64 KiB worker resolves to 16/16/15/5 and is already direct, so another tag-removal trial there would be redundant. Remaining all-level compression/decompression gaps still require work.
+
 ## GCC level-3 256-KiB double-RLE shortcut retained, 2026-11-07
 
 An isolated 3,000-frame phase trace on current 256-KiB inputs remained byte-identical. Mixed parse/encode took 228.36/186.65 ms; encoder gathering/literals/tables/bits were 42.96/62.20/26.58/53.87 ms. LL and OF each selected run-length mode in 3,001 of 9,003 sequence blocks (including warmup). Varied parse/encode took 167.99/122.45 ms, split 18.64/48.59/20.65/33.91 ms across the same encoder stages, with no LL/OF run-length tables. These instrumented times are diagnostic and include timer overhead, not headline throughput.

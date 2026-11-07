@@ -343,13 +343,13 @@ namespace
         }
     }
 
-    template <unsigned MinimumMatch>
+    template <unsigned MinimumMatch, unsigned WindowLog = 20U, unsigned HashLog = 18U>
     void check_double_fast_direct_offbase()
     {
         using namespace sph::zstd::detail;
-        using matcher_type = double_fast_match_state<20U, 18U, 18U, MinimumMatch>;
-        matcher_type logical{20U, 18U, 18U, MinimumMatch};
-        matcher_type direct{20U, 18U, 18U, MinimumMatch};
+        using matcher_type = double_fast_match_state<WindowLog, HashLog, HashLog, MinimumMatch>;
+        matcher_type logical{WindowLog, HashLog, HashLog, MinimumMatch};
+        matcher_type direct{WindowLog, HashLog, HashLog, MinimumMatch};
         std::vector<std::uint8_t> input(1048576U);
         for (unsigned shape{}; shape < 4U; ++shape)
         {
@@ -3220,6 +3220,7 @@ int main()
         test_greedy_direct_offbase();
         check_double_fast_direct_offbase<5U>();
         check_double_fast_direct_offbase<6U>();
+        check_double_fast_direct_offbase<4U, 18U, 16U>();
         test_row_parser_workspace();
         check_row_batch_boundaries<4U>();
         check_row_batch_boundaries<5U>();

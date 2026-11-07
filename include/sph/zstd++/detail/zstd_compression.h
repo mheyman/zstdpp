@@ -1851,7 +1851,8 @@ namespace sph::zstd::detail
             std::optional<bool> known_rle = std::nullopt) -> parsed_block
         {
 #if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
-            if constexpr (MinimumMatch == 5U)
+            if constexpr (MinimumMatch == 5U ||
+                (MinimumMatch == 4U && WindowLog == 18U && LongHashLog == 16U && ShortHashLog == 16U))
                 return parse_impl_offbase<false>(input, block_begin, block_size,
                     std::move(result), known_rle);
 #endif
