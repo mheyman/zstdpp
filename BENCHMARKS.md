@@ -1,5 +1,26 @@
 # Benchmark results
 
+## Compact Huffman-weight FSE storage and scratch screens (2026-11-07)
+
+Audited both Huffman weight-table builders: weights are0–11 and the requested FSE table log is at most6. An isolated capacity template supplies64 states and12 transforms for weights while leaving sequence tables at512/256. The state encoder and byte compressor accept the table type; compact builder scratch uses13 cumulative entries and64 spread bytes. Explicit log/alphabet capacity checks precede indexing. The weight table shrinks from3084 to236 bytes; no normalization or symbol-spread algorithm changes.
+
+A second independent candidate keeps production table/state types and workspace layout, specializing only builder scratch for weights. Its temporary arrays shrink from514+512 bytes to26+64 bytes. This distinguishes scratch reduction from the full representation/layout change. Both start from production, not the rejected direct-body assembly.
+
+Six rotating baseline/candidate/reference triples per input used optimized generic GCC13, CPU2, level2 with256-KiB pledge,40,000 frames per trial:
+
+| Variant | Input | Previous C++ MiB/s | Candidate MiB/s | Reference MiB/s | Paired gain | Wins / 6 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Compact weight table | varied | 3524.70 | 3596.00 | 3611.32 | +2.26% | 5 |
+| Compact weight table | mixed | 2130.05 | 2100.30 | 2111.50 | -1.56% | 0 |
+| Weight-builder scratch only | varied | 3501.76 | 3510.88 | 3590.40 | +0.37% | 4 |
+| Weight-builder scratch only | mixed | 2136.74 | 2133.71 | 2103.18 | +0.66% | 3 |
+
+The compact table regresses mixed in every pair and falls below reference there. Scratch-only gains are weak and varied remains98.67% of reference by paired ratio (one win). Reject the full-table candidate and do not retain the scratch-only screen without stronger evidence. Complete executable sizes grow from133.2890625 KiB to137.8046875/137.4609375 KiB respectively; smaller data structures do not imply smaller generated code.
+
+Each candidate passed4096 differential table/bitstream cases under ASan/UBSan: randomized0–11 alphabets, logs5/6, low-probability count policies, complete active state/transform comparison, and encoded bytes versus the existing generic table. Oversized table log and alphabet are rejected. These checks cover generated valid normalized counts plus capacity errors, not all malformed normalized distributions. Across both candidates all72 timed compression workers produced reference-identical frames and passed allocation guards; eight decoder checks recovered the inputs. Wider cross-level qualification was not run for these rejected screens. Production code and README metrics remain unchanged.
+
+Evidence: `out/compact-weight-table-20261107/` and `out/weight-builder-scratch-20261107/` contain isolated source generators, binaries, raw trials/identities, and sanitizer oracles. Next inspect the existing weight-table-build and weight-stream phase counters separately from normalization/header/body work before another prototype. A bounded normalized-header writer may remove per-byte vector append overhead, but first establish that the residual cost warrants it; preserve exact bytes and capacity/error checks. The all-level goal remains open.
+
 ## Direct Huffman weight-body assembly rejected (2026-11-07)
 
 Reference `HUF_compressWeights` writes normalized counts and the FSE stream consecutively into its destination. C++ assembles those two buffers into `compressed_weights`, then copies that intermediate vector into the Huffman body. An isolated candidate replaces the intermediate content with a local size and inserts the two existing buffers directly into the body after the same compressed-versus-raw size decision. The first version preserves the unused workspace vector and its reservation to isolate the dataflow change. A second version removes that vector and its512-byte reservation, eliminating one construction-time allocation. Neither changes normalization, FSE encoding, repeat-table selection, or frame bytes.
