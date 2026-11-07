@@ -2893,6 +2893,16 @@ namespace
             }
         }
         verify(frame, input.size(), true);
+
+        // Level 2 produces raw literal sections with short sequence-stream
+        // tails here. Staging these literals must not relax output bounds.
+        input.resize(1024U * 1024U);
+        for (std::size_t index{}; index < input.size(); ++index)
+            input[index] = static_cast<std::uint8_t>((index / 16U + index % 7U) & 255U);
+        auto const raw_literal_frame{reference_compress(input, 2)};
+        for (auto const capacity : {std::size_t{0}, std::size_t{1}, input.size() - 1U, input.size()})
+            verify(raw_literal_frame, capacity, true);
+        verify(raw_literal_frame, input.size(), true);
     }
 
     void test_error_reporting()

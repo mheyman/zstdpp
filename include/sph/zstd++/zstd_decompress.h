@@ -647,11 +647,18 @@ namespace sph::zstd
         {
             try
             {
-                auto literals{decode_literals(block)};
+#if defined(_MSC_VER)
                 // On GCC 13 and MSVC, medium-sized compressed blocks benefit from a
                 // decoder with fixed-width copies for nonoverlapping matches.
+                auto const medium_match_copy{block.size() >= 2048U && block.size() <= 8192U};
+                auto literals{decode_literals(block, medium_match_copy)};
+                auto const decoded{decode_sequences(block.subspan(literals.sequence_offset), literals.bytes,
+                    literals.padded, medium_match_copy)};
+#else
+                auto literals{decode_literals(block)};
                 auto const decoded{decode_sequences(block.subspan(literals.sequence_offset), literals.bytes,
                     literals.padded, block.size() >= 2048U && block.size() <= 8192U)};
+#endif
                 deliver(decoded);
                 trim_history();
             }
@@ -661,7 +668,12 @@ namespace sph::zstd
             }
         }
 
+#if defined(_MSC_VER)
+        [[nodiscard]] auto decode_literals(std::span<std::uint8_t const> block,
+            bool medium_match_copy) -> literals_section
+#else
         [[nodiscard]] auto decode_literals(std::span<std::uint8_t const> block) -> literals_section
+#endif
         {
             if (block.empty())
             {
@@ -759,6 +771,16 @@ namespace sph::zstd
                     auto const stored{block.subspan(header_size, regenerated_size)};
                     auto const padded{header_size <= block.size() - regenerated_size &&
                         block.size() - (header_size + regenerated_size) >= copy_slack};
+#if defined(_MSC_VER)
+                    if (!padded && medium_match_copy)
+                    {
+                        // Stage raw literals for the medium copy strategy, as
+                        // the reference does when input lacks readable padding.
+                        literals_.resize(regenerated_size + copy_slack);
+                        std::memcpy(literals_.data(), stored.data(), regenerated_size);
+                        return {{literals_.data(), regenerated_size}, header_size + stored_size, true};
+                    }
+#endif
                     return {stored, header_size + stored_size, padded};
                 }
                 literals_.clear();

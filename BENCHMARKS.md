@@ -1,5 +1,32 @@
 # Benchmark results
 
+## Native level-2 raw-literal investigation, 2026-11-06
+
+The structured level-2 deficit persisted across four fresh copies of each implementation, three alternating CPU2 trials of 10,000 frames per copy. C++ lost all 12 pairs, with median paired throughput 9.01% below reference. Copy-median C++ rates were 1,758.26–1,769.59 MiB/s versus reference 1,933.57–1,948.44 MiB/s. `out/native-l2-confirm-20261106/multi-image/` contains hashes, image addresses, and results; `base` denotes reference and `cand` denotes current C++ in those files.
+
+Optimized, symbolized uProf captures preserved the deficit: 50,000 frames took 28.4288 seconds in C++ and 25.7599 in reference. C++ sampled time was mainly `decode_sequences_impl<0,1>` (21.55 seconds), with 3.03 seconds in `<1,0>` and 0.98 seconds in the medium match-copy helper. Reference sampled 24.00 seconds in sequence decoding and 1.03 in FSE table construction. These are 10 ms timer profiles, not hardware-cycle totals. Profiles are in `out/uprof-native2-20261106/`.
+
+Exact-output traces show the first block has 8,449 sequences; the remaining fourteen blocks each have 4,096 sequences, 4,097 raw literal bytes, and only 14 trailing encoded bytes after the literal section. Those raw literals are therefore unpadded for C++'s 16-byte copy requirement. The reference's `set_basic` literal handler copies literals into workspace when trailing input cannot support wildcopy; C++ previously retained an unpadded borrowed span. The frame contains 65,264 sequences with one literal and a 15-byte match. Trace artifacts: `out/native-l2-confirm-20261106/{blocks,sequences}.csv`.
+
+An initial MSVC staging trial gained 20.87% median paired throughput at structured level 2, but lost 6.14% on mixed3 across four copy pairs (0/8 wins), so it was rejected. Extending the existing short-copy fast path to padded literals recovered only part of the mixed loss (-3.10%, 0/8); this variant was also rejected despite +21.79% at structured2. Artifacts: `out/msvc-raw-literal-padding-20261106/` and `out/msvc-raw-literal-padding-v2-20261106/`.
+
+The scoped version stages unpadded raw literals only for the existing medium-block copy strategy, reusing the literal workspace reserved at construction. It preserves the smaller-block borrowed-literal path and does not introduce another block-size threshold. Four fresh copies per version, two rotating-order pairs per copy, produced the following old/new controls; all 96 workers passed exact-output and ordinary-allocation guards.
+
+| Input / frame level | Frames per trial | Median paired throughput change | Winning pairs |
+| --- | ---: | ---: | ---: |
+| Structured / 2 | 10,000 | +20.85% | 8/8 |
+| Structured / 1 | 3,000 | -0.07% | 4/8 |
+| Structured / 16 | 30,000 | +0.38% | 7/8 |
+| Structured / 18 | 30,000 | +0.03% | 4/8 |
+| Mixed / 3 | 30,000 | +0.49% | 5/8 |
+| Random / 2 | 100,000 | -0.84% | 4/8 |
+
+Every level-2 copy pair gained between 20.15% and 21.23% by its per-copy median. The raw-random control was noisy (per-copy changes -4.83% to +3.59%); it does not establish a stable regression or improvement. Executable size remains 102.50 KiB. The finalized MSVC `.text` matches the screened candidate exactly: 71,073 bytes, SHA-256 `7a60c112ed0e7d14db495c20b9c7f4326d1b666ec019a05702eaa36e54ac6689`.
+
+The unit suite now checks exact and undersized output buffers for this reference-generated level-2 frame, including decoder reuse after failure. MSVC unit, 36,578 malformed-frame cases, and compression parity passed (287.01 seconds total). All 14 final GCC tests passed. An initially shared dispatch refactor changed GCC's binary; isolating that refactor to MSVC restored GCC SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`, preserving its published measurements. Scoped trial scripts, binaries, hashes, and results are under `out/msvc-raw-literal-padding-v3-20261106/`.
+
+The refreshed [native matrix](BENCHMARKS_NATIVE.md) and README contain all nine metrics from 678 trials. Structured level 2 now measures **2,126.66/1,928.48 MiB/s, 110.28% of reference**, with peak memory **6.96/6.89 MiB, 101.08%**, and executable size **102.50/113.50 KiB, 90.31%**. Current structured16/18 ratios are 99.69%/99.71%; these near-parity results and the noisy raw-copy controls leave the overall goal open. The native identical-binary caveat still applies. Data and provenance: `out/msvc-raw-literal-padding-v3-20261106/current-matrix/`. GCC tables remain unchanged.
+
 ## MSVC boundary checks and paired padded states, 2026-11-06
 
 The combined decoder change moves medium-block scheduled-reader truncation checks to refill boundaries (with a final exact-end check) and pairs adjacent literal/match state-bit reads in padded MSVC blocks. Checked reads remain available; malformed-tail shifts are masked, and refill records overflow before further input loads. The GCC production decoder path is unchanged.
