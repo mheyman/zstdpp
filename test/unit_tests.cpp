@@ -2903,6 +2903,27 @@ namespace
         for (auto const capacity : {std::size_t{0}, std::size_t{1}, input.size() - 1U, input.size()})
             verify(raw_literal_frame, capacity, true);
         verify(raw_literal_frame, input.size(), true);
+
+        // Long periodic matches cross their source range. Exercise every
+        // 32-byte tail remainder with exact and undersized destinations.
+        for (std::size_t period : {1024U, 2048U, 28672U})
+        {
+            for (std::size_t tail{}; tail < 32U; ++tail)
+            {
+                input.resize(2U * period + 64U + tail);
+                random = 1234567U;
+                for (std::size_t index{}; index < period; ++index)
+                {
+                    random = random * 1664525U + 1013904223U;
+                    input[index] = static_cast<std::uint8_t>(random >> 24U);
+                }
+                for (auto index{period}; index < input.size(); ++index)
+                    input[index] = input[index - period];
+                auto const overlap_frame{reference_compress(input, 3)};
+                verify(overlap_frame, input.size() - 1U, true);
+                verify(overlap_frame, input.size(), true);
+            }
+        }
     }
 
     void test_error_reporting()
