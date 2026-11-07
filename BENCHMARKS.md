@@ -1,5 +1,27 @@
 # Benchmark results
 
+## GCC zero-literal specialization screen, 2026-11-06
+
+Longer checks of the retained GCC 13 Release decoder against reference used six alternating 100,000-frame pairs, pinned to CPU 2. Structured16 measured a median paired throughput ratio of 102.42% (4/6 wins), and structured19 measured 101.61% (4/6). These confirmations weaken the deficits in the shorter matrix, but do not prove every level/input is faster. Existing README measurements remain unchanged because no new implementation was retained.
+
+An isolated prototype extended the MSVC zero-literal block dispatch to GCC x64 and supplied a compile-time zero literal entry in GCC's existing packed-entry loop. GCC retained its bit reader, grouped FSE state reads, and append implementation. This removes constant work without adopting the rejected arbitrary-RLE cache. Six 100,000-frame old/new pairs improved structured16 by 11.48%, with all six pairs faster.
+
+However, six alternating 30,000-frame pairs per control found regressions. These percentages compare the prototype against the previous **C++ decoder**, not reference zstd:
+
+| Input / frame level | Median paired throughput change | Faster pairs |
+| --- | ---: | ---: |
+| Structured 19 | -0.68% | 2/6 |
+| Structured 18 | -1.18% | 0/6 |
+| Structured 6 | +1.85% | 5/6 |
+| Mixed 3 | -3.44% | 0/6 |
+| Repeated 3 | +2.03% | 5/6 |
+| Zero 3 | -0.92% | 2/6 |
+| Random 2 | -2.22% | 1/6 |
+
+Three further mixed3 pairs under `perf stat`, 100,000 frames each, reproduced the regression: candidate/old-C++ throughput 95.71% and cycle cost 104.04%. Median instructions/frame fell from 2,139,765.35 to 2,124,193.19 (about 0.73%), while branch misses/frame stayed nearly unchanged at 539.95/540.56. The counter report's `reference` label denotes the saved old C++ worker. These counters establish higher execution cost despite fewer instructions; they do not isolate its cause. Complete executable size increased from 128,320 to 129,160 bytes.
+
+Rejected this version. Every timed worker passed exact-output warmup and allocation guards; comprehensive malformed-frame validation was not run for the rejected candidate. Restored the header and rebuilt production: SHA-256 exactly matches the saved baseline, `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`. Scripts, source snapshots, binaries, trial CSVs, and counters are under `out/gcc-zero-literal-20261106/`. Next investigate how the dispatch changes the general loop's generated code before trying another clone; an outer dispatch that preserves the existing general function is a testable alternative, not an established fix.
+
 ## MSVC zero-literal sequence specialization, 2026-11-06
 
 Tracing the structured level-16 frame found three blocks containing 2,972 sequences whose literal-length table is constant zero. The retained general decoder performed literal-copy and length/state work for those sequences. An MSVC-only specialization now recognizes explicit zero-symbol RLE tables or repeated zero-literal tables once per padded non-medium block, then uses a compile-time zero literal entry and omits literal copying and literal-state updates. All table loading, repeat eligibility, output/history bounds, and bitstream-end validation remain in place. Nonzero constant tables retain the general path. GCC's path is unchanged.
