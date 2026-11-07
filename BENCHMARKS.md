@@ -1,5 +1,31 @@
 # Benchmark results
 
+## Short level-2 stage audit (2026-11-07)
+
+Current production commit `5aac380` was rebuilt in an isolated GCC 13 Release `-O3 -DNDEBUG` configuration with the existing optional phase timers, level 2 and a 262144-byte pledged input size. Three alternating C++/reference pairs per input ran 20,000 frames on CPU 2. All 12 output frames matched reference bytes; both decoders recovered each input. Artifacts and reproduction scripts: `out/short-l2-stages-20261107/` (`run.sh`, `run.py`, `results.json`, individual logs). No production source changed.
+
+Median accumulated stage time divided by 20,001 calls (timed frames plus warmup), in microseconds per frame:
+
+| Stage | Varied C++ | Varied reference | Mixed C++ | Mixed reference |
+| --- | ---: | ---: | ---: | ---: |
+| Literal compression | 15.723 | 11.078 | 29.021 | 20.098 |
+| Sequence preparation plus tables | 12.168 | 8.303 | 19.782 | 16.346 |
+| Sequence bit emission | 6.730 | 9.758 | 18.026 | 23.927 |
+| Huffman tree (nested) | 3.781 | 4.667 | 0.064 | 0.966 |
+| Huffman weights (nested) | 2.861 | 1.832 | 0.809 | 0.561 |
+
+C++ preparation-plus-tables is the sum of separate stage medians (gather and tables), not a median of their sum. Reference `ZSTD_buildSequencesStatistics` includes `ZSTD_seqToCodes`; C++ gathers these codes before literal compression. The active C++ collecting parser already gathers literals, so that stage primarily prepares sequence codes. Nested timers add unequal overhead, and stages cannot be added to derive an uninstrumented speed claim. These are diagnostic measurements, not README benchmark replacements.
+
+Boundary audit changes the next experiment:
+
+- The C++ Huffman `streams_ns` bucket is 5.949 us/frame on varied input, but includes 1.618 us of canonical/repeat-code preparation plus body assembly. Reference's 2.300 us stream bucket has a narrower scope. Instrument the actual encoder calls separately before attributing the full difference to bit emission.
+- C++ input-block selection has its own timer. Reference `split_ns` wraps sequence-store partition derivation, which is unused here (zero); it does not measure the input-block splitter. Do not interpret zero as absence of reference splitting work.
+- Sequence bit emission currently favors C++ on both shapes. Literal processing and sequence-code preparation are better targets than another general FSE writer rewrite.
+- Prior work already rejected repeat-code aliasing, retained-extent Huffman scratch, early repeat proofs and wider static Huffman groups. Repeating these changes requires a distinct new mechanism and uninstrumented validation.
+
+Next: isolate Huffman encoder-call time from preparation/assembly and inspect the sequence-code preparation loop against reference `ZSTD_seqToCodes`. Test only a candidate that removes measured work, with varied and mixed controls. Overall all-level speed goal remains open.
+
+
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
 ## Short level-2 confirmation and folded match comparison, 2026-11-07
