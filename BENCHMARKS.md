@@ -2,6 +2,39 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-2 flush cadence and empty FSE emissions, 2026-11-07
+
+An isolated instrumented header copy records adaptive writer selection, requested widths, flush occupancy, grouped FSE widths (including the ML-only shortcut), and sequence symbol frequencies. Each diagnostic runs one warmup plus one measured frame; all counts below cover both frames. Instrumented timings are not performance results. All three diagnostic frames match reference exactly. Artifacts: `out/l2-flush-audit-20261107/`, including the reproducible instrumentation script and raw histograms.
+
+| Input | Narrow / wide blocks | Narrow / wide sequences | Zero-bit FSE emissions / loop emissions | Wide pre-overflow / post-threshold flushes | Mean bits at flush |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Varied | 0 / 16 | 0 / 14082 | 13416 / 14066 (95.38%) | 0 / 1786 | 58.90 |
+| Mixed | 2 / 14 | 2 / 33286 | 29662 / 33272 (89.15%) | 36 / 220 | 58.60 |
+| Structured | 0 / 30 | 0 / 131586 | 127524 / 131556 (96.94%) | 62 / 242 | 57.06 |
+
+For varied input, checked appends total42,280, of which28,162 request zero bits. The unchecked writer receives28,184 calls, including13,416 zero-bit FSE groups. Nearly all nonzero extra fields have width7. No sequence in the three traced inputs reaches the reference's31-extra-bit threshold for an additional pre-extra flush. Reference `ZSTD_encodeSequences_body` on64-bit systems flushes after every reverse-loop sequence; C++ already accumulates roughly eight varied sequences per flush. This is a source-derived cadence comparison, not a separately instrumented reference count. There is no evidence that C++ flushes too frequently on this workload.
+
+Two isolated optimized GCC13 level2 candidates tested the empty-emission opportunity against current production, using six alternating10,000-frame pairs per input onCPU2:
+
+| Candidate | Varied paired change | Varied wins | Mixed paired change | Mixed wins |
+| --- | ---: | ---: | ---: | ---: |
+| Return early from wide `append_unchecked` for zero width | -0.07% | 3/6 | -0.86% | 2/6 |
+| Skip empty groups before constructing their combined value | -1.32% | 1/6 | -0.71% | 2/6 |
+
+The second variant checks the total FSE width before the shifts/ORs in the adaptive helper, and checks the ML-only width in its shortcut; it does not include the first variant's writer-level guard. Both preserve state transitions, ordering, final flushes and capacity logic. For valid FSE outputs, zero width implies zero value, so omitting the write preserves payload bytes.
+
+Three additional varied counter pairs for the first candidate measure production/candidate median instructions46.333428/45.496635B (-1.81%), cycles13.176160/13.059405B (-0.89%), and branches6.773951/6.710115B. Reduced work in these counter runs does not establish a throughput gain in the unprofiled pairs. Both candidates are rejected. All48 ordinary timed candidate/control workers and6 counter workers match reference frames and pass allocation guards. Broad sanitizer/unit qualification was not run for rejected candidates. Production and README measurements remain unchanged. Artifacts: `out/wide-zero-write-20261107/`, `out/empty-fse-group-20261107/`.
+
+The symbol audit identifies a more specific structural question:
+
+| Input | Dominant LL code and frequency | Dominant ML code and frequency | Dominant OF code and frequency |
+| --- | ---: | ---: | ---: |
+| Varied | 3 (99.05%) | 43 (99.83%) | 0 (99.99%) |
+| Mixed | 1 (97.55%) | 12 (96.87%) | 0 (99.32%) |
+| Structured | 1 (99.38%) | 12 (99.20%) | 0 (99.83%) |
+
+Next evaluate a block-scoped dominant-symbol FSE transition specialization: cache that symbol's transform and exploit zero-bit transition ranges while preserving exact state updates and a general fallback. This is distinct from skipping the writer after all transitions are already computed. First inspect actual table logs and reachable state patterns and account for setup cost; varied has only about880 sequences per block, so blindly expanding all512 possible states for both length tables could cost more than it saves. Do not introduce cross-frame memoization that benefits only identical benchmark frames, or repeat flush/empty-write variants without new evidence. The all-level goal remains incomplete.
+
 ## Level-2 FSE residue and local wide-writer controls, 2026-11-07
 
 Two isolated GCC13 `-O3 -DNDEBUG` candidates target the current 1-MiB level-2 varied-input entropy path. Each uses six alternating 10,000-frame production/candidate pairs per input on CPU2, followed by three 10,000-frame hardware-counter pairs on varied input. No production headers were modified.
