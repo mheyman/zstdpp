@@ -31,12 +31,15 @@ int main(int argc, char** argv)
 {
     try
     {
-        if (argc != 6)
-            throw std::invalid_argument{"usage: zstdpp_batch input csv same|contexts|compare batch_frames pairs"};
+        if (argc != 6 && argc != 7)
+            throw std::invalid_argument{"usage: zstdpp_batch input csv same|contexts|compare batch_frames pairs [AB|BA construction order]"};
         auto const input = sph::zstd::eval::read_binary(argv[1]);
         std::string_view const mode{argv[3]};
         if (mode != "same" && mode != "contexts" && mode != "compare")
             throw std::invalid_argument{"unknown batch mode"};
+        std::string_view const construction = argc == 7 ? argv[6] : "AB";
+        if (construction != "AB" && construction != "BA")
+            throw std::invalid_argument{"construction order must be AB or BA"};
         auto positive_count = [](std::string_view value) {
             std::uint64_t count{};
             auto const parsed = std::from_chars(value.data(), value.data() + value.size(), count);
@@ -56,9 +59,11 @@ int main(int argc, char** argv)
         if (a.level != b.level || a.pledge != input.size() || b.pledge != input.size() ||
             a.parameters != b.parameters || a.parameters != reference_parameters)
             throw std::runtime_error{"resolved compression parameters differ"};
-        std::unique_ptr<void, void(*)(void*)> first{a.create(input), a.destroy};
-        std::unique_ptr<void, void(*)(void*)> second{
-            mode == "same" ? nullptr : b.create(input), b.destroy};
+        std::unique_ptr<void, void(*)(void*)> first{nullptr, a.destroy};
+        std::unique_ptr<void, void(*)(void*)> second{nullptr, b.destroy};
+        if (construction == "BA" && mode != "same") second.reset(b.create(input));
+        first.reset(a.create(input));
+        if (construction == "AB" && mode != "same") second.reset(b.create(input));
         auto* const second_context = mode == "same" ? first.get() : second.get();
         std::vector<std::uint8_t> expected(ZSTD_compressBound(input.size()));
         auto const size = ZSTD_compress(expected.data(), expected.size(), input.data(), input.size(), a.level);
@@ -77,7 +82,7 @@ int main(int argc, char** argv)
             throw std::runtime_error{"reference decoder mismatch"};
         std::ofstream report{argv[2]};
         if (!report) throw std::runtime_error{"cannot open batch report"};
-        report << "pair,order,frames,input_bytes,a_ns,b_ns,b_over_a\n";
+        report << "pair,order,frames,input_bytes,a_ns,b_ns,b_over_a,construction\n";
         auto measure = [&](batch_api const& api, void* c) {
             auto const aligned = api.allocations();
             auto const ordinary = ordinary_allocations.load(std::memory_order_relaxed);
@@ -98,12 +103,13 @@ int main(int argc, char** argv)
             else { tb = measure(b, second_context); ta = measure(a, first.get()); }
             report << i << ',' << (i % 2U == 0U ? "AB" : "BA") << ',' << frames << ','
                    << input.size() << ',' << ta << ',' << tb << ','
-                   << static_cast<double>(ta) / static_cast<double>(tb) << '\n';
+                   << static_cast<double>(ta) / static_cast<double>(tb) << ',' << construction << '\n';
         }
         report.flush();
         if (!report) throw std::runtime_error{"cannot write batch report"};
         std::cout << "Batch diagnostic passed: " << mode << ", " << pairs
-                  << " pairs; exact reference bytes, reciprocal decoding, and allocation guards.\n"
+                  << " pairs, construction " << construction
+                  << "; exact reference bytes, reciprocal decoding, and allocation guards.\n"
                      "Combined-process timings only; use isolated workers for published RSS/code size.\n";
     }
     catch (std::exception const& error)
