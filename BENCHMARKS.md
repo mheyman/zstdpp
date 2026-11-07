@@ -1,5 +1,15 @@
 # Benchmark results
 
+## GCC sequence countdown and zero-literal combination, 2026-11-06
+
+Tested a single countdown exit before FSE state updates, replacing the index/final-state/loop-termination arrangement only on GCC x64. Six alternating CPU2-pinned 30,000-frame old/new pairs measured structured19 -1.83% (1/6 wins), mixed3 +3.75% (4/6, variable). Three longer 100,000-frame counter pairs measured 100.32% cycle cost and 99.54% throughput. Instructions/frame fell from 1,121,906.45 to 1,107,461.31; branch misses/frame fell from 27.21 to 18.96. Removing instructions did not establish a target speedup. Counter labels compare candidate with retained C++, not reference zstd.
+
+Scoped the countdown to non-medium blocks, preserving the original medium iteration direction and checks. Structured19 improved 2.11% initially (5/6), then 1.66% in six 100,000-frame pairs (5/6). However, mixed3 lost 5.98% in six 100,000-frame pairs (0/6), and structured16 lost 2.00% (1/6, 30,000 frames). Structured18 gained 1.27% (6/6). These controls expose compiler interactions even in the medium path whose loop semantics are unchanged.
+
+Combined the scoped countdown with the saved outer zero-literal specialization to test whether the complementary gains survive together. Six 30,000-frame pairs preserved structured16 +11.06% (6/6), but structured19's initially neutral -0.31% became -1.34% in six 100,000-frame pairs (1/6). Other 30,000-frame controls: structured18 -1.26% (1/6), structured6 -0.33% (1/6), mixed3 -0.76% (1/6), repeated3 +1.85% (5/6), zero3 +2.94% (3/6, variable), random2 +0.49% (5/6). The separate gains are not additive; this version still worsens near-parity structured cases.
+
+All three variants are rejected. Timed workers passed exact-output warmup and allocation guards; comprehensive malformed-input tests were not run for these rejected candidates. Restored source and rebuilt production exactly to baseline SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`. README unchanged. Artifacts are in `out/gcc-sequence-countdown-20261106/`. Next investigate the GCC raw-input copy path with long paired counters against reference and controlled buffer placement, treating identical level-2–22 frames as one case. Native buffer-placement findings are useful context, not proof of GCC behavior.
+
 ## Reference structured19 profile and short-match copy trial, 2026-11-06
 
 Profiled reference and retained GCC C++ sequentially on CPU 2 with the same frame, 300,000 decodes and `cycles:u` period 100003. Reference worker elapsed time was 20.4027 seconds versus C++ 20.5497 seconds. Reference sampled shares were 89.11% in sequence decoding, 5.13% in safe copying and 4.36% in FSE table construction. C++ shares were 55.99% in padded medium decoding, 30.18% in parsing, 9.74% in the tiny-match helper and 3.06% in libc copying. Different inlining boundaries prevent interpreting the symbol-share difference as excess parsing work. Profiles, annotations and worker snapshots are in `out/gcc-reference19-profile-20261106/`; recording used Linux `/tmp` and copied results back.
