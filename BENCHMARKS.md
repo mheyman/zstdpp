@@ -2,6 +2,28 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-1 regression attribution and loop-placement control, 2026-11-07
+
+The completed repeated-input audit compares the saved pre-fixed-length-writer executable with current production at 100,000 frames per run, pinned to CPU2. Three alternating counter pairs give median cycles 17.084806B versus 19.147477B (+12.07%), but instructions are 99.790088B versus 99.804788B (+0.0147%). All eight counter/profile frames match the saved reference frame (SHA-256 `8f0ecce439313ba75fb187a6cc0ddd519b240a24a15a7136dc34e7467f0b51f0`). The profiling process is complete.
+
+Cycle profiles place 80.84% of old samples and 84.44% of current samples in the compact fast parser, rather than the changed entropy loop. Both reports have zero lost samples; throttle records have not been audited, so use these shares for localization rather than precise stage-cycle subtraction. Annotated assembly shows the same long-match loop operations shifted from address `0x144e0` to `0x144d0`. This supports investigating instruction placement, not assuming new per-sequence algorithmic work caused the regression.
+
+An isolated GCC13 candidate adds `__attribute__((optimize("align-loops=32")))` to fast `parse()`. Initial six-pair repeated/structured controls improve by 13.95%/1.05%. However, its hottest loop begins at `0x144f0`, still only 16-byte aligned: the option changes placement within the function but does not establish that 32-byte alignment itself explains the gain. No portable alignment guarantee or general CPU conclusion follows.
+
+Six rotating current/candidate/reference triples across six 1-MiB shapes give:
+
+| Input | Frames/trial | Candidate change vs current C++ | Paired wins | Current C++ MiB/s | Candidate MiB/s | Reference MiB/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| structured | 2000 | 0.85% | 4/6 | 730.78 | 732.84 | 681.51 |
+| mixed | 6000 | -2.78% | 1/6 | 2578.09 | 2530.50 | 2204.28 |
+| varied | 6000 | -2.67% | 0/6 | 3420.08 | 3327.57 | 3441.07 |
+| zero | 10000 | -0.54% | 1/6 | 41079.09 | 40598.93 | 8586.87 |
+| repeated | 10000 | 11.32% | 6/6 | 23316.10 | 25921.78 | 9809.22 |
+| random | 4000 | -0.26% | 3/6 | 3827.96 | 3794.92 | 2943.41 |
+All 108 timed compression workers pass exact reference-frame comparison and allocation guards; all 12 decoder checks recover the original input. The initial 24-worker pair screen also passes. Both C++ executables are 127.7890625 KiB. Per-trial memory, binary/input hashes, and all nine comparison metrics are saved in `out/parser-loop-alignment-20261107/final/`; the completed attribution audit is in `out/l1-repeat-audit-20261107/`.
+
+The candidate is rejected: recovering an already-leading repeated workload does not justify widening the varied-input deficit. Production headers and published README measurements are unchanged. No broad malformed-input or sanitizer qualification was performed for this rejected compiler-option candidate. Next: prioritize the confirmed varied level-2 entropy deficit; retain the placement evidence when interpreting future unrelated-source regressions, and do not repeat single-sequence guards or generic alignment sweeps without a distinct hypothesis.
+
 ## README matrix measurement provenance
 
 These notes record which measurements populate the current README tables. Keep future refresh history here, with implementation decisions and next steps in [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md). The README presents the library and the latest published comparisons.
