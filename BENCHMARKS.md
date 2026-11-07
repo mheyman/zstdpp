@@ -2,6 +2,40 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Paired length-state FSE batching experiments, 2026-11-07
+
+The varied level-2 run audit found 7,027 of 7,033 reverse-loop sequences per frame with zero literal extra bits, seven match extra bits and offset code zero. There are 75 identical-code runs across eight blocks; 6,961 sequences lie in runs of at least four. Most payloads happen to match, but exceptions exist: the implementation must read each actual match length. Only the first block has a compressed offset table; the other seven have OF-RLE. Mixed and structured inputs have no eligible seven-bit sequences in this audit.
+
+An isolated prototype advances both non-RLE LL and ML states over validated zero-bit ranges and packs four actual seven-bit payloads per write. Ordinary transitions handle bit-emitting boundaries and interrupting symbols. A single affine range only covers two of the seven eligible varied blocks: six paired trials were effectively neutral on varied (+0.10%) and lost mixed throughput (-2.88%). A revision represents up to eight contiguous constant-increment ranges per symbol, rejects unsupported tables, and keeps the existing fallback. Its range storage is explicitly zero-initialized. Setup, bounded code scans and actual payload reads are included in timings; no corpus-specific payload constant or persistent cache is used.
+
+The corrected piecewise version and a second version with its batching body in a non-inlined lambda were each measured in six rotating old/candidate/reference triples per input, 10,000 frames per worker, optimized GCC 13 `-O3 -DNDEBUG`, CPU 2. Baseline is retained commit `5655a4f`. These are experimental measurements, not published production replacements.
+
+| Candidate | Input | Old C++ MiB/s | Candidate MiB/s | Reference MiB/s | Median paired change | Wins vs old |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Piecewise | varied | 3435.53 | 3586.33 | 3739.48 | +4.20% | 6/6 |
+| Piecewise | mixed | 3326.55 | 3152.47 | 2718.01 | -5.13% | 0/6 |
+| Outlined piecewise | varied | 3419.13 | 3580.06 | 3687.40 | +4.46% | 5/6 |
+| Outlined piecewise | mixed | 3301.54 | 3148.50 | 2730.02 | -4.56% | 0/6 |
+
+Outlining preserves the varied gain but does not recover mixed throughput. It is not evidence that code placement alone caused the mixed regression. Candidate executable sizes are 128.859375 and 129.078125 KiB, versus baseline 128.21875 KiB and reference 632.515625 KiB. Per-trial RSS, code sizes, speeds and binary/input identities are stored with the raw results. The initial piecewise run before explicit range initialization is excluded from these conclusions.
+
+Three additional rotating counter triples on varied input (10,000 frames each) give these medians for the outlined version. Counters ran separately from plain timing and sanitizer compilation.
+
+| Counter | Old C++ | Outlined candidate | Reference |
+| --- | ---: | ---: | ---: |
+| Cycles | 13,186,349,343 | 12,487,824,113 | 12,106,130,363 |
+| Instructions | 46,349,130,568 | 42,531,908,621 | 39,684,406,018 |
+| Branches | 6,775,832,053 | 6,308,845,127 | 5,156,446,738 |
+| Branch misses | 5,775,139 | 5,658,021 | 31,748,419 |
+
+Instructions fall 8.24% and cycles 5.30%, confirming useful work removal, but candidate cycles remain 3.15% above reference. Neither fewer instructions nor fewer branch misses proves the all-level speed objective.
+
+All 72 plain-timing compression frames and nine counter-run frames match reference. C++ workers pass their post-warmup ordinary/aligned allocation guards. Eight decoder checks recover the source. Each candidate passes the independent 240-case scalar-versus-batched stream oracle under ASan/UBSan: changing seven-bit payloads, rare normalized counts of either sign, interrupted runs, sizes around the 256-sequence dispatch boundary, and output prefixes. This is prototype validation, not a substitute for all-level acceptance and broader normalized-table tests before integration.
+
+Neither candidate is retained. Production headers and README performance numbers remain unchanged. Next: profile the mixed-input regression against the saved baseline, distinguishing existing writer/parser costs from the new path's guard and stack-frame costs; then reconsider placement or dispatch using that evidence. Before retaining a revision, broaden state-range tests, run all-level byte parity/interoperability, and measure the full input matrix plus short-input controls. Varied level 2 and high-level decoder gaps remain open.
+
+Artifacts: `out/varied-run-audit-20261107/`, `out/paired-fse-runs-20261107/`, corrected `out/piecewise-fse-runs-20261107/final/`, and `out/outlined-piecewise-fse-20261107/` (`final/`, `counters.sh`, counter CSVs, and `oracle.txt`). The latter's `prepare.py` and `run.sh` reproduce the isolated outlining control.
+
 ## Batched zero-extra-bit FSE runs retained, 2026-11-07
 
 The adaptive wide sequence writer now batches identical ML symbols when the existing LL/OF-RLE path has no literal or offset extra bits and the ML symbol has no extra bits. It scans matching code bytes with bounded8-byte loads plus an exact scalar tail. For each run, `encode_zero_extra_run` validates whether the zero-bit state range has a constant nonnegative increment, advances multiple states at once within that range, and uses the ordinary FSE transition at bit-emitting boundaries or on nonlinear tables. RLE validation, initial/final states, bit ordering and output capacity handling remain intact. Short runs skip range validation unless their length reaches the table size, bounding setup cost relative to useful work. No persistent cache, workspace growth or heap allocation is introduced.
