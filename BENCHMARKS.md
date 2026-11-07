@@ -2,6 +2,32 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-2 FSE residue and local wide-writer controls, 2026-11-07
+
+Two isolated GCC13 `-O3 -DNDEBUG` candidates target the current 1-MiB level-2 varied-input entropy path. Each uses six alternating 10,000-frame production/candidate pairs per input on CPU2, followed by three 10,000-frame hardware-counter pairs on varied input. No production headers were modified.
+
+The first candidate reuses `quotient = value >> number_bits` for both the next-state index and `emitted = value - (quotient << number_bits)`, replacing the original mask expression in `encode_bits`. RLE checks and final-state behavior remain unchanged. Assembly confirms the shared shift result, followed by a shift/subtract for emitted bits. Valid sequence-table widths are at most nine, so the unsigned residue equals the original low-bit mask, including zero width. This introduces no tables or workspace.
+
+| Candidate | Input | Median paired throughput change | Wins | Production MiB/s | Candidate MiB/s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Shared FSE quotient | Varied | +0.31% | 3/6 | 3424.64 | 3406.84 |
+| Shared FSE quotient | Mixed | +0.32% | 4/6 | 2968.99 | 2985.04 |
+| Local adaptive wide writer | Varied, initial | +2.09% | 5/6 | 3325.37 | 3402.30 |
+| Local adaptive wide writer | Mixed | -0.26% | 2/6 | 2927.50 | 2901.16 |
+| Local adaptive wide writer | Varied, independent confirmation | -0.18% | 2/6 | 3420.59 | 3418.34 |
+
+Paired changes and ratios of independently computed speed medians are different statistics. FSE residue counter medians: production/candidate cycles13.184961/13.140531B, instructions46.333428/46.122148B, branches6.773951/6.773952B. The roughly0.46% instruction reduction and0.34% cycle reduction do not establish a reliable throughput gain. Reject the arithmetic candidate; artifacts: `out/fse-state-residue-20261107/`.
+
+The second candidate makes the allocation-free `wide_sequence_bit_writer` local to `write_sequence_bitstream`, preserving its output buffer, capacity checks, flush rules, and narrow fallback. This differs from historical narrow level-3 local-writer experiments. An initial edit to the main encoder affected an inactive compile-time path: its executable was byte-identical to production (SHA-256 `f2de000b88bdbfee3f6a167c714e078c1013bf5bba859017d6b618e989ce0ae1`). Its timing variation is an identical-binary control, not a gain; saved under `out/local-wide-writer-20261107/`.
+
+Moving the writer in the actual adaptive helper changes machine code (candidate SHA-256 `60087d74cdde76eed5e11b4fa61798b7be347f6be8c27b00e4d497f5c7d45905`). The wide workspace state accesses disappear, but counter medians do not improve: production/candidate cycles13.196515/13.243605B and instructions46.333428/46.455891B. Branches fall6.773951→6.694874B. Less workspace traffic is not sufficient when total work and scheduling also change.
+
+Six independent rotating production/candidate/reference triples confirm no gain. Reference reaches3686.71MiB/s versus candidate3418.34 (92.72% ratio of medians; median paired reference ratio92.18%,0/6 wins). The initial2.09% old/new result did not reproduce. Reject the local-writer candidate. Both executables are127.9453125KiB. Complete throughput/memory/code measurements and identities are saved in `out/local-adaptive-writer-20261107/final/`; assembly, paired trials and counters are in its parent directory.
+
+All78 active-candidate compression runs pass exact reference-frame comparisons and allocation guards (24 pairs-workers+6 counter-workers per candidate, plus18 confirmation workers); both confirmation decoders recover the input. The additional24 identical-binary control workers also pass. Broad unit/sanitizer qualification was not run for these rejected candidates. Production headers and published README performance numbers remain unchanged.
+
+Next: trace the actual 1-MiB level-2 adaptive writer's per-block branch selection, emitted-bit widths and flush frequency, then compare reference flush cadence. Use that evidence before changing reservoir scheduling; do not repeat local-state or mask-expression variants merely because their source looks cheaper. The all-level performance goal remains open.
+
 ## Level-1 regression attribution and loop-placement control, 2026-11-07
 
 The completed repeated-input audit compares the saved pre-fixed-length-writer executable with current production at 100,000 frames per run, pinned to CPU2. Three alternating counter pairs give median cycles 17.084806B versus 19.147477B (+12.07%), but instructions are 99.790088B versus 99.804788B (+0.0147%). All eight counter/profile frames match the saved reference frame (SHA-256 `8f0ecce439313ba75fb187a6cc0ddd519b240a24a15a7136dc34e7467f0b51f0`). The profiling process is complete.
