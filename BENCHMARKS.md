@@ -1,5 +1,15 @@
 # Benchmark results
 
+## Reference structured19 profile and short-match copy trial, 2026-11-06
+
+Profiled reference and retained GCC C++ sequentially on CPU 2 with the same frame, 300,000 decodes and `cycles:u` period 100003. Reference worker elapsed time was 20.4027 seconds versus C++ 20.5497 seconds. Reference sampled shares were 89.11% in sequence decoding, 5.13% in safe copying and 4.36% in FSE table construction. C++ shares were 55.99% in padded medium decoding, 30.18% in parsing, 9.74% in the tiny-match helper and 3.06% in libc copying. Different inlining boundaries prevent interpreting the symbol-share difference as excess parsing work. Profiles, annotations and worker snapshots are in `out/gcc-reference19-profile-20261106/`; recording used Linux `/tmp` and copied results back.
+
+Reference `ZSTD_overlapCopy8` builds eight valid bytes for short offsets using four sequential byte assignments and an offset-adjusted four-byte copy. Tested that operation on GCC 13 x64 medium blocks only, for matches at most eight bytes with offsets below sixteen and at least sixteen spare output bytes. Offset one retains the existing fill; exact-output bounds remain checked before the path. This directly tests a reference architectural difference without the zero-literal prototype.
+
+Six alternating CPU2-pinned 30,000-frame pairs gained 0.86% on structured19 (4/6) but lost 2.38% on mixed3 (0/6). Moving the same operation to a noinline helper worsened results to -4.07% and -6.44%, respectively (0/6 each). Both rejected. All benchmark workers passed exact-output warmup and ordinary-allocation guards; comprehensive malformed-input validation was not run for these rejected prototypes. Sources, workers and trials are in `out/gcc-short-match8-20261106/`.
+
+Restored the header and verified the rebuilt worker matches baseline SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`. README metrics remain unchanged. Next compare the annotated reference/C++ sequence loops, separating entry loads, extra-bit extraction, state transitions and copying. Do not repeat the already rejected local-output cursor, 64-byte chunk, AVX2 copy or batching experiments based only on broad symbol shares.
+
 ## GCC medium-block profiles and tiny-copy controls, 2026-11-06
 
 Three alternating 100,000-frame CPU2 `perf stat` pairs reproduced the outer-dispatch candidate's structured19 regression against retained C++: median cycle cost 102.56%, throughput 97.84%. Median instructions/frame fell from 1,121,906.45 to 1,118,200.41; branch misses/frame rose from 19.40 to 29.80. These aggregate counters do not isolate a cause. The diagnostic report's `reference` label denotes the saved C++ baseline.
