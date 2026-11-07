@@ -40,7 +40,11 @@
             if (block_size >= 1024U &&
                 (known_rle.has_value() ? *known_rle : is_rle(input.subspan(block_begin, block_size))))
             {
+                #if defined(SPH_ZSTDPP_DOUBLE_FAST_DIRECT_OFFBASE)
+                result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 0U});
+#else
                 result.sequences.push_back(parsed_sequence{2U, block_size - 2U, 1U, 1U});
+#endif
 #if SPH_ZSTDPP_DOUBLE_FAST_COLLECT
                 gather_literals(block_begin, 2U);
 #endif
@@ -275,8 +279,13 @@
 #if SPH_ZSTDPP_DOUBLE_FAST_COLLECT
                 gather_literals(anchor, position - anchor);
 #endif
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_DIRECT_OFFBASE)
+                result.sequences.push_back(parsed_sequence{position - anchor, match_length,
+                    repeat_code != 0U ? static_cast<std::size_t>(repeat_code) : offset + 3U, 0U});
+#else
                 result.sequences.push_back(parsed_sequence{
                     position - anchor, match_length, offset, repeat_code});
+#endif
                 position += match_length;
                 anchor = position;
 
@@ -340,8 +349,12 @@
                         if constexpr (UseTags)
                             short_tags[repeat_short_hash] = long_tags[repeat_long_hash] = input[position];
 #endif
+#if defined(SPH_ZSTDPP_DOUBLE_FAST_DIRECT_OFFBASE)
+                        result.sequences.push_back(parsed_sequence{0U, repeat_length, 1U, 0U});
+#else
                         result.sequences.push_back(parsed_sequence{
                             0U, repeat_length, repeat_one, 1U});
+#endif
                         position += repeat_length;
                         anchor = position;
                     }

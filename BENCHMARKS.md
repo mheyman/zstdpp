@@ -1,5 +1,17 @@
 # Benchmark results
 
+## GCC level-4 direct encoded offsets retained, 2026-11-06
+
+The double-fast parser now offers an explicit direct-offBase view: ordinary matches store offset+3, repeat matches store the repeat code, and the record's separate repeat field is cleared. GCC 13 level 4 selects that view and the corresponding entropy-writer policy, avoiding reconstruction in both code gathering and reverse bit writing. Records stay the same size, buffers are reused, and ordinary parser callers retain logical offsets. All three emission sites (ordinary match, immediate repeat and RLE shortcut) are covered. Partition repair is confined to optimal strategies and does not consume these records.
+
+Six alternating CPU2 old/new pairs gave median paired throughput changes of structured +4.22% (6/6 wins, 3,000 frames), mixed +2.11% (4/6, 3,000), random +0.23% (3/6, 3,000), repeated +10.32% (6/6, 10,000), zero +25.12% (6/6, 10,000), and varied text +4.29% (6/6, 3,000). All 72 workers produced exact reference frames and passed worker guards. The large gains on simple inputs may include generated-code layout effects; the experiment does not attribute every gain solely to removed conversions.
+
+Independent current/reference comparisons used six alternating 3,000-frame trials for each of the five table inputs, with byte parity and both decoders checking both encodings. Structured measures 710.16/701.63 MiB/s (101.21% of reference); mixed 2013.67/1645.96 (122.34%). All five measured rows exceed reference, but the structured lead remains narrow. README and BENCHMARKS_INPUTS contain all nine current throughput, whole-worker peak RSS and executable-size metrics for those rows. C++ executable size is 127.74 KiB versus reference 632.52 KiB. Other rows and the Windows section are unchanged.
+
+Added record-by-record equivalence tests for minimum-match 5 and 6, four input shapes, eight blocks per frame and two reset epochs, checking block metadata, every LL/ML/offBase and cleared repeat fields. Optimized units passed in 0.35 seconds, and all-level compression acceptance passed in 17.36 seconds. Rebuilt neighboring level-3 and level-5 executables exactly match their saved hashes. No added allocation or changed frame format. Artifacts, baseline/candidate controls, reference reports, hashes and table-update script: `out/double-fast-offbase-20261106/`.
+
+NEXT: evaluate the same representation for the level-3 double-fast specialization using separate baseline controls; it has an existing double-RLE writer policy, so its result cannot be inferred from level 4. Keep level 4's new implementation and its cross-input controls intact. The broader compression/decompression goal remains incomplete.
+
 ## Scalar FSE scheduling and index trials, 2026-11-06
 
 Traced the level-4 encoder hotspot at `16edc`: the stack store saves the next-state table load immediately before it. This confirms a state-transition dependency, but the sampled percentage does not prove that the store itself is expensive. Two isolated changes were tested against the same saved optimized GCC 13 worker on structured input, using six alternating CPU2 pairs of 3,000 frames each:

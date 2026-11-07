@@ -344,6 +344,54 @@ namespace
     }
 
     template <unsigned MinimumMatch>
+    void check_double_fast_direct_offbase()
+    {
+        using namespace sph::zstd::detail;
+        using matcher_type = double_fast_match_state<20U, 18U, 18U, MinimumMatch>;
+        matcher_type logical{20U, 18U, 18U, MinimumMatch};
+        matcher_type direct{20U, 18U, 18U, MinimumMatch};
+        std::vector<std::uint8_t> input(1048576U);
+        for (unsigned shape{}; shape < 4U; ++shape)
+        {
+            std::uint32_t random{12345U};
+            for (std::size_t index{}; index < input.size(); ++index)
+            {
+                random = random * 1664525U + 1013904223U;
+                input[index] = shape == 0U ? 0U : shape == 1U ?
+                    static_cast<std::uint8_t>((index / 16U + index % 7U) & 255U) :
+                    shape == 2U ? static_cast<std::uint8_t>(index % 31U) :
+                    static_cast<std::uint8_t>(random >> 24U);
+            }
+            for (unsigned epoch{}; epoch < 2U; ++epoch)
+            {
+                logical.reset();
+                direct.reset();
+                for (std::size_t begin{}; begin < input.size(); begin += 131072U)
+                {
+                    auto const expected{logical.parse(input, begin, 131072U)};
+                    auto const actual{direct.parse_offbase(input, begin, 131072U)};
+                    check(expected.sequences.size() == actual.sequences.size() &&
+                        expected.input_begin == actual.input_begin &&
+                        expected.trailing_literal_position == actual.trailing_literal_position &&
+                        expected.trailing_literal_length == actual.trailing_literal_length,
+                        "double-fast offBase preserves block shape across resets");
+                    for (std::size_t index{}; index < expected.sequences.size(); ++index)
+                    {
+                        auto const& left{expected.sequences[index]};
+                        auto const& right{actual.sequences[index]};
+                        auto const offbase{left.repeat_code != 0U ?
+                            static_cast<std::uint32_t>(left.repeat_code) : left.offset + 3U};
+                        check(left.literal_length == right.literal_length &&
+                            left.match_length == right.match_length &&
+                            right.repeat_code == 0U && right.offset == offbase,
+                            "double-fast offBase preserves each encoded sequence");
+                    }
+                }
+            }
+        }
+    }
+
+    template <unsigned MinimumMatch>
     void check_double_fast_tag_storage()
     {
         using namespace sph::zstd::detail;
@@ -3170,6 +3218,8 @@ int main()
         test_row_hash_salt_state();
         test_row_match_state();
         test_greedy_direct_offbase();
+        check_double_fast_direct_offbase<5U>();
+        check_double_fast_direct_offbase<6U>();
         test_row_parser_workspace();
         check_row_batch_boundaries<4U>();
         check_row_batch_boundaries<5U>();

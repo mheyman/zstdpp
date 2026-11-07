@@ -1844,6 +1844,21 @@ namespace sph::zstd::detail
             repeat_offsets_ = {1U, 4U, 8U};
         }
 
+        // This view stores encoded offBase in offset and clears repeat_code.
+        // Its consumer must select the encoder's DirectOffBase policy.
+        [[nodiscard]] auto parse_offbase(std::span<std::uint8_t const> input,
+            std::size_t block_begin, std::size_t block_size, parsed_block result = {},
+            std::optional<bool> known_rle = std::nullopt) -> parsed_block
+        {
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+            if constexpr (MinimumMatch == 5U)
+                return parse_impl_offbase<false>(input, block_begin, block_size,
+                    std::move(result), known_rle);
+#endif
+            return parse_impl_offbase<true>(input, block_begin, block_size,
+                std::move(result), known_rle);
+        }
+
         template <typename Block = parsed_block>
         [[nodiscard]] auto parse(std::span<std::uint8_t const> input,
             std::size_t block_begin, std::size_t block_size,
@@ -2004,6 +2019,14 @@ namespace sph::zstd::detail
                         index = index >= first_current ? index - frame_index_base_ : 0U;
             }
         }
+
+#define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl_offbase
+#define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 0
+#define SPH_ZSTDPP_DOUBLE_FAST_DIRECT_OFFBASE 1
+#include "double_fast_parse.inl"
+#undef SPH_ZSTDPP_DOUBLE_FAST_DIRECT_OFFBASE
+#undef SPH_ZSTDPP_DOUBLE_FAST_COLLECT
+#undef SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME
 
 #define SPH_ZSTDPP_DOUBLE_FAST_PARSE_NAME parse_impl
 #define SPH_ZSTDPP_DOUBLE_FAST_COLLECT 0
