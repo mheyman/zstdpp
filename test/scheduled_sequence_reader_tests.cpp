@@ -18,42 +18,53 @@ int main()
     using sph::zstd::detail::scheduled_sequence_reader;
     unsigned random{0x573a31U};
     auto next = [&] { random = random * 1664525U + 1013904223U; return random; };
-    for (unsigned trial{}; trial < 32768U; ++trial)
+    for (bool const boundary_checks : {false, true})
     {
-        std::array<std::uint8_t, 257> bytes{};
-        auto const size{1U + next() % bytes.size()};
-        for (auto& byte : bytes) byte = static_cast<std::uint8_t>(next() >> 24U);
-        bytes[size - 1U] = static_cast<std::uint8_t>(1U << (trial % 8U));
-        auto const source{std::span<std::uint8_t const>{bytes}.first(size)};
-        reverse_bit_reader original{source};
-        scheduled_sequence_reader scheduled{source};
-        auto read = [&](unsigned width)
+        for (unsigned trial{}; trial < 32768U; ++trial)
         {
-            require(original.read_fast(width) == scheduled.read_fast(width));
-            require(original.remaining() == scheduled.remaining());
-            require(original.overflowed() == scheduled.overflowed());
-            require(original.at_end() == scheduled.at_end());
-        };
-        read(next() % 10U);
-        read(next() % 9U);
-        read(next() % 10U);
-        scheduled.reload();
-        for (unsigned sequence{}; sequence < 64U; ++sequence)
-        {
-            auto const offset_bits{next() % 32U};
-            auto const match_bits{next() % 17U};
-            auto const literal_bits{next() % 17U};
-            read(offset_bits);
-            read(match_bits);
-            if (offset_bits + match_bits + literal_bits >= 31U) scheduled.reload();
-            read(literal_bits);
-            if (sequence != 63U)
+            std::array<std::uint8_t, 257> bytes{};
+            auto const size{1U + next() % bytes.size()};
+            for (auto& byte : bytes) byte = static_cast<std::uint8_t>(next() >> 24U);
+            bytes[size - 1U] = static_cast<std::uint8_t>(1U << (trial % 8U));
+            auto const source{std::span<std::uint8_t const>{bytes}.first(size)};
+            reverse_bit_reader original{source};
+            scheduled_sequence_reader scheduled{source};
+            auto read = [&](unsigned width)
             {
-                auto const literal_state_bits{next() % 10U};
-                auto const match_state_bits{next() % 10U};
-                read(literal_state_bits + match_state_bits);
-                read(next() % 9U);
+                auto const valid{!original.overflowed() && width <= original.remaining()};
+                auto const expected{original.read_fast(width)};
+                auto const actual{boundary_checks ? scheduled.read_scheduled(width) : scheduled.read_fast(width)};
+                if (valid || !boundary_checks) require(expected == actual);
+                require(original.remaining() == scheduled.remaining());
+                if (!boundary_checks) require(original.overflowed() == scheduled.overflowed());
+                require(original.at_end() == scheduled.at_end());
+            };
+            auto reload = [&]
+            {
                 scheduled.reload();
+                require(original.overflowed() == scheduled.overflowed());
+            };
+            read(next() % 10U);
+            read(next() % 9U);
+            read(next() % 10U);
+            reload();
+            for (unsigned sequence{}; sequence < 64U; ++sequence)
+            {
+                auto const offset_bits{next() % 32U};
+                auto const match_bits{next() % 17U};
+                auto const literal_bits{next() % 17U};
+                read(offset_bits);
+                read(match_bits);
+                if (offset_bits + match_bits + literal_bits >= 31U) reload();
+                read(literal_bits);
+                if (sequence != 63U)
+                {
+                    auto const literal_state_bits{next() % 10U};
+                    auto const match_state_bits{next() % 10U};
+                    read(literal_state_bits + match_state_bits);
+                    read(next() % 9U);
+                    reload();
+                }
             }
         }
     }

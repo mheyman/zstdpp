@@ -1305,11 +1305,17 @@ namespace sph::zstd
 #endif
             auto const read_sequence_bits = [&bits](unsigned count) noexcept -> std::uint32_t
             {
-                if constexpr (trusted_input)
+#if defined(_MSC_VER)
+                if constexpr (MediumMatchCopy) return bits.read_scheduled(count);
+                else
+#endif
                 {
-                    return bits.read_fast_trusted(count);
+                    if constexpr (trusted_input)
+                    {
+                        return bits.read_fast_trusted(count);
+                    }
+                    return bits.read_fast(count);
                 }
-                return bits.read_fast(count);
             };
             std::size_t literal_offset{};
             auto const* const literal_data{literals.data()};
@@ -1477,7 +1483,7 @@ namespace sph::zstd
                         (state_value & ((std::uint32_t{1} << offset_state_bits) - 1U));
 #else
 #if defined(_MSC_VER)
-                    if constexpr (MediumMatchCopy)
+                    if constexpr (MediumMatchCopy || LiteralsPadded)
                     {
                         // Pair the adjacent LL/ML fields, leaving OF independent
                         // to limit splitting work and live values in MSVC's loop.

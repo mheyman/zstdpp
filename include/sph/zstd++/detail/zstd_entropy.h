@@ -245,8 +245,8 @@ namespace sph::zstd::detail
     // Sequence-only reservoir. Call reload() after initial FSE states and after
     // each non-final sequence; also reload between ML and LL extras when their
     // combined OF/ML/LL width is at least 31. With validated table widths this
-    // bounds every interior read to the 64-bit container. At the input head,
-    // individual reads retain truncation detection instead of overreading.
+    // bounds every interior read to the 64-bit container. Checked reads detect
+    // truncation immediately; scheduled reads defer it to reload() or at_end().
     class scheduled_sequence_reader
     {
         std::span<std::uint8_t const> bytes_;
@@ -286,6 +286,13 @@ namespace sph::zstd::detail
 
         void reload() noexcept
         {
+            if (consumed_ > 64U)
+            {
+                overflow_ = true;
+                position_ = 0U;
+                consumed_ = 64U;
+                return;
+            }
             if (position_ == 0U) return;
             auto const move{std::min(position_, std::size_t{consumed_ / 8U})};
             position_ -= move;
@@ -308,6 +315,17 @@ namespace sph::zstd::detail
             return result;
         }
 
+        // Scheduled callers read 0..32 bits, reload at the boundaries, and check
+        // at_end() before accepting a stream. Mask shifts even on malformed tails.
+        [[nodiscard]] auto read_scheduled(unsigned count) noexcept -> std::uint32_t
+        {
+            if (count == 0U) return 0U;
+            auto const result{static_cast<std::uint32_t>(
+                (container_ << (consumed_ & 63U)) >> (64U - count))};
+            consumed_ += count;
+            return result;
+        }
+
         [[nodiscard]] auto read_fast_trusted(unsigned count) noexcept -> std::uint32_t
         {
             return read_fast(count);
@@ -315,7 +333,7 @@ namespace sph::zstd::detail
 
         [[nodiscard]] auto remaining() const noexcept -> std::size_t
         {
-            return position_ * 8U + 64U - consumed_;
+            return consumed_ <= 64U ? position_ * 8U + 64U - consumed_ : 0U;
         }
         [[nodiscard]] auto overflowed() const noexcept -> bool { return overflow_; }
         [[nodiscard]] auto at_end() const noexcept -> bool

@@ -1,5 +1,23 @@
 # Benchmark results
 
+## MSVC boundary checks and paired padded states, 2026-11-06
+
+The combined decoder change moves medium-block scheduled-reader truncation checks to refill boundaries (with a final exact-end check) and pairs adjacent literal/match state-bit reads in padded MSVC blocks. Checked reads remain available; malformed-tail shifts are masked, and refill records overflow before further input loads. The GCC production decoder path is unchanged.
+
+To avoid attributing one slow executable instance to the algorithm, the comparison used four fresh byte-identical copies of the baseline and four of the candidate. Each copy pair ran three alternating 30,000-frame trials on CPU2, with copy order rotated each trial. All 72 trials passed exact-output and ordinary-allocation guards.
+
+| Input / frame level | Median paired throughput change | Winning trial pairs | Range of changes between per-copy medians |
+| --- | ---: | ---: | ---: |
+| Mixed / 3 | +1.26% | 10/12 | -0.26% to +1.67% |
+| Structured / 16 | +1.77% | 10/12 | +1.47% to +2.39% |
+| Structured / 18 | +3.37% | 12/12 | +2.55% to +3.98% |
+
+The optimized worker shrank from 103.00 to 102.50 KiB; its `.text` shrank from 71,489 to 71,025 bytes. The rebuilt production worker's `.text` hash matches the screened candidate. The mixed-input improvement is less consistent than the structured improvements; the earlier apparent 19% gain from one slow baseline instance is not evidence for this change.
+
+Validation: MSVC unit, differential bit-reader, and 36,578-case malformed-frame checks passed; MSVC compression parity passed in 247.47 seconds. All 14 GCC tests passed, and the expanded reader test passed ASan/UBSan. The rebuilt GCC decoder retains SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`. Trial data, executable hashes, image addresses, and scripts are under `out/msvc-combined-reader-20261106/multi-image/` and its parent directory. Native measurements remain subject to the identical-binary caveat below.
+
+The [current native matrix](BENCHMARKS_NATIVE.md) and README were refreshed from 678 trials covering all 22 levels and five inputs. Structured16 measured 18,370.68/18,164.77 MiB/s (101.13% of reference); structured18 15,341.46/15,176.03 (101.09%); mixed3 8,352.05/5,492.12 (152.07%). These are current/reference measurements, separate from the old/new copy controls above. Full speed, peak-memory, and executable-size metrics are published for every row. Raw data and provenance: `out/msvc-combined-reader-20261106/current-matrix/`. GCC tables are unchanged.
+
 ## Native identical-binary control, 2026-11-06
 
 A four-way CPU2-pinned comparison of the retained baseline, two individual experiments, and their combination initially suggested improvements in both structured controls. The mixed-input baseline was unexpectedly slow. A second rotating-order control compared two copies each of baseline and combined binaries, using equal-length executable names and 30,001 iterations per run. The baseline copies have identical SHA-256 `6126ccf646bb8b31032e25471801f722943fb4a1a41c9fb2f601bbf41ed0d082`, yet `baseline.exe` measured 6,123.94–7,481.25 MiB/s while `basecopy.exe` measured 8,459.36–8,592.23 MiB/s. The median paired difference was **21.86%**, with the duplicate faster in all four trials. The combined executable's two copies were much closer to one another.
@@ -13,6 +31,8 @@ Three rotating 30,000-frame trials across eight byte-identical images confirmed 
 AMD uProf 5.3 hardware-counter collection works on this Windows/Hyper-V installation, but its `assess` profile did **not reproduce the slow/fast difference**. Sequential 300,000-frame baseline/copy runs took 60.2176/60.0051 seconds (4,981.93/4,999.57 MiB/s). Reported process CPI was 0.3127/0.3112 and branch mispredictions per thousand instructions were 0.6235/0.6194. These are sampled profile metrics, not exact counter totals or unprofiled performance results. Three unprofiled elevated control pairs still showed baseline throughput varying from 5,922.23 to 8,176.08 MiB/s versus copy throughput 8,300.37–8,510.59 MiB/s, with the same image addresses. Thus elevation alone does not explain the discrepancy, and these hardware profiles cannot identify its cause. Reports: `out/uprof-identical-assess-20261106/`; control script/data: `out/msvc-combined-reader-20261106/elevated-control.ps1` and `elevated-control/`.
 
 Lighter `tbp` profiling (1 ms timer, no call stacks) also failed to preserve the gap: baseline/copy took 37.0141/37.4116 seconds for 300,000 frames. Their hottest sampled application address was the same RVA `0x61fc`, accounting for 7.409/7.503 sampled seconds. The matching production disassembly maps this to `mov r8d,[rbp-0x14]` in sequence decoding; sampling attribution is not proof that this load causes the slowdown. Reports: `out/uprof-identical-tbp-20261106/`. Next: try substantially sparser sampling with unprofiled controls before and after it, and verify the slowdown survives collection before interpreting profile differences. No optimization or benchmark-table update is justified by these profiles alone.
+
+An explicit 50 ms timer profile preserved a smaller difference: baseline/copy worker times were 45.5412/42.1660 seconds for 300,000 frames. Three unprofiled pairs immediately before profiling had median throughput 7,468.91/8,464.89 MiB/s; three after had 6,445.12/8,457.80 MiB/s, with unchanged image addresses. Sampled application-module time was 40.35/36.30 seconds, while runtime-DLL time was 3.85/4.75 seconds. This locates the observed extra sampled time in application code, but one sparse pair cannot establish an instruction-level cause or distinguish cache/predictor effects. The report confirms a 50 ms interval. Artifacts: `out/uprof-identical-sparse-20261106/` and `out/msvc-combined-reader-20261106/sparse-{before,after}/`.
 
 The experiment also added permanent malformed-frame interoperability coverage: 36,578 cases flip each compressed-payload bit, shorten declared payloads to reach entropy decoding, compare reference/C++ acceptance and successful output, and verify output guards. This passed for the candidate and restored MSVC implementation, and for the restored GCC implementation.
 
