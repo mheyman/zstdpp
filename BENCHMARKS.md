@@ -1,5 +1,25 @@
 # Benchmark results
 
+## Balanced Huffman pairs rejected after confirmation (2026-11-07)
+
+Tested a different dependency structure inside the retained adaptive eight-symbol writer. Each four-symbol group formed two independent two-symbol payloads, then merged them; code checks, widths, 63-bit combined flush decision, tail handling, output bounds, and allocations stayed unchanged. This is not the older two-reservoir writer that flushed each lane independently. Isolated GCC 13 `-O3 -DNDEBUG` assembly confirms changed pair construction; production was untouched.
+
+The independent bit-by-bit oracle passes all 452 cases under ASan/UBSan, including checked/trusted variants, widths 1–11, flush boundaries, tails, and invalid widths at every tested position. Six rotating old/candidate/reference triples of 40,000 frames per short input initially suggested small paired gains: varied +0.78% (4/6), mixed +0.87% (4/6). Varied separate medians actually favored baseline (3474.70 versus 3461.91 MiB/s), illustrating the variability.
+
+Six longer alternating baseline/candidate pairs of 100,000 frames per input failed to confirm either gain:
+
+| Input | Baseline MiB/s | Candidate MiB/s | Paired change | Wins |
+| --- | ---: | ---: | ---: | ---: |
+| varied, 256 KiB | 3497.88 | 3471.44 | -1.08% | 0/6 |
+| mixed, 256 KiB | 2110.54 | 2103.58 | -0.47% | 3/6 |
+
+Both executables are 133.289 KiB. Baseline/candidate confirmation median RSS is 4.496/4.500 MiB on varied and 4.699/4.721 MiB on mixed; the implementation adds no workspace. Three additional alternating 60,000-frame varied counter pairs give baseline/candidate medians: cycles 19,385,757,374 / 19,343,601,340; instructions 66,542,568,183 / 66,784,371,510; branches 8,405,586,853 / 8,405,585,855; branch misses 37,303,543 / 39,048,458. The small cycle difference does not establish a repeatable throughput gain, and instructions increase about 0.36%.
+
+All 66 compression worker runs (36 initial, 24 longer, six counter) matched reference frames and passed allocation guards. Both decoders recovered both initial frames. The prototype is rejected; no production or README benchmark change. Artifacts: `out/huffman-balanced-pairs-20261107/`, including candidate header, oracle, disassembly, section hashes, initial/confirmation results, and counters.
+
+Next opportunity: input-block fingerprint comparison. Existing reference `split_ns` measures sequence partitioning, not the `ZSTD_splitBlock` input splitter, so first establish matching boundaries if timing it. Both implementations use 64-bit products for histogram distance. Investigate whether the bounded 8-KiB chunks and maximum block size permit narrower products/absolute differences without overflow, retaining the wide threshold and reduction as needed. Prove all bounds and compare outputs before timing. This differs from the already rejected histogram-capacity and initialization changes; do not repeat those or another Huffman packing microvariant without new evidence.
+
+
 ## Short sequence-code pairing rejected (2026-11-07)
 
 Following the stage audit, tested exposing two independent sequence-code conversions per loop iteration. Production already uses small lookup tables plus high-bit operations for LL/ML, like reference; unlike reference's internal conversion it preserves checked helpers and an offset-code validity check. Earlier unchecked/narrow conversion experiments had already regressed, so this trial retained every check, input order, representation, and literal-gathering operation.
