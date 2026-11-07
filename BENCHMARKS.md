@@ -2,6 +2,14 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Reference-style double-fast catch-up guard rejected, 2026-11-07
+
+The branch-profile follow-up first audited earlier safe-address, branch-hint, repeat-guard, long-match-loop, PGO, and in-record offset-base experiments; those already failed controls. A distinct isolated trial changed backward match extension from two short-circuit boundary checks to the reference's bitwise combination of the two Boolean checks, still short-circuiting before reading either byte. Match insertion and repeat-offset behavior were unchanged.
+
+Built baseline/candidate with GCC13 `-O3 -g -DNDEBUG`, level 2 and pledged size 256 KiB. Six alternating CPU2 pairs of 20,000 frames per input all matched optimized reference bytes and passed the worker allocation guards. Varied median paired throughput change was **-0.23% (3/6 wins)**; genuine mixed was **+0.17% (3/6 wins)**. There is no reliable speedup, so the candidate remains isolated. The optimized `.text` did change (baseline `2ac9abe466022b3c694e30d75afb44df92a6f236375fd176e6aadbfa3bad24a6`, candidate `f8a58b20f26b4460fe78a582269059976a633948b2d8020afea3e20af4933f57`); this was not a source-only no-op. No production changes or README measurement refresh.
+
+Artifacts: `out/l2-catchup-20261107/` contains the source overlay, build/run scripts, 24 timed worker outputs, reference frames, raw metrics, and candidate disassembly. The repeated level-2 branch-control microvariants have not established a gain. Next rotate to the README's level-1 structured decompression deficit: confirm it with longer alternating current/reference runs before selecting a decoder change. Keep level-2's remaining gap open rather than relabeling neutral trials as success.
+
 ## Current level-2 varied-input cycle and branch profiles, 2026-11-07
 
 Rebuilt the current level-2/256-KiB C++ worker with GCC13 `-O3 -g -DNDEBUG`; compared it with the optimized reference worker on the same varied input, pinned to CPU2. Three alternating 40,000-frame counter pairs confirm a remaining deficit:
