@@ -1,5 +1,24 @@
 # Benchmark results
 
+## Direct Huffman weight-body assembly rejected (2026-11-07)
+
+Reference `HUF_compressWeights` writes normalized counts and the FSE stream consecutively into its destination. C++ assembles those two buffers into `compressed_weights`, then copies that intermediate vector into the Huffman body. An isolated candidate replaces the intermediate content with a local size and inserts the two existing buffers directly into the body after the same compressed-versus-raw size decision. The first version preserves the unused workspace vector and its reservation to isolate the dataflow change. A second version removes that vector and its512-byte reservation, eliminating one construction-time allocation. Neither changes normalization, FSE encoding, repeat-table selection, or frame bytes.
+
+Each variant used six rotating old/candidate/reference triples per input,40,000 frames per trial, CPU2, optimized generic GCC13 level2 with a256-KiB pledge. Each candidate worker is133.15625 KiB versus baseline133.2890625 KiB. Results:
+
+| Variant | Input | Previous C++ MiB/s | Candidate MiB/s | Reference MiB/s | Paired gain vs previous | Wins / 6 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Direct assembly, allocation retained | varied | 3537.82 | 3591.57 | 3612.52 | +0.94% | 4 |
+| Direct assembly, allocation retained | mixed | 2132.84 | 2080.80 | 2098.41 | -2.49% | 1 |
+| Direct assembly, unused buffer removed | varied | 3505.93 | 3409.24 | 3550.81 | -2.35% | 1 |
+| Direct assembly, unused buffer removed | mixed | 2131.57 | 2123.52 | 2093.37 | -0.36% | 2 |
+
+The first candidate loses the mixed lead over reference; the complete buffer-removal version worsens the target varied gap (95.58% reference paired,0/6 wins). Reject both. Fewer copies or initial allocations alone do not establish a faster steady-state loop; these runs also change generated code and, for the second variant, workspace layout. Do not attribute the regression to a specific cache conflict without evidence.
+
+All72 timed compression workers produced reference-identical frames and passed allocation guards; eight decoder checks recovered the inputs. This rejection screen does not establish full cross-level qualification. Production code and README metrics remain unchanged. Evidence: `out/weight-direct-body-20261107/`, including `results/` and `no-buffer/`, source generators, saved copy-only executable, raw metrics and identities.
+
+Next audit a weight-specific FSE table capacity. The weight path requests table log at most6 and weights0–11, but `fse_compression_table` owns512 states and256 transforms and its builder uses257 cumulative entries plus512 spread bytes. A validated64-state/12-symbol specialization could reduce initialization, copies, and workspace rather than changing buffer placement alone. Confirm all callers' bounds and preserve generic sequence tables, RLE behavior, exact normalization/state mapping, and malformed-count rejection. Measure varied/mixed plus1-MiB controls before retention; earlier generic in-place builder experiments do not establish this narrower-capacity result. The full goal remains open.
+
 ## Fresh short level-2 baseline and FSE-mode audit (2026-11-07)
 
 Rebuilt current production with generic GCC13 `-O3 -DNDEBUG`, level2, and a262144-byte pledged input. Using the 1-MiB worker would resolve different parameters. Six alternating CPU2 current/reference pairs of60,000 varied frames confirmed a gap: C++3498.72/reference3631.33 MiB/s, median paired ratio97.07%, one win. README's short varied row now contains all nine metrics from this confirmation: RSS4.500000/4.482421875 MiB and executable133.2890625/632.515625 KiB. This is updated measurement evidence, not a retained optimization; other rows are unchanged. All12 compression workers produced reference-identical frames and passed allocation guards; both decoders recovered the input.
