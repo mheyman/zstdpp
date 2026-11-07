@@ -5851,7 +5851,7 @@ namespace sph::zstd::detail
     template <bool AlignedLiterals, bool SelectBeforeEmit = false, bool RankCanonical = false,
         bool DeferredCodes = false,
         std::size_t HistogramThreshold = RankCanonical ? 8192U : 1500U,
-        bool ValidateCodesOnce = false>
+        bool ValidateCodesOnce = false, bool AdaptivePacking = false>
     [[nodiscard]] inline auto encode_huffman_literals(std::span<std::uint8_t const> literals,
         basic_compression_workspace<AlignedLiterals>& workspace, std::vector<std::uint8_t>& output,
         bool optimal_depth = false, std::size_t minimum_gain = 0U) -> bool;
@@ -6238,7 +6238,7 @@ namespace sph::zstd::detail
         // literals retain the existing 1500-byte threshold.
         if (!skip_huffman && encode_huffman_literals<AlignedLiterals, !CarefulSelection,
             GroupFse || (CollectedLiterals && !GroupFse), DeferredCodes,
-            GroupFse ? 8192U : 1500U, ValidateCodesOnce>(literal_bytes, workspace, huffman_literals,
+            GroupFse ? 8192U : 1500U, ValidateCodesOnce, AdaptiveWideWrites>(literal_bytes, workspace, huffman_literals,
             OptimalHuffmanDepth, minimum_literal_gain))
         {
             output.swap(huffman_literals);
@@ -6985,7 +6985,7 @@ namespace sph::zstd::detail
             sizes[0], sizes[1], sizes[2], descriptions, true) + 3U;
     }
 
-    template <bool CheckCodes = true>
+    template <bool CheckCodes = true, bool AdaptivePacking = false>
     inline void encode_huffman_stream(std::span<std::uint8_t const> input,
         std::array<huffman_code, 256> const& codes,
         std::vector<std::uint8_t>& output)
@@ -7008,7 +7008,46 @@ namespace sph::zstd::detail
             container |= static_cast<std::uint64_t>(code.value) << count;
             count += code.number_bits;
         };
+
         auto position{input.size()};
+        if constexpr(AdaptivePacking) {
+            auto flush = [&]() {
+                auto completed=container;
+                if constexpr(std::endian::native==std::endian::big) completed=std::byteswap(completed);
+                std::memcpy(cursor,&completed,sizeof(completed));
+                auto const bytes=count/8U;
+                cursor+=bytes;
+                container>>=bytes*8U;
+                count&=7U;
+            };
+            auto pack_four = [&](std::size_t end) {
+                std::uint64_t packed{};
+                unsigned width{};
+                for(unsigned i=0;i<4U;++i) {
+                    auto const code=codes[input[end-1U-i]];
+                    if constexpr(CheckCodes)
+                        if(code.number_bits==0U || code.number_bits>11U)
+                            throw entropy_error{"invalid Zstandard Huffman encoding code"};
+                    packed|=static_cast<std::uint64_t>(code.value)<<width;
+                    width+=code.number_bits;
+                }
+                return std::pair{packed,width};
+            };
+
+            for(;position>=8U;position-=8U) {
+                auto const a=pack_four(position);
+                auto const b=pack_four(position-4U);
+                container|=a.first<<count;
+                count+=a.second;
+                // Each group fits independently. Use one store only when the
+                // actual combined width leaves all shifts strictly below 64.
+                if(count+b.second>63U) flush();
+                container|=b.first<<count;
+                count+=b.second;
+                flush();
+            }
+
+        }
         for (; position >= 4U; position -= 4U)
         {
             // At most seven carried bits plus four eleven-bit codes: 51 bits.
@@ -7047,7 +7086,7 @@ namespace sph::zstd::detail
      * support the full byte alphabet; direct weights support symbols up to 128.
      */
     template <bool AlignedLiterals, bool SelectBeforeEmit, bool RankCanonical, bool DeferredCodes,
-        std::size_t HistogramThreshold, bool ValidateCodesOnce>
+        std::size_t HistogramThreshold, bool ValidateCodesOnce, bool AdaptivePacking>
     [[nodiscard]] inline auto encode_huffman_literals(std::span<std::uint8_t const> literals,
         basic_compression_workspace<AlignedLiterals>& workspace, std::vector<std::uint8_t>& output,
         bool optimal_depth, std::size_t minimum_gain) -> bool
@@ -7433,7 +7472,7 @@ namespace sph::zstd::detail
         if (!prefer_repeat && !four_streams)
         {
             auto& stream{workspace.huffman_streams[0]};
-            encode_huffman_stream<check_stream_codes>(literals, codes, stream);
+            encode_huffman_stream<check_stream_codes, AdaptivePacking>(literals, codes, stream);
 #ifdef SPH_ZSTDPP_TRACE_PHASES
             auto const body_start{std::chrono::steady_clock::now()};
 #endif
@@ -7450,7 +7489,7 @@ namespace sph::zstd::detail
             {
                 auto const begin{std::min(literals.size(), stream * segment_size)};
                 auto const end{std::min(literals.size(), (stream + 1U) * segment_size)};
-                encode_huffman_stream<check_stream_codes>(literals.subspan(begin, end - begin), codes, streams[stream]);
+                encode_huffman_stream<check_stream_codes, AdaptivePacking>(literals.subspan(begin, end - begin), codes, streams[stream]);
             }
             if (streams[0].size() > std::numeric_limits<std::uint16_t>::max() ||
                 streams[1].size() > std::numeric_limits<std::uint16_t>::max() ||
@@ -7540,7 +7579,7 @@ namespace sph::zstd::detail
                 if (!four_streams)
                 {
                     auto& stream{workspace.huffman_streams[0]};
-                    encode_huffman_stream<check_stream_codes>(literals, repeat_codes, stream);
+                    encode_huffman_stream<check_stream_codes, AdaptivePacking>(literals, repeat_codes, stream);
 #ifdef SPH_ZSTDPP_TRACE_PHASES
                     auto const body_start{std::chrono::steady_clock::now()};
 #endif
@@ -7557,7 +7596,7 @@ namespace sph::zstd::detail
                     {
                         auto const begin{std::min(literals.size(), stream * segment_size)};
                         auto const end{std::min(literals.size(), (stream + 1U) * segment_size)};
-                        encode_huffman_stream<check_stream_codes>(literals.subspan(begin, end - begin), repeat_codes, streams[stream]);
+                        encode_huffman_stream<check_stream_codes, AdaptivePacking>(literals.subspan(begin, end - begin), repeat_codes, streams[stream]);
                     }
                     if (streams[0].size() <= std::numeric_limits<std::uint16_t>::max() &&
                         streams[1].size() <= std::numeric_limits<std::uint16_t>::max() &&

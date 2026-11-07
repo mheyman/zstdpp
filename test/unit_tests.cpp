@@ -2021,6 +2021,8 @@ namespace
                 actual.assign((length * 11U + 7U) / 8U + 8U, 0xA5U);
                 actual.clear();
                 sph::zstd::detail::encode_huffman_stream(input, codes, actual);
+                check(actual == expected, "original Huffman writer matches scalar oracle");
+                sph::zstd::detail::encode_huffman_stream<true, true>(input, codes, actual);
                 check(actual == expected, "direct Huffman stream matches scalar packing and end marker");
                 check(actual.capacity() == capacity, "direct Huffman stream reuses reserved storage");
             }
@@ -2041,10 +2043,55 @@ namespace
                 actual.assign((length * 11U + 7U) / 8U + 8U, 0xA5U);
                 actual.clear();
                 sph::zstd::detail::encode_huffman_stream(input, codes, actual);
+                check(actual == expected, "original Huffman writer matches scalar oracle");
+                sph::zstd::detail::encode_huffman_stream<true, true>(input, codes, actual);
                 check(actual == expected, "minimum/maximum-length Huffman codes preserve full-stream packing");
                 check(actual.capacity() == capacity, "worst-case Huffman stream needs no growth");
             }
         }
+        // Exact 62/63/64-bit batches exercise the adaptive store boundary;
+        // 88-bit batches force the two-store path.
+        for (unsigned group_bits : {62U, 63U, 64U, 88U})
+        {
+            for (unsigned symbol{}; symbol < 8U; ++symbol)
+            {
+                auto const width = group_bits == 88U ? 11U : symbol == 0U ? group_bits - 56U : 8U;
+                codes[symbol] = {static_cast<std::uint16_t>((1U << width) - 1U),
+                    static_cast<std::uint8_t>(width)};
+            }
+            for (unsigned length : {0U, 7U, 8U, 9U, 16U, 17U, 255U, 4096U})
+            {
+                std::vector<std::uint8_t> input(length), expected;
+                for (unsigned index{}; index < length; ++index)
+                    input[index] = static_cast<std::uint8_t>(index % 8U);
+                sph::zstd::detail::forward_bit_writer scalar;
+                scalar.reset(expected);
+                for (auto index{length}; index > 0U; --index)
+                {
+                    auto const code = codes[input[index - 1U]];
+                    scalar.append_unchecked(code.value, code.number_bits);
+                }
+                scalar.finish_into(expected);
+                sph::zstd::detail::encode_huffman_stream<true, true>(input, codes, actual);
+                check(actual == expected, "adaptive Huffman packing preserves exact-width boundaries");
+                sph::zstd::detail::encode_huffman_stream<false, true>(input, codes, actual);
+                check(actual == expected, "trusted adaptive Huffman packing preserves boundaries");
+                check(actual.capacity() == capacity, "adaptive Huffman writer reuses storage");
+            }
+        }
+        codes[0] = {1U, 1U};
+        for (unsigned width : {0U, 12U})
+            for (unsigned length : {1U, 7U, 8U, 9U, 16U, 17U})
+                for (unsigned position{}; position < length; ++position)
+                {
+                    codes[1] = {0U, static_cast<std::uint8_t>(width)};
+                    std::vector<std::uint8_t> input(length);
+                    input[position] = 1U;
+                    bool rejected{};
+                    try { sph::zstd::detail::encode_huffman_stream<true, true>(input, codes, actual); }
+                    catch (sph::zstd::detail::entropy_error const&) { rejected = true; }
+                    check(rejected, "adaptive Huffman writer rejects invalid widths in batches and tails");
+                }
     }
 
     void test_invalid_match_history()
