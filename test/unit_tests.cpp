@@ -2952,6 +2952,14 @@ namespace
             verify(raw_literal_frame, capacity, true);
         verify(raw_literal_frame, input.size(), true);
 
+        // Level 1 produces short overlapping matches in the non-medium
+        // sequence path as well as a medium first block. Exercise exact
+        // destination bounds and decoder reuse on both paths.
+        auto const short_overlap_frame{reference_compress(input, 1)};
+        verify(short_overlap_frame, input.size() - 1U, true);
+        verify(short_overlap_frame, input.size(), true);
+        verify(short_overlap_frame, input.size(), true);
+
         // Explicit raw blocks exercise the large-copy threshold and every
         // vector-tail remainder without depending on compressor decisions.
         for (std::size_t tail{}; tail < 35U; ++tail)

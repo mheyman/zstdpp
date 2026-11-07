@@ -2,6 +2,26 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Bounded short-overlap copy retained, 2026-11-07
+
+The earlier broad overlap-seed helper extension regressed mixed input. This narrower GCC13 change applies only to the non-medium decoder after nonoverlapping matches have already returned: for overlapping matches of at most eight bytes and offsets at least four, perform two ordered exact four-byte copies. Overlap guarantees `length > offset >= 4`, so the first four bytes are available, the second copy can consume bytes written by the first, and neither copy crosses the requested match end. Offsets below four, longer matches, medium blocks, other compilers, and all validation remain on their existing paths.
+
+An independent bytewise-expansion oracle passed ASan/UBSan for all ten supported length/offset pairs, 64 alignments, and 64 data seeds (40,960 cases) using exact-end allocations. Added a permanent structured level-1 direct-decoder test for an undersized destination, exact capacity, guards, and reuse after error. Optimized GCC13 unit tests and all-level compression/interoperability acceptance passed in 17.89 seconds. The integrated decoder exactly matches the measured candidate binary; all 22 rebuilt decoder workers are byte-identical.
+
+Six alternating old/new pairs per case measured:
+
+| Input / compression level | Frames per trial | Median paired throughput change | Candidate wins |
+| --- | ---: | ---: | ---: |
+| Structured / 1 | 3,000 | +27.42% | 6/6 |
+| Mixed / 3 | 20,000 | -2.70% | 1/6 |
+| Structured / 18 | 30,000 | +2.13% | 5/6 |
+
+The mixed regression is an accepted, explicit tradeoff for closing the structured level-1 deficit. Independent six-trial current/reference confirmations measured structured1 **1592.38/1273.70 MiB/s (125.02%)**, mixed3 **9857.15/7372.57 (133.70%)**, and structured18 **19248.87/19619.18 (98.11%)**. Thus mixed retains a substantial reference lead, while structured18 remains unresolved. Current C++ worker size is **126.34 KiB**, versus reference **211.24 KiB**; memory and every comparison ratio are in the README and detailed matrix.
+
+Refreshed all 110 GCC decoder cases using three alternating 1,000-frame trials per case, then the three longer confirmations above: 696 current/reference worker runs, all exact-output and allocation-guard checks passed. The README's compression, short-input compression, and native Windows measurements are preserved. Broad short-screen improvements are not all attributed to this source change; only the controlled old/new comparisons establish its measured effect. Short-screen deficits also remain at structured20/21 and require longer confirmation.
+
+Artifacts: `out/short-overlap4-20261107/` contains the candidate and previous header, oracle, source-generation and benchmark scripts, build/test logs, all raw trials, the 110-row summary, worker hash, and report renderer. Next: confirm current structured20/21 with longer runs, then investigate the remaining structured18 sequence-decoding cost without sacrificing mixed3's reference lead. Compression gaps remain on the overall task list.
+
 ## Level-1 structured decoder profile and overlap-seed control, 2026-11-07
 
 Six alternating CPU2 comparisons of the current optimized GCC13 decoders on the 1-MiB structured level-1 reference frame (3,000 frames each) confirm a small deficit: C++/reference median speeds 1127.55/1154.24 MiB/s; median paired throughput 98.54%, with C++ winning 2/6. These are different aggregations; the ratio of medians is not the median paired ratio. Exact decoded-output checks passed throughout.
