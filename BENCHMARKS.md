@@ -1,5 +1,26 @@
 # Benchmark results
 
+## Tiny-copy branch dispatcher rejected (2026-11-07)
+
+An isolated diagnostic counted both callers of the existing noinline 1–7-byte helper. Each run decoded one warmup plus one measured frame; the following counts are per frame. Structured18 nonoverlapping calls: length3=467, length4=767, length5=559, length6=1527; overlap seeds: length7=1029. Structured20: 476/768/548/1535 respectively, plus1024 seven-byte seeds. Structured1 has8192 seven-byte overlap seeds and no other helper calls; mixed3 has none. Diagnostic timings are not performance measurements. The two source/destination ranges are disjoint for both callers, including the initial overlap seed.
+
+The candidate replaces GCC13's switch/jump table with a bounded branch dispatcher: lengths4–7 copy first/last four bytes; lengths2–3 copy two bytes plus the last byte; length1 copies one byte. Zero and out-of-range counts still do nothing. It preserves the noinline helper, caller checks, exact bounds, overlap doubling, and other compiler policies. Assembly confirms conditional branches and fixed-width loads/stores replace the indirect jump. No allocation or workspace is added.
+
+Initial six alternating CPU2 pairs gave structured18 +0.19%(3/6), structured20 +0.66%(5/6), mixed3 +3.42%(6/6), and structured1 +0.14%(4/6). Longer optimized generic GCC13 confirmations give:
+
+| Input / frame level | Frames per trial | Median paired gain | Wins / 6 | Previous C++ MiB/s | Candidate MiB/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| structured / 18 | 100,000 | -0.95% | 1 | 19393.97 | 19157.68 |
+| structured / 20 | 100,000 | +1.21% | 6 | 19330.49 | 19545.03 |
+| mixed / 3 | 50,000 | +3.38% | 6 | 9769.78 | 10126.61 |
+| structured / 1 | 10,000 | -0.30% | 2 | 1595.24 | 1590.17 |
+
+Reject this version: it worsens the confirmed level18 target. Mixed's gain cannot be explained by faster helper calls because it makes none in the diagnostic; generated-code changes outside the helper and runtime effects must be considered. Paired percentages differ from ratios of independent medians. All110 reference-frame checks and96 timed workers passed warmup exact-output and allocation guards. An independent36,864-case bytewise oracle passed ASan/UBSan, covering lengths0–8,64 alignments,64 patterns, adjacent disjoint source/destination ranges, and exact allocation ends. This is not full malformed-frame qualification. Production code and README metrics are unchanged.
+
+One additional 100,000-frame counter pair per structured level confirms little instruction reduction: level18 old/candidate112.037/111.852 billion instructions,17.575/17.622 billion branches,10.441/14.337 million branch misses,23.437/23.492 billion cycles. Level20 gives112.291/112.108 billion instructions,17.610/17.658 billion branches,1.832/2.891 million misses,23.476/23.026 billion cycles. All four workers passed output/allocation guards. These single pairs support neither a universal branch-prediction improvement nor attribution of the speed changes solely to the helper.
+
+Evidence: `out/tiny-copy-dispatch-20261107/`, including audit counts, candidate assembly, initial/confirmation timings, oracle, and counter runs. Next test separation of overlap-seed and ordinary match-copy dispatch only if it removes measured work: the seven-byte seeds currently share a switch with the varying3–6-byte matches. Preserve the general fallback and all bounds; evaluate structured18/shared20,structured1,mixed3 before retention. Do not infer that a branch tree is inherently faster than a jump table. The full goal remains open.
+
 ## Long overlapping-copy pointer traversal rejected (2026-11-07)
 
 The structured decoder profile motivated an isolated GCC 13 rewrite of the long-overlap loop. It retained 32-byte chunks, offset >= 1024, length >= 64, forward execution, and the exact final 32-byte copy. Source and destination pointers advanced directly instead of recomputing both addresses from an integer position. The bundled reference's `ZSTD_wildcopy` also advances pointers, but permits overcopy and peels an initial 16-byte copy; this experiment preserved our exact bounds. No allocation or workspace was added. Earlier wider-chunk and sequence-batching experiments were not repeated.
