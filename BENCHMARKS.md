@@ -2,6 +2,30 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Fast level-2 direct offBase trial rejected, 2026-11-07
+
+Reference fast parsing stores encoded offBase in its sequence records. C++ level-2 fast parsing instead stores a logical offset and repeat code, then reconstructs offBase in both code gathering and reverse sequence writing. An isolated candidate added an explicit parser policy and selected the existing DirectOffBase encoder policy only for GCC13 level 2 with a pledged 1 MiB source. All three fast-parser sequence emission sites were adapted, including initial RLE and immediate repeat matches; record size, allocation policy, and bit-writer selection stayed unchanged. This is distinct from the previously rejected 256-KiB double-fast trial.
+
+Six alternating CPU-2-pinned, optimized GCC13 old/candidate pairs of 10,000 frames per input measured:
+
+| Input | Median paired throughput change | Candidate pair wins | Old median MiB/s | Candidate median MiB/s |
+| --- | ---: | ---: | ---: | ---: |
+| Varied, 1 MiB | -1.13% | 2/6 | 3423.53 | 3384.40 |
+| Mixed, 1 MiB | -0.30% | 3/6 | 2998.76 | 2953.19 |
+
+The paired percentage is the median of individual pair ratios, not the ratio of the two throughput medians. All 24 timed workers matched separately generated reference frames and passed worker allocation guards. Three further alternating 10,000-frame varied counter pairs also matched reference:
+
+| Counter median | Production | Candidate |
+| --- | ---: | ---: |
+| User cycles | 13,233,188,238 | 13,417,232,380 |
+| Instructions | 46,333,428,909 | 46,822,687,315 |
+| Branches | 6,773,951,833 | 6,703,254,248 |
+| Branch misses | 5,802,976 | 5,850,767 |
+
+Despite fewer branches, retired instructions rise 1.06% and cycles rise 1.39%. Moving conversion to the parser does not establish an overall work reduction. The candidate remains isolated under `out/fast-offbase-20261107/` with preparation/build/run scripts, headers, executables, reference frames, all trial CSVs, and counters. Production headers were never changed. Rejected before full parser-history/malformed-input qualification; existing README measurements remain authoritative.
+
+NEXT: inspect the candidate and production parser/encoder assembly before proposing another representation change. In particular, distinguish actual conversion savings from stores and masks caused by retaining the packed match-length/repeat-code field. Do not assume that the retained double-fast direct-offset benefit transfers to fast parsing, or repeat the rejected offset-RLE loop specialization.
+
 ## Level-2 1-MiB profile and Huffman-description reuse audit, 2026-11-07
 
 The generic GCC13 optimized 1-MiB level-2 worker resolves to `fast_match_state<20,16,6,0>`, unlike the 256-KiB collected-literal double-fast path. Three alternating, CPU-2-pinned 10,000-frame counter pairs on the varied corpus measured these medians:
