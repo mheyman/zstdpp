@@ -1,5 +1,18 @@
 # Benchmark results
 
+## Scalar FSE scheduling and index trials, 2026-11-06
+
+Traced the level-4 encoder hotspot at `16edc`: the stack store saves the next-state table load immediately before it. This confirms a state-transition dependency, but the sampled percentage does not prove that the store itself is expensive. Two isolated changes were tested against the same saved optimized GCC 13 worker on structured input, using six alternating CPU2 pairs of 3,000 frames each:
+
+| Candidate | Median paired throughput change | Pair wins |
+| --- | ---: | ---: |
+| Load and assign next FSE state before appending emitted bits | -2.57% | 2/6 |
+| Retain original ordering, use unsigned 32-bit next-state index | -3.25% | 1/6 |
+
+All 24 timed workers matched the reference frame exactly and passed their worker guards. Neither candidate merits broader correctness/performance gates; both were rejected. The narrower arithmetic is already retained in a different grouped-writer context, but that result does not transfer to this scalar loop. Candidate headers, workers and raw results are archived in `out/fse-early-transition-20261106/` and `out/fse-scalar-index-20261106/`. Restored production source and rebuilt level-4 SHA-256 both match the saved baseline; executable SHA-256 is `dabfe44df6db35b396bb2dafdc027fc8bca523d04589efaba05069274ea0cc18`. README tables are unchanged because no improvement was retained.
+
+Next architectural candidate: double-fast records currently retain logical offset plus repeat code, and the entropy encoder reconstructs offBase in both its gathering and reverse-writing passes. The retained GCC level-5 greedy specialization already stores offBase directly. Audit and adapt that representation for double-fast with an explicit parser/writer policy, covering ordinary matches, immediate repeat matches and the RLE shortcut. Keep ordinary parser callers unchanged. Current partition derivation and repeat repair are selected only for optimal strategies, but all remaining parsed-record consumers still need review before implementation. Require record-level equivalence, reference-frame parity, mixed/structured/random/repeated/zero controls, and unchanged neighboring workers before retention.
+
 ## Current structured compression confirmation, 2026-11-06
 
 After the Linux memory-report correction, six alternating CPU2 trials confirmed level 17 at 480.91/483.14 MiB/s (99.54% of reference), substantially closer than its 90.85% short screen. Level 4 remains slower: six 3,000-frame trials gave 663.62/696.27 MiB/s (95.31%). Both runs passed byte-for-byte compression and decoding both encodings with both decoders. These are diagnostic confirmations, not a retained library change. Reports: `out/current-structured17-20261106/` and `out/current-structured4-20261106/`.
