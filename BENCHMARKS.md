@@ -2,6 +2,29 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Dominant-symbol linear FSE transition control, 2026-11-07
+
+The isolated table audit inspects the actual selected table, dominant code, table log, and every incoming state in that code's zero-bit range. Each input uses one warmup plus one frame; all three diagnostic frames match reference. Varied level2 uses log7 length tables (128 states), correcting the earlier conservative512-state setup estimate. Dominant LL3 has either124 zero-bit incoming states with increments3–4 or126 with constant increment2. Dominant ML43 likewise alternates between constant+2 and increments3–4. OF is RLE in seven of eight blocks. Structured input instead has a mixed first block followed by14 blocks of4096 sequences: LL/OF are RLE, ML12 uses log9 with510 zero-bit states and constant increment1. Audit artifacts: `out/dominant-fse-audit-20261107/`.
+
+An isolated candidate chooses a proposed common symbol from the middle sequence, validates a constant increment across its entire zero-bit incoming-state range, and records the symbol, range limit, and increment. Both length states are prepared once per adaptive wide/grouped block. On a matching symbol/state it adds the validated increment and returns zero emitted bits; otherwise it calls the existing general transition. No histogram pass, expanded transition cache, cross-frame memoization, or heap allocation is added. Setup cost is included in all timing. The choice of middle symbol affects opportunity only, not correctness.
+
+Six alternating optimized GCC13 CPU2 pairs of10,000 frames per input:
+
+| Input | Production MiB/s | Candidate MiB/s | Median paired change | Wins |
+| --- | ---: | ---: | ---: | ---: |
+| Varied | 3457.92 | 3346.90 | -3.30% | 1/6 |
+| Mixed | 2960.31 | 2963.07 | +0.17% | 3/6 |
+
+Three additional varied counter pairs measure production/candidate medians: cycles13.124889/13.418449B (+2.24%), instructions46.333430/45.706158B (-1.35%), branches6.773952/6.861231B, branch misses5.826541/8.147678M. Reducing the table work per successful transition does not improve overall execution.
+
+The modified transition oracle passes ASan/UBSan. It compares every specialized emitted value/width and final state with the unchanged general transition across RLE tables and generated normalized tables, including negative-one counts; its existing index checks cover3,676,128 cases. All24 plain timing workers,6 counter workers, and2 profile workers emit exact reference frames and pass allocation guards. Broad all-level acceptance was not run for the rejected candidate.
+
+Both30,000-frame cycle profiles have zero lost samples and zero throttle records. Production/candidate sampled totals39.692/40.293B; parser shares49.70%/47.89%, broad sequence encoder22.23%/22.31%, Huffman literal selector6.83%/8.27%. The parser moved from0x101b0 to0xfdc0, but the profiles do not support blaming a slower parser for the regression. These are sampled functions, not isolated stage timings; do not infer that setup alone caused the slowdown. Worker size falls131016→130936 bytes without a throughput benefit.
+
+Reject the candidate; production headers and README metrics remain unchanged. Reproduction, oracle, assembly, counters, profiles and raw trials are in `out/linear-fse-transition-20261107/`.
+
+Next assess bulk advancement through runs of identical zero-extra-bit sequences in the existing LL/OF-RLE shortcut. A validated constant-increment range can permit advancing several FSE transitions at once, avoiding loop iterations rather than adding a per-symbol branch. Preserve the general fallback and exact state/output order, bound all code-array scans, and include varied2 as a regression control. This opportunity primarily affects structured/mixed blocks; it does not resolve the still-open varied2 gap by itself. Keep that gap and the high-level decoder gaps on the task list, and avoid further per-symbol branch/metadata variants without new evidence.
+
 ## Level-2 flush cadence and empty FSE emissions, 2026-11-07
 
 An isolated instrumented header copy records adaptive writer selection, requested widths, flush occupancy, grouped FSE widths (including the ML-only shortcut), and sequence symbol frequencies. Each diagnostic runs one warmup plus one measured frame; all counts below cover both frames. Instrumented timings are not performance results. All three diagnostic frames match reference exactly. Artifacts: `out/l2-flush-audit-20261107/`, including the reproducible instrumentation script and raw histograms.
