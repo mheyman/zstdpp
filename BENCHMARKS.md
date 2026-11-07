@@ -2,6 +2,23 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Grouped FSE state-mask lookup rejected, 2026-11-07
+
+An isolated GCC13 medium-block decoder replaced only the two shift/subtract masks used to split the grouped FSE state value with a ten-entry constexpr mask table. The reverse bit reader, reloads, checks, table representation, and allocation behavior were unchanged. Source audit confirms sequence tables are validated at maximum logs 9 (literal/match) and 8 (offset); generated state widths cannot exceed those logs, and RLE uses zero. Thus the proposed mask indices are 0–9. Disassembly verifies two indexed memory-AND instructions against the new table, so the source change reached the hot code.
+
+All 110 reference-frame checks and all 48 timed workers passed exact-output and allocation guards. Six alternating CPU2 current/candidate pairs gave:
+
+| Input / frame level | Frames per trial | Median paired throughput change | Candidate wins |
+| --- | ---: | ---: | ---: |
+| Structured / 18 | 30,000 | -2.22% | 1/6 |
+| Structured / 20 | 30,000 | +0.05% | 3/6 |
+| Mixed / 3 | 20,000 | +0.68% | 3/6 |
+| Structured / 1 | 3,000 | -2.61% | 0/6 |
+
+The remaining target gap worsens and the retained level-1 gain regresses, so this candidate is rejected without further malformed-input qualification. Production code, binaries, and README metrics remain unchanged. Artifacts and annotated instruction locations: `out/state-mask-20261107/` (the memory-AND pair is at candidate addresses `a411`/`a414`). Do not infer that fewer source expressions or replacing a variable shift with a lookup makes the loop faster.
+
+Next rotate back to compression: audit a combined maximum-symbol/most-frequent scan in `select_sequence_table`. The current code scans a bounded histogram for the last nonzero symbol and then scans its prefix again with `max_element`. This proposal concerns only already-built histogram metadata, not the previously rejected per-sequence histogram fusion or offset-code rescan removal. Preserve table-selection ties and compressed bytes; inspect compiler vectorization and benchmark level-2 varied/mixed controls before retaining anything.
+
 ## Fixed four-sequence decode batch rejected, 2026-11-07
 
 Implemented an isolated GCC13 medium-block decoder that decodes four sequence records into a fixed stack array, then executes their existing validated copies. The prototype preserves FSE/repeat-offset order and final-sequence handling; length validation uses a pending logical output size while offset validation remains in copy execution. Records retain literal pointers and three lengths/offsets, requiring 128 bytes of stack scratch on this target and no heap allocation. Other block paths retain the ordinary loop.
