@@ -6352,6 +6352,26 @@ namespace sph::zstd::detail
 #endif
             return;
         }
+        // The compact fast path keeps its scalar writer except when both
+        // length states qualify for the validated paired-run shortcut.
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+        if constexpr (GroupFse && CollectedLiterals &&
+            std::is_same_v<ParsedView, compact_parsed_block_view>)
+        {
+            if (literal_table.mode != sequence_table_mode::run_length &&
+                offset_table.mode == sequence_table_mode::run_length &&
+                parsed.sequences.size() > 256U &&
+                workspace.offset_codes[parsed.sequences.size() - 1U] == 0U &&
+                try_write_paired_sequence_bitstream<false>(parsed, workspace,
+                    literal_table, offset_table, match_length_table, output))
+            {
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                entropy_trace.bits_ns += entropy_trace_elapsed(entropy_phase_start);
+#endif
+                return;
+            }
+        }
+#endif
         fse_compression_state literal_state{*literal_table.table};
         fse_compression_state offset_state{*offset_table.table};
         fse_compression_state match_state{*match_length_table.table};

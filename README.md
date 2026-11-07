@@ -10,6 +10,8 @@ The library provides streaming compression and decompression, Huffman and FSE en
 
 The current benchmark matrix checks byte-for-byte compressed output at levels 1–22 on five deterministic inputs. The acceptance tests also check decoding in both directions.
 
+For implementation priorities and ongoing work, see the [performance work list](PERFORMANCE_PLAN.md). Dated experiments and previous results are kept in the [benchmark report](BENCHMARKS.md) and [development history](PERFORMANCE_HISTORY.md).
+
 ## Get started
 
 Add `include` to your C++23 include path, or link the header-only `sph::zstdpp` CMake target. Output is delivered to a callback whose span remains valid for that invocation. Call `finish()` explicitly; destructors do not emit or validate output.
@@ -96,19 +98,6 @@ out/build/msvc-release-eval/eval/bin/zstdpp_pair.exe --level 3 --input path/to/f
 
 For GCC, use the `gcc-release-eval` configure preset and `gcc-pair` build preset, then run `out/build/gcc-release-eval/eval/bin/zstdpp_pair`. The tables below use 1 MiB inputs. See the [benchmark report](BENCHMARKS.md) for measurement conditions and reproduction details.
 
-## Documentation and development
-
-| Document | Contents |
-| --- | --- |
-| [Current benchmark matrix](BENCHMARKS_INPUTS.md) | Absolute measurements for every level and input, input definitions, and measurement conditions. |
-| [Native Windows decoder matrix](BENCHMARKS_NATIVE.md) | MSVC decompression speed, memory, and executable size at every frame level and input. |
-| [Benchmark report](BENCHMARKS.md) | Reproduction instructions, focused comparisons, and dated measurements. |
-| [Performance work list](PERFORMANCE_PLAN.md) | Current priorities, completed tasks, and recent experiment outcomes. |
-| [Development history](PERFORMANCE_HISTORY.md) | Archived progress notes and earlier results formerly kept in this README. |
-| [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
-
-The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/).
-
 ## Performance
 
 The tables compare optimized GCC 13 builds of C++ and bundled reference zstd at **levels 1–22** on five deterministic **1 MiB inputs**: zero-filled, repeated, structured, pseudo-random, and mixed data. Additional tables cover varied data and shorter inputs. Measurements were collected on 2026-11-06–07; per-row trial counts and refresh dates are recorded in the [benchmark report](BENCHMARKS.md#readme-matrix-measurement-provenance).
@@ -129,7 +118,7 @@ Every measured compression frame matched reference bytes, and both decoders reco
 
 | Level | Zero | Repeated | Structured | Random | Mixed |
 | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 475.1% / 88.1% / 20.2% | 238.4% / 88.0% / 20.2% | 108.3% / 86.6% / 20.2% | 132.5% / 102.7% / 20.2% | 117.2% / 89.6% / 20.2% |
+| 1 | 483.1% / 87.8% / 20.4% | 236.8% / 87.8% / 20.4% | 108.0% / 86.7% / 20.4% | 137.4% / 102.7% / 20.4% | 114.0% / 90.7% / 20.4% |
 | 2 | 347.4% / 87.0% / 20.4% | 183.4% / 87.1% / 20.4% | 109.9% / 88.2% / 20.4% | 129.1% / 101.2% / 20.4% | 119.4% / 89.8% / 20.4% |
 | 3 | 266.9% / 91.0% / 20.2% | 185.0% / 90.5% / 20.2% | 105.3% / 91.6% / 20.2% | 138.6% / 104.6% / 20.2% | 121.6% / 94.2% / 20.2% |
 | 4 | 268.2% / 96.1% / 20.2% | 187.2% / 97.0% / 20.2% | 101.2% / 97.0% / 20.2% | 133.0% / 107.3% / 20.2% | 122.3% / 98.1% / 20.2% |
@@ -188,7 +177,7 @@ Every measured compression frame matched reference bytes, and both decoders reco
 
 | Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| zero | 1 | 40606.25 | 8546.58 | 475.12% | 5.20 | 5.90 | 88.11% | 127.80 | 632.52 | 20.20% |
+| zero | 1 | 41142.43 | 8516.50 | 483.09% | 5.20 | 5.92 | 87.79% | 128.84 | 632.52 | 20.37% |
 | zero | 2 | 40314.04 | 11604.86 | 347.39% | 5.33 | 6.12 | 86.96% | 129.11 | 632.52 | 20.41% |
 | zero | 3 | 19775.78 | 7408.62 | 266.93% | 5.98 | 6.57 | 91.03% | 127.75 | 632.52 | 20.20% |
 | zero | 4 | 20058.71 | 7477.82 | 268.24% | 7.56 | 7.87 | 96.10% | 127.75 | 632.52 | 20.20% |
@@ -210,7 +199,7 @@ Every measured compression frame matched reference bytes, and both decoders reco
 | zero | 20 | 7122.05 | 1455.30 | 489.39% | 21.73 | 22.18 | 97.97% | 145.42 | 632.52 | 22.99% |
 | zero | 21 | 6933.35 | 1454.68 | 476.62% | 21.77 | 22.20 | 98.06% | 145.42 | 632.52 | 22.99% |
 | zero | 22 | 6918.63 | 1442.57 | 479.61% | 21.77 | 22.27 | 97.77% | 145.42 | 632.52 | 22.99% |
-| repeated | 1 | 23712.82 | 9944.85 | 238.44% | 5.21 | 5.92 | 87.99% | 127.80 | 632.52 | 20.20% |
+| repeated | 1 | 23496.98 | 9924.21 | 236.76% | 5.21 | 5.93 | 87.81% | 128.84 | 632.52 | 20.37% |
 | repeated | 2 | 25488.48 | 13896.89 | 183.41% | 5.33 | 6.12 | 87.14% | 129.11 | 632.52 | 20.41% |
 | repeated | 3 | 14523.56 | 7851.18 | 184.99% | 6.00 | 6.63 | 90.51% | 127.75 | 632.52 | 20.20% |
 | repeated | 4 | 15039.63 | 8032.12 | 187.24% | 7.58 | 7.81 | 97.00% | 127.75 | 632.52 | 20.20% |
@@ -232,7 +221,7 @@ Every measured compression frame matched reference bytes, and both decoders reco
 | repeated | 20 | 1846.75 | 1470.57 | 125.58% | 21.77 | 22.25 | 97.83% | 145.42 | 632.52 | 22.99% |
 | repeated | 21 | 1831.10 | 1457.36 | 125.64% | 21.77 | 22.29 | 97.68% | 145.42 | 632.52 | 22.99% |
 | repeated | 22 | 1823.61 | 1446.32 | 126.09% | 21.77 | 22.26 | 97.79% | 145.42 | 632.52 | 22.99% |
-| structured | 1 | 741.18 | 684.54 | 108.28% | 5.32 | 6.14 | 86.61% | 127.80 | 632.52 | 20.20% |
+| structured | 1 | 743.17 | 687.90 | 108.04% | 5.32 | 6.13 | 86.72% | 128.84 | 632.52 | 20.37% |
 | structured | 2 | 947.05 | 861.70 | 109.90% | 5.50 | 6.23 | 88.24% | 129.11 | 632.52 | 20.41% |
 | structured | 3 | 781.37 | 741.73 | 105.34% | 6.19 | 6.76 | 91.59% | 127.75 | 632.52 | 20.20% |
 | structured | 4 | 710.16 | 701.63 | 101.21% | 7.76 | 7.99 | 97.04% | 127.75 | 632.52 | 20.20% |
@@ -254,7 +243,7 @@ Every measured compression frame matched reference bytes, and both decoders reco
 | structured | 20 | 220.31 | 192.07 | 114.70% | 21.83 | 22.20 | 98.33% | 145.42 | 632.52 | 22.99% |
 | structured | 21 | 229.28 | 193.81 | 118.30% | 21.85 | 22.25 | 98.21% | 145.42 | 632.52 | 22.99% |
 | structured | 22 | 225.04 | 193.74 | 116.16% | 21.85 | 22.35 | 97.75% | 145.42 | 632.52 | 22.99% |
-| random | 1 | 3829.86 | 2889.39 | 132.55% | 6.16 | 6.00 | 102.70% | 127.80 | 632.52 | 20.20% |
+| random | 1 | 3795.10 | 2761.47 | 137.43% | 6.16 | 6.00 | 102.73% | 128.84 | 632.52 | 20.37% |
 | random | 2 | 3688.14 | 2857.66 | 129.06% | 6.32 | 6.25 | 101.16% | 129.11 | 632.52 | 20.41% |
 | random | 3 | 3548.64 | 2559.98 | 138.62% | 6.97 | 6.66 | 104.63% | 127.75 | 632.52 | 20.20% |
 | random | 4 | 3561.16 | 2677.44 | 133.01% | 8.55 | 7.97 | 107.30% | 127.75 | 632.52 | 20.20% |
@@ -276,7 +265,7 @@ Every measured compression frame matched reference bytes, and both decoders reco
 | random | 20 | 12.22 | 11.43 | 106.91% | 23.01 | 22.39 | 102.77% | 145.42 | 632.52 | 22.99% |
 | random | 21 | 12.31 | 11.61 | 106.07% | 23.00 | 22.38 | 102.73% | 145.42 | 632.52 | 22.99% |
 | random | 22 | 14.17 | 11.50 | 123.15% | 22.99 | 22.41 | 102.61% | 145.42 | 632.52 | 22.99% |
-| mixed | 1 | 2584.80 | 2204.58 | 117.25% | 5.50 | 6.14 | 89.57% | 127.80 | 632.52 | 20.20% |
+| mixed | 1 | 2512.51 | 2203.85 | 114.01% | 5.52 | 6.08 | 90.72% | 128.84 | 632.52 | 20.37% |
 | mixed | 2 | 3191.18 | 2673.44 | 119.37% | 5.64 | 6.28 | 89.82% | 129.11 | 632.52 | 20.41% |
 | mixed | 3 | 2105.95 | 1731.30 | 121.64% | 6.30 | 6.69 | 94.16% | 127.75 | 632.52 | 20.20% |
 | mixed | 4 | 2013.67 | 1645.96 | 122.34% | 7.85 | 8.00 | 98.14% | 127.75 | 632.52 | 20.20% |
@@ -421,11 +410,11 @@ Every measured compression frame matched reference bytes, and both decoders reco
 <details>
 <summary>Varied-input compression at all 22 levels</summary>
 
-Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 1, 2, 8, 9, and 18 use six longer trials; other levels use three screening trials. High levels have very few frames, so these screening results are not confirmed performance wins. Every compression trial matched reference bytes, and both decoders recovered the input at each level. Level 18 uses the [30-frame confirmation](BENCHMARKS.md#level-18-varied-confirmation-and-child-link-prefetch-2026-11-07). The level-8/9 rows use [six rotating baseline/C++/reference trials](BENCHMARKS.md#local-row-insertion-cursor-retained-2026-11-07). A corresponding varied-input decompression performance matrix has not been measured in this report. See the [measurement report](BENCHMARKS.md#current-all-level-varied-compression-screen-and-confirmations-2026-11-07) for corpus identity and conditions.
+Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 1, 2, 8, 9, and 18 use six longer trials; other levels use three screening trials. High levels have very few frames, so these screening results are not confirmed performance wins. Every compression trial matched reference bytes, and both decoders recovered the input at each level. Level 18 uses the [30-frame confirmation](BENCHMARKS.md#level-18-varied-confirmation-and-child-link-prefetch-2026-11-07). The level-1 row uses [six rotating baseline/C++/reference trials](BENCHMARKS.md#compact-level-1-paired-state-batching-retained-2026-11-07). The level-8/9 rows use [six rotating baseline/C++/reference trials](BENCHMARKS.md#local-row-insertion-cursor-retained-2026-11-07). A corresponding varied-input decompression performance matrix has not been measured in this report. See the [measurement report](BENCHMARKS.md#current-all-level-varied-compression-screen-and-confirmations-2026-11-07) for corpus identity and conditions.
 
 | Level | Trials × frames | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 1 | 6 × 6000 | 3444.87 | 3482.34 | 98.92% | 5.23 | 5.90 | 88.52% | 127.80 | 632.52 | 20.20% |
+| 1 | 6 × 30000 | 3540.33 | 3475.05 | 101.88% | 5.23 | 5.92 | 88.23% | 128.84 | 632.52 | 20.37% |
 | 2 | 6 × 30000 | 3711.42 | 3697.42 | 100.38% | 5.32 | 6.13 | 86.72% | 129.11 | 632.52 | 20.41% |
 | 3 | 3 × 827 | 2606.64 | 2533.02 | 102.91% | 6.02 | 6.64 | 90.64% | 127.75 | 632.52 | 20.20% |
 | 4 | 3 × 485 | 2712.80 | 2489.31 | 108.98% | 7.58 | 7.86 | 96.52% | 127.75 | 632.52 | 20.20% |
@@ -630,3 +619,16 @@ Each cell gives **speed / peak memory / executable size** as C++ percentages of 
 | mixed | 22 | 15346.89 | 10619.75 | 144.51% | 7.18 | 7.08 | 101.43% | 106.00 | 113.50 | 93.39% |
 
 </details>
+
+## Documentation and development
+
+| Document | Contents |
+| --- | --- |
+| [Current benchmark matrix](BENCHMARKS_INPUTS.md) | Absolute measurements for every level and input, input definitions, and measurement conditions. |
+| [Native Windows decoder matrix](BENCHMARKS_NATIVE.md) | MSVC decompression speed, memory, and executable size at every frame level and input. |
+| [Benchmark report](BENCHMARKS.md) | Reproduction instructions, focused comparisons, and dated measurements. |
+| [Performance work list](PERFORMANCE_PLAN.md) | Current priorities, completed tasks, and recent experiment outcomes. |
+| [Development history](PERFORMANCE_HISTORY.md) | Archived progress notes and earlier results formerly kept in this README. |
+| [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
+
+The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/).

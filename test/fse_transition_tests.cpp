@@ -94,25 +94,32 @@ void compare_run_streams()
 void compare_paired_streams() {
     std::size_t cases{};
     for(unsigned log : {5U,7U,9U}) for(int rare : {-1,1,2,3,7,15}) for(unsigned count : {1U,7U,8U,255U,256U,257U,511U,512U,513U,1024U})
-    for(unsigned pattern=0;pattern<4;++pattern) for(std::size_t prefix : {0U,1U,255U}) {
+    for(unsigned pattern=0;pattern<6;++pattern) for(std::size_t prefix : {0U,1U,255U}) {
+        auto const rare_ll = pattern == 4U ? 35U : 16U;
+        auto const rare_ml = pattern == 5U ? 52U : 12U;
         normalized_counts ln{},mn{};ln.table_log=mn.table_log=log;
-        ln.maximum_symbol=16U;ln.values[3]=static_cast<std::int16_t>((1U<<log)-static_cast<unsigned>(rare<0?-rare:rare));ln.values[16]=static_cast<std::int16_t>(rare);
-        mn.maximum_symbol=43U;mn.values[43]=static_cast<std::int16_t>((1U<<log)-static_cast<unsigned>(rare<0?-rare:rare));mn.values[12]=static_cast<std::int16_t>(rare);
+        ln.maximum_symbol=rare_ll;ln.values[3]=static_cast<std::int16_t>((1U<<log)-static_cast<unsigned>(rare<0?-rare:rare));ln.values[rare_ll]=static_cast<std::int16_t>(rare);
+        mn.maximum_symbol=std::max(43U,rare_ml);mn.values[43]=static_cast<std::int16_t>((1U<<log)-static_cast<unsigned>(rare<0?-rare:rare));mn.values[rare_ml]=static_cast<std::int16_t>(rare);
         auto lt=build_fse_compression_table(ln),mt=build_fse_compression_table(mn),ot=make_run_length_fse_table(0U);
         selected_sequence_table ll{sequence_table_mode::compressed,&lt},ml{sequence_table_mode::compressed,&mt},of{sequence_table_mode::run_length,&ot};
         compression_workspace workspace;workspace.reserve(131072U,count);parsed_block parsed;
+        compact_parsed_block compact;
         for(unsigned i=0;i<count;++i) {
-            bool const exception=i!=(count-1U)/2U && (pattern==1U ? i%17U==0U : pattern==2U ? (i&1U)!=0U : pattern==3U && (i==7U || i+2U==count));
-            auto lc=static_cast<std::uint8_t>(exception?16U:3U),mc=static_cast<std::uint8_t>(exception?12U:43U);
-            auto const length=exception?16U+(i&1U):3U;
+            bool const exception=i!=(count-1U)/2U && (pattern==1U ? i%17U==0U : pattern==2U ? (i&1U)!=0U : pattern==3U ? (i==7U || i+2U==count) : pattern==4U ? i==0U : pattern==5U && i+1U==count);
+            auto lc=static_cast<std::uint8_t>(exception?rare_ll:3U),mc=static_cast<std::uint8_t>(exception?rare_ml:43U);
+            auto const length=exception ? (pattern==4U ? 65536U : 16U+(i&1U)) : 3U;
             auto const match=match_length_base[mc]+(exception?0U:((i*29U+15U)&127U));
             parsed.sequences.emplace_back(length,match,1U,1U);
+            compact.sequences.push_back({length,match,1U,1U});
             workspace.literal_codes[i]=lc;workspace.match_codes[i]=mc;workspace.offset_codes[i]=0U;
         }
         std::vector<std::uint8_t> expected(prefix,0xA5U),actual(prefix,0xA5U);
         write_sequence_bitstream<false,false>(parsed,workspace,ll,of,ml,expected);
         write_sequence_bitstream<true,true>(parsed,workspace,ll,of,ml,actual);
         if(expected!=actual) throw std::runtime_error("paired FSE stream mismatch");
+        actual.assign(prefix,0xA5U);
+        write_sequence_bitstream<true,true>(compact_parsed_block_view{compact},workspace,ll,of,ml,actual);
+        if(expected!=actual) throw std::runtime_error("compact paired FSE stream mismatch");
         ++cases;
     }
     std::cout<<cases<<" paired FSE stream cases passed\n";

@@ -14,7 +14,7 @@ Level-3 compression rows were refreshed on 2026-11-07 with six alternating 3,000
 
 Six-trial compression confirmations on 2026-11-07 refresh structured levels 2, 5, and 17, mixed level 17, and random level 14; see the [confirmation report](BENCHMARKS.md#current-compression-gap-confirmations-2026-11-07) for conditions.
 
-Level-1 compression was refreshed on 2026-11-07 with six rotating old/current/reference trials per input after the fixed-length FSE writer change; see the [measurement report](BENCHMARKS.md#fixed-length-fse-writer-retained-2026-11-07).
+Level-1 compression was refreshed on 2026-11-07 after enabling paired length-state batching for eligible compact records: six rotating baseline/current/reference trials per input, with 30,000 frames for varied, 15,000 for mixed, 2,000 for structured, 4,000 for random, and 10,000 for zero/repeated. See the [measurement report](BENCHMARKS.md#compact-level-1-paired-state-batching-retained-2026-11-07), including the mixed-input tradeoff.
 
 Level-2 compression was refreshed on 2026-11-07 after actual-width Huffman batching, using six rotating old/current/reference trials per input. See the [retained-change report](BENCHMARKS.md#actual-width-huffman-batching-retained-2026-11-07) for conditions and tradeoffs.
 
@@ -26,7 +26,7 @@ Levels 8 and 9 compression were refreshed on 2026-11-07 after keeping the row-in
 
 | Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| zero | 1 | 40606.25 | 8546.58 | 475.12% | 5.20 | 5.90 | 88.11% | 127.80 | 632.52 | 20.20% |
+| zero | 1 | 41142.43 | 8516.50 | 483.09% | 5.20 | 5.92 | 87.79% | 128.84 | 632.52 | 20.37% |
 | zero | 2 | 40314.04 | 11604.86 | 347.39% | 5.33 | 6.12 | 86.96% | 129.11 | 632.52 | 20.41% |
 | zero | 3 | 19775.78 | 7408.62 | 266.93% | 5.98 | 6.57 | 91.03% | 127.75 | 632.52 | 20.20% |
 | zero | 4 | 20058.71 | 7477.82 | 268.24% | 7.56 | 7.87 | 96.10% | 127.75 | 632.52 | 20.20% |
@@ -48,7 +48,7 @@ Levels 8 and 9 compression were refreshed on 2026-11-07 after keeping the row-in
 | zero | 20 | 7122.05 | 1455.30 | 489.39% | 21.73 | 22.18 | 97.97% | 145.42 | 632.52 | 22.99% |
 | zero | 21 | 6933.35 | 1454.68 | 476.62% | 21.77 | 22.20 | 98.06% | 145.42 | 632.52 | 22.99% |
 | zero | 22 | 6918.63 | 1442.57 | 479.61% | 21.77 | 22.27 | 97.77% | 145.42 | 632.52 | 22.99% |
-| repeated | 1 | 23712.82 | 9944.85 | 238.44% | 5.21 | 5.92 | 87.99% | 127.80 | 632.52 | 20.20% |
+| repeated | 1 | 23496.98 | 9924.21 | 236.76% | 5.21 | 5.93 | 87.81% | 128.84 | 632.52 | 20.37% |
 | repeated | 2 | 25488.48 | 13896.89 | 183.41% | 5.33 | 6.12 | 87.14% | 129.11 | 632.52 | 20.41% |
 | repeated | 3 | 14523.56 | 7851.18 | 184.99% | 6.00 | 6.63 | 90.51% | 127.75 | 632.52 | 20.20% |
 | repeated | 4 | 15039.63 | 8032.12 | 187.24% | 7.58 | 7.81 | 97.00% | 127.75 | 632.52 | 20.20% |
@@ -70,7 +70,7 @@ Levels 8 and 9 compression were refreshed on 2026-11-07 after keeping the row-in
 | repeated | 20 | 1846.75 | 1470.57 | 125.58% | 21.77 | 22.25 | 97.83% | 145.42 | 632.52 | 22.99% |
 | repeated | 21 | 1831.10 | 1457.36 | 125.64% | 21.77 | 22.29 | 97.68% | 145.42 | 632.52 | 22.99% |
 | repeated | 22 | 1823.61 | 1446.32 | 126.09% | 21.77 | 22.26 | 97.79% | 145.42 | 632.52 | 22.99% |
-| structured | 1 | 741.18 | 684.54 | 108.28% | 5.32 | 6.14 | 86.61% | 127.80 | 632.52 | 20.20% |
+| structured | 1 | 743.17 | 687.90 | 108.04% | 5.32 | 6.13 | 86.72% | 128.84 | 632.52 | 20.37% |
 | structured | 2 | 947.05 | 861.70 | 109.90% | 5.50 | 6.23 | 88.24% | 129.11 | 632.52 | 20.41% |
 | structured | 3 | 781.37 | 741.73 | 105.34% | 6.19 | 6.76 | 91.59% | 127.75 | 632.52 | 20.20% |
 | structured | 4 | 710.16 | 701.63 | 101.21% | 7.76 | 7.99 | 97.04% | 127.75 | 632.52 | 20.20% |
@@ -92,7 +92,7 @@ Levels 8 and 9 compression were refreshed on 2026-11-07 after keeping the row-in
 | structured | 20 | 220.31 | 192.07 | 114.70% | 21.83 | 22.20 | 98.33% | 145.42 | 632.52 | 22.99% |
 | structured | 21 | 229.28 | 193.81 | 118.30% | 21.85 | 22.25 | 98.21% | 145.42 | 632.52 | 22.99% |
 | structured | 22 | 225.04 | 193.74 | 116.16% | 21.85 | 22.35 | 97.75% | 145.42 | 632.52 | 22.99% |
-| random | 1 | 3829.86 | 2889.39 | 132.55% | 6.16 | 6.00 | 102.70% | 127.80 | 632.52 | 20.20% |
+| random | 1 | 3795.10 | 2761.47 | 137.43% | 6.16 | 6.00 | 102.73% | 128.84 | 632.52 | 20.37% |
 | random | 2 | 3688.14 | 2857.66 | 129.06% | 6.32 | 6.25 | 101.16% | 129.11 | 632.52 | 20.41% |
 | random | 3 | 3548.64 | 2559.98 | 138.62% | 6.97 | 6.66 | 104.63% | 127.75 | 632.52 | 20.20% |
 | random | 4 | 3561.16 | 2677.44 | 133.01% | 8.55 | 7.97 | 107.30% | 127.75 | 632.52 | 20.20% |
@@ -114,7 +114,7 @@ Levels 8 and 9 compression were refreshed on 2026-11-07 after keeping the row-in
 | random | 20 | 12.22 | 11.43 | 106.91% | 23.01 | 22.39 | 102.77% | 145.42 | 632.52 | 22.99% |
 | random | 21 | 12.31 | 11.61 | 106.07% | 23.00 | 22.38 | 102.73% | 145.42 | 632.52 | 22.99% |
 | random | 22 | 14.17 | 11.50 | 123.15% | 22.99 | 22.41 | 102.61% | 145.42 | 632.52 | 22.99% |
-| mixed | 1 | 2584.80 | 2204.58 | 117.25% | 5.50 | 6.14 | 89.57% | 127.80 | 632.52 | 20.20% |
+| mixed | 1 | 2512.51 | 2203.85 | 114.01% | 5.52 | 6.08 | 90.72% | 128.84 | 632.52 | 20.37% |
 | mixed | 2 | 3191.18 | 2673.44 | 119.37% | 5.64 | 6.28 | 89.82% | 129.11 | 632.52 | 20.41% |
 | mixed | 3 | 2105.95 | 1731.30 | 121.64% | 6.30 | 6.69 | 94.16% | 127.75 | 632.52 | 20.20% |
 | mixed | 4 | 2013.67 | 1645.96 | 122.34% | 7.85 | 8.00 | 98.14% | 127.75 | 632.52 | 20.20% |

@@ -1,5 +1,30 @@
 # Benchmark results
 
+## Compact level-1 paired-state batching retained (2026-11-07)
+
+GCC 13's compact fast path now tries the existing paired LL/ML FSE writer when LL is non-RLE, OF is RLE code zero, and there are more than 256 sequences. The helper validates common length codes and zero-bit transition spans before changing output; ineligible blocks retain the scalar writer. No persistent workspace or heap allocation is added. Other compiler policies are unchanged.
+
+Six alternating 30,000-frame baseline pairs confirmed varied-input C++ throughput of 3391.91 versus reference 3498.13 MiB/s (96.50% paired, zero wins). Matched 60,000-frame cycle profiles had zero lost/throttled samples; C++ attributed 50.21% to the compact parser and 20.81% to the enclosing frame function. Different reference function boundaries prevent equivalent-stage subtraction. An eligibility audit found six of eight varied blocks suitable for paired batching, versus no mixed blocks.
+
+An adaptive Huffman packing policy extension was rejected: six alternating 30,000-frame confirmations gave varied -0.52% (2/6 wins), mixed +2.59% (6/6). That policy is not retained. Evidence: `out/l1-varied-confirm-20261107/`, `out/l1-adaptive-huffman-20261107/`, and `out/l1-paired-eligibility-20261107/`.
+
+Final qualification used six rotating baseline/current/reference trials per shape, generic GCC 13 `-O3 -DNDEBUG`, pinned to CPU 2. Frames per trial: varied 30,000, mixed 15,000, structured 2,000, random 4,000, zero/repeated 10,000. Paired gains are medians of within-trial ratios; README percentages instead divide median throughputs.
+
+| Input | Previous C++ MiB/s | Current C++ MiB/s | Reference MiB/s | Paired gain over previous | Wins / 6 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| varied | 3429.70 | 3540.33 | 3475.05 | +3.67% | 6 |
+| mixed | 2567.11 | 2512.51 | 2203.85 | -1.83% | 2 |
+| structured | 738.66 | 743.17 | 687.90 | +0.61% | 4 |
+| zero | 40509.74 | 41142.43 | 8516.50 | +1.38% | 4 |
+| repeated | 23598.98 | 23496.98 | 9924.21 | -0.20% | 3 |
+| random | 3816.35 | 3795.10 | 2761.47 | -0.24% | 3 |
+
+Varied wins five of six paired reference comparisons (101.05% paired; 101.88% ratio of medians). Mixed's -1.83% cost against the previous C++ build is an accepted tradeoff; it remains 114.27% of reference by paired ratio. All six shapes exceed reference in this measurement, but this does not establish the all-level objective.
+
+The complete worker grows by 1,072 bytes, from 127.796875 to 128.843750 KiB (reference 632.515625 KiB). All nine published level-1 metrics were refreshed for the five main shapes and varied. Decoder, native, short-input, and other-level measurements are unchanged. Memory values measure whole-process peak RSS.
+
+Initial and final qualification passed 144 exact-frame/allocation-guarded compression workers and 16 reciprocal decoder checks. Integrated unit, compact-sequence, FSE-transition, and all-22-level parity tests passed in 18.34 seconds. The expanded oracle tests 3,240 cases in each of ordinary and compact representations (6,480 comparisons), including extended literal/match records, plus 612 run-boundary and 3,676,128 state-index cases. AddressSanitizer and UndefinedBehaviorSanitizer passed. Integrated level-1 text/read-only data match the measured candidate; the other 21 levels retain baseline text/read-only data. Evidence: `out/l1-paired-sequences-20261107/qualification/summary.json` and `out/l1-paired-sequences-20261107/integrated/`.
+
 ## Local row-insertion cursor retained (2026-11-07)
 
 The GCC 13 lazy-depth-2 row matcher updated its workspace insertion cursor after every inserted position. Byte-sized tag stores can alias workspace fields, and the optimized loop repeatedly reloaded cursor/table state. The retained change keeps only the insertion cursor local and publishes it once after the catch-up loop. Hashing, salt observation, prefetching, cache replacement, insertion order, and table layout are unchanged. The existing broader batch-local optimization for greedy/depth-1 parsing is not enabled for depth 2.
@@ -437,7 +462,7 @@ The main matrix covers zero-filled, repeated, structured, pseudo-random, and mix
 
 Six-trial compression confirmations on 2026-11-07 refresh structured levels 2, 5, and 17, mixed level 17, and random level 14. See the [confirmation report](#current-compression-gap-confirmations-2026-11-07) for iteration counts and variability. These update the measurements without a source change.
 
-Level-1 compression was refreshed on 2026-11-07 after specializing blocks with fixed length codes. Six rotating old/current/reference trials per input verified exact frames and both decoders; see the [measurement report](#fixed-length-fse-writer-retained-2026-11-07).
+Level-1 compression was refreshed on 2026-11-07 after compact paired-state batching. Six rotating old/current/reference trials per input verified exact frames and both decoders; see the [measurement report](#compact-level-1-paired-state-batching-retained-2026-11-07) for trial lengths and the mixed-input tradeoff.
 
 ## Fixed-length FSE writer retained, 2026-11-07
 
