@@ -1,5 +1,25 @@
 # Benchmark results
 
+## Short sequence-code pairing rejected (2026-11-07)
+
+Following the stage audit, tested exposing two independent sequence-code conversions per loop iteration. Production already uses small lookup tables plus high-bit operations for LL/ML, like reference; unlike reference's internal conversion it preserves checked helpers and an offset-code validity check. Earlier unchecked/narrow conversion experiments had already regressed, so this trial retained every check, input order, representation, and literal-gathering operation.
+
+An initial `#pragma GCC unroll 2` was ignored by GCC 13. Its `.text` and `.rodata` are byte-identical to baseline. Six rotating 40,000-frame baseline/candidate/reference triples per input therefore act only as a code-identical timing control: paired varied +0.62% (3/6 wins), mixed -1.68% (0/6). This does not establish any optimization or the cause of timing variation. A section-extraction command ran during one control trial, so those timings are additionally unsuitable as production benchmark replacements. The final section audit ran after all workers finished.
+
+The second candidate explicitly calls a small conversion lambda for two successive sequences, then handles an odd tail. It compiles without the ignored-annotation warning and changes machine code. Six rotating 40,000-frame triples per input:
+
+| Input | Baseline MiB/s | Candidate MiB/s | Reference MiB/s | Paired candidate/baseline change | Wins |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| varied, 256 KiB | 3525.74 | 3422.05 | 3583.96 | -2.36% | 1/6 |
+| mixed, 256 KiB | 2114.47 | 2111.22 | 2105.32 | -0.15% | 3/6 |
+
+Executable size grows from 133.289 to 133.734 KiB. Candidate/baseline median RSS is 4.482/4.469 MiB on varied and 4.723/4.723 MiB on mixed. No persistent workspace or allocations were added. Both experiments' 72 timed workers matched reference bytes and passed existing allocation guards; eight decoder checks recovered the two inputs. The explicit candidate is rejected for the varied regression and lack of consistent benefit. No production source or README metrics changed; broader correctness qualification is unnecessary for a discarded prototype.
+
+The stage audit's proposed extra Huffman instrumentation is unnecessary: the existing `huffman_emit_ns` already wraps `encode_huffman_stream`, including resize and tail emission. Across the three prior diagnostic runs its median is **3.715 us/frame** on varied versus reference's **2.300 us/frame** stream bucket; mixed is **0.094 vs 0.076 us/frame**. C++ has one timer per stream, reference one per four-stream wrapper, so even these narrower scopes have unequal instrumentation overhead. The larger C++ `streams_ns` additionally includes code preparation and body assembly. These are diagnostic leads, not precise recoverable speedup estimates.
+
+Artifacts: `out/short-code-unroll-20261107/`, `out/short-code-pairs-20261107/` (isolated headers, scripts, trials, identities, section hashes), and earlier `out/short-l2-stages-20261107/results.json`. Next: inspect whether the retained adaptive Huffman packer's four-symbol dependency chain can be shortened by forming independent two-symbol pairs before merging, preserving the actual-width flush rule. Check generated instructions before throughput runs; do not repeat rejected two-reservoir flushing, wider static groups, or gather-loop unrolling. Full all-level objective remains open.
+
+
 ## Short level-2 stage audit (2026-11-07)
 
 Current production commit `5aac380` was rebuilt in an isolated GCC 13 Release `-O3 -DNDEBUG` configuration with the existing optional phase timers, level 2 and a 262144-byte pledged input size. Three alternating C++/reference pairs per input ran 20,000 frames on CPU 2. All 12 output frames matched reference bytes; both decoders recovered each input. Artifacts and reproduction scripts: `out/short-l2-stages-20261107/` (`run.sh`, `run.py`, `results.json`, individual logs). No production source changed.
