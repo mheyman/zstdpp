@@ -1,5 +1,15 @@
 # Benchmark results
 
+## GCC level-3 direct encoded offsets retained, 2026-11-07
+
+Extended the measured direct-offBase parser policy to GCC 13 level 3. Its double-RLE and adaptive sequence writers now receive the same representation policy as the main encoder, including last-sequence extra bits and both reverse loops. Logical-offset callers retain the existing behavior. Levels 2 and 4 were rebuilt and their complete executable hashes exactly match saved production workers.
+
+Six alternating CPU2 old/new pairs measured structured +5.79% (6/6 wins), mixed +5.49% (6/6), varied text +1.53% (6/6), random -0.09% (3/6), repeated -1.52% (0/6), and zero +2.15% (5/6). Structured/mixed/varied/random used 3,000 frames per worker; repeated/zero used 10,000. All 72 workers produced exact reference frames and passed worker guards. Retained with the explicit repeated-input regression: it remains 184.99% of reference throughput in the independent comparison, while the structured bottleneck gains substantially. No claim that every input improved versus the prior C++ build.
+
+Optimized units and all-level compression acceptance passed in 17.85 seconds combined. Acceptance also covers short 64 KiB level-3 mixed and varied inputs; those checks establish byte correctness, not performance at that size. Independent six-trial, 3,000-frame reference comparisons on all five table inputs passed compressed-byte parity and both encodings with both decoders. Structured is 781.37/741.73 MiB/s (105.34%), mixed 2105.95/1731.30 (121.64%). All five current measured level-3 rows exceed reference. C++ worker size is 127.74 KiB versus 632.52 KiB reference. README and BENCHMARKS_INPUTS update all nine metrics for those five rows and preserve other results.
+
+Artifacts, snapshots, raw controls, validation, hashes and the table update script: `out/l3-direct-offbase-20261106/` (run began before midnight). NEXT: measure the newly selected direct-offset policy on short pledged level-3 inputs against the pre-change source; do not infer short-input performance from 1 MiB gains. Then return to remaining structured compression/decompression deficits. Overall all-level performance completion remains unproven.
+
 ## GCC level-4 direct encoded offsets retained, 2026-11-06
 
 The double-fast parser now offers an explicit direct-offBase view: ordinary matches store offset+3, repeat matches store the repeat code, and the record's separate repeat field is cleared. GCC 13 level 4 selects that view and the corresponding entropy-writer policy, avoiding reconstruction in both code gathering and reverse bit writing. Records stay the same size, buffers are reused, and ordinary parser callers retain logical offsets. All three emission sites (ordinary match, immediate repeat and RLE shortcut) are covered. Partition repair is confined to optimal strategies and does not consume these records.

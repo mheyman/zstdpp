@@ -100,6 +100,8 @@ For GCC, use the `gcc-release-eval` configure preset and `gcc-pair` build preset
 
 Measured 2026-11-06 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
 
+Level-3 compression was refreshed on 2026-11-07. Levels 3 and 4 use six alternating 3,000-frame compression trials per input.
+
 Memory is whole-process peak resident set size (RSS), including the benchmark worker. On Linux, this is the current executable's `VmHWM`, excluding peaks inherited from its launcher. Code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
 
 ### Compression (% of reference)
@@ -108,7 +110,7 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1 | 465.6% / 88.0% / 20.2% | 240.6% / 87.5% / 20.2% | 96.4% / 86.9% / 20.2% | 123.1% / 103.4% / 20.2% | 109.2% / 89.9% / 20.2% |
 | 2 | 355.0% / 87.5% / 20.2% | 150.7% / 87.9% / 20.2% | 99.6% / 87.0% / 20.2% | 121.6% / 100.6% / 20.2% | 113.4% / 90.2% / 20.2% |
-| 3 | 262.1% / 90.9% / 20.2% | 180.6% / 91.5% / 20.2% | 97.8% / 91.7% / 20.2% | 125.1% / 105.1% / 20.2% | 116.1% / 93.5% / 20.2% |
+| 3 | 266.9% / 91.0% / 20.2% | 185.0% / 90.5% / 20.2% | 105.3% / 91.6% / 20.2% | 138.6% / 104.6% / 20.2% | 121.6% / 94.2% / 20.2% |
 | 4 | 268.2% / 96.1% / 20.2% | 187.2% / 97.0% / 20.2% | 101.2% / 97.0% / 20.2% | 133.0% / 107.3% / 20.2% | 122.3% / 98.1% / 20.2% |
 | 5 | 201.9% / 89.9% / 20.2% | 164.0% / 90.9% / 20.2% | 99.7% / 91.5% / 20.2% | 133.5% / 101.2% / 20.2% | 117.6% / 94.4% / 20.2% |
 | 6 | 345.0% / 91.4% / 18.8% | 176.6% / 90.1% / 18.8% | 129.9% / 90.5% / 18.8% | 119.1% / 100.4% / 18.8% | 135.2% / 92.0% / 18.8% |
@@ -165,7 +167,7 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | zero | 1 | 38532.76 | 8276.12 | 465.59% | 5.21 | 5.92 | 87.98% | 127.60 | 632.52 | 20.17% |
 | zero | 2 | 37484.49 | 10560.47 | 354.95% | 5.33 | 6.09 | 87.53% | 127.95 | 632.52 | 20.23% |
-| zero | 3 | 18765.83 | 7160.85 | 262.06% | 6.01 | 6.61 | 90.90% | 127.73 | 632.52 | 20.19% |
+| zero | 3 | 19775.78 | 7408.62 | 266.93% | 5.98 | 6.57 | 91.03% | 127.74 | 632.52 | 20.20% |
 | zero | 4 | 20058.71 | 7477.82 | 268.24% | 7.56 | 7.87 | 96.10% | 127.74 | 632.52 | 20.20% |
 | zero | 5 | 9457.89 | 4685.44 | 201.86% | 7.56 | 8.41 | 89.92% | 127.63 | 632.52 | 20.18% |
 | zero | 6 | 8088.86 | 2344.70 | 344.99% | 7.58 | 8.29 | 91.44% | 119.20 | 632.52 | 18.85% |
@@ -187,7 +189,7 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | zero | 22 | 6918.63 | 1442.57 | 479.61% | 21.77 | 22.27 | 97.77% | 145.41 | 632.52 | 22.99% |
 | repeated | 1 | 23047.53 | 9580.09 | 240.58% | 5.18 | 5.92 | 87.50% | 127.60 | 632.52 | 20.17% |
 | repeated | 2 | 20517.50 | 13615.53 | 150.69% | 5.33 | 6.06 | 87.89% | 127.95 | 632.52 | 20.23% |
-| repeated | 3 | 13969.50 | 7735.16 | 180.60% | 6.00 | 6.56 | 91.49% | 127.73 | 632.52 | 20.19% |
+| repeated | 3 | 14523.56 | 7851.18 | 184.99% | 6.00 | 6.63 | 90.51% | 127.74 | 632.52 | 20.20% |
 | repeated | 4 | 15039.63 | 8032.12 | 187.24% | 7.58 | 7.81 | 97.00% | 127.74 | 632.52 | 20.20% |
 | repeated | 5 | 8286.91 | 5051.70 | 164.04% | 7.58 | 8.34 | 90.94% | 127.63 | 632.52 | 20.18% |
 | repeated | 6 | 4484.29 | 2539.77 | 176.56% | 7.57 | 8.40 | 90.12% | 119.20 | 632.52 | 18.85% |
@@ -209,7 +211,7 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | repeated | 22 | 1823.61 | 1446.32 | 126.09% | 21.77 | 22.26 | 97.79% | 145.41 | 632.52 | 22.99% |
 | structured | 1 | 665.10 | 689.98 | 96.39% | 5.32 | 6.13 | 86.90% | 127.60 | 632.52 | 20.17% |
 | structured | 2 | 817.13 | 820.36 | 99.61% | 5.46 | 6.27 | 87.04% | 127.95 | 632.52 | 20.23% |
-| structured | 3 | 711.69 | 727.79 | 97.79% | 6.17 | 6.73 | 91.67% | 127.73 | 632.52 | 20.19% |
+| structured | 3 | 781.37 | 741.73 | 105.34% | 6.19 | 6.76 | 91.59% | 127.74 | 632.52 | 20.20% |
 | structured | 4 | 710.16 | 701.63 | 101.21% | 7.76 | 7.99 | 97.04% | 127.74 | 632.52 | 20.20% |
 | structured | 5 | 1026.29 | 1029.31 | 99.71% | 7.73 | 8.45 | 91.49% | 127.63 | 632.52 | 20.18% |
 | structured | 6 | 2662.04 | 2049.38 | 129.89% | 7.60 | 8.40 | 90.49% | 119.20 | 632.52 | 18.85% |
@@ -231,7 +233,7 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | structured | 22 | 225.04 | 193.74 | 116.16% | 21.85 | 22.35 | 97.75% | 145.41 | 632.52 | 22.99% |
 | random | 1 | 3669.28 | 2980.51 | 123.11% | 6.18 | 5.98 | 103.36% | 127.60 | 632.52 | 20.17% |
 | random | 2 | 3668.27 | 3016.34 | 121.61% | 6.29 | 6.25 | 100.62% | 127.95 | 632.52 | 20.23% |
-| random | 3 | 3497.60 | 2795.65 | 125.11% | 6.98 | 6.64 | 105.06% | 127.73 | 632.52 | 20.19% |
+| random | 3 | 3548.64 | 2559.98 | 138.62% | 6.97 | 6.66 | 104.63% | 127.74 | 632.52 | 20.20% |
 | random | 4 | 3561.16 | 2677.44 | 133.01% | 8.55 | 7.97 | 107.30% | 127.74 | 632.52 | 20.20% |
 | random | 5 | 2510.75 | 1881.33 | 133.46% | 8.54 | 8.45 | 101.18% | 127.63 | 632.52 | 20.18% |
 | random | 6 | 2112.57 | 1773.54 | 119.12% | 8.54 | 8.51 | 100.37% | 119.20 | 632.52 | 18.85% |
@@ -253,7 +255,7 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | random | 22 | 14.17 | 11.50 | 123.15% | 22.99 | 22.41 | 102.61% | 145.41 | 632.52 | 22.99% |
 | mixed | 1 | 2366.32 | 2166.12 | 109.24% | 5.52 | 6.14 | 89.88% | 127.60 | 632.52 | 20.17% |
 | mixed | 2 | 2949.66 | 2601.27 | 113.39% | 5.62 | 6.24 | 90.17% | 127.95 | 632.52 | 20.23% |
-| mixed | 3 | 1996.03 | 1719.60 | 116.08% | 6.30 | 6.74 | 93.45% | 127.73 | 632.52 | 20.19% |
+| mixed | 3 | 2105.95 | 1731.30 | 121.64% | 6.30 | 6.69 | 94.16% | 127.74 | 632.52 | 20.20% |
 | mixed | 4 | 2013.67 | 1645.96 | 122.34% | 7.85 | 8.00 | 98.14% | 127.74 | 632.52 | 20.20% |
 | mixed | 5 | 2493.45 | 2119.91 | 117.62% | 7.97 | 8.45 | 94.36% | 127.63 | 632.52 | 20.18% |
 | mixed | 6 | 2587.36 | 1913.09 | 135.24% | 7.82 | 8.50 | 92.00% | 119.20 | 632.52 | 18.85% |

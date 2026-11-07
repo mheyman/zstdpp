@@ -592,7 +592,7 @@ namespace sph::zstd
                             std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt,
                             compression_workspace_.literals);
                     else if constexpr (effective_parameters_.strategy == compression_strategy::double_fast &&
-                        Parameters.compression_level == 4)
+                        (Parameters.compression_level == 3 || Parameters.compression_level == 4))
                         parsed_ = match_state_.parse_offbase(input, block_begin, bytes.size(),
                             std::move(parsed_), rle_checked ? std::optional<bool>{input_is_rle} : std::nullopt);
                     else if constexpr (effective_parameters_.strategy == compression_strategy::greedy &&
@@ -771,7 +771,7 @@ namespace sph::zstd
                             , ((effective_parameters_.strategy == compression_strategy::greedy &&
                                Parameters.compression_level == 5) ||
                                (effective_parameters_.strategy == compression_strategy::double_fast &&
-                                Parameters.compression_level == 4))
+                                (Parameters.compression_level == 3 || Parameters.compression_level == 4)))
                             , (effective_parameters_.strategy == compression_strategy::double_fast &&
                                Parameters.compression_level == 3 &&
                                effective_parameters_.pledged_source_size == 1048576U)

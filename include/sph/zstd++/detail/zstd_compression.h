@@ -5771,7 +5771,7 @@ namespace sph::zstd::detail
         bool optimal_depth = false, std::size_t minimum_gain = 0U) -> bool;
 
     // Keep the entropy/table selection shared when a block chooses its bit writer.
-    template <bool Wide, bool Grouped, bool DoubleRleShortcut = false,
+    template <bool Wide, bool Grouped, bool DoubleRleShortcut = false, bool DirectOffBase = false,
         bool AlignedLiterals, typename ParsedView>
     inline void write_sequence_bitstream(ParsedView const& parsed,
         basic_compression_workspace<AlignedLiterals>& workspace,
@@ -5788,7 +5788,7 @@ namespace sph::zstd::detail
         auto const last_ll{workspace.literal_codes[last_index]};
         auto const last_of{workspace.offset_codes[last_index]};
         auto const last_ml{workspace.match_codes[last_index]};
-        auto const last_offset{last.repeat_code != 0U ?
+        auto const last_offset{DirectOffBase ? last.offset : last.repeat_code != 0U ?
             static_cast<std::uint32_t>(last.repeat_code) : last.offset + 3U};
         literal_state.initialize(last_ll);
         offset_state.initialize(last_of);
@@ -5831,7 +5831,7 @@ namespace sph::zstd::detail
                     }
                     bits.append(sequence.literal_length, literal_length_bits[ll]);
                     bits.append(sequence.match_length - 3U, match_length_bits[ml]);
-                    auto const encoded_offset{sequence.repeat_code != 0U ?
+                    auto const encoded_offset{DirectOffBase ? sequence.offset : sequence.repeat_code != 0U ?
                         static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
                     bits.append(encoded_offset, of);
                 }
@@ -5869,7 +5869,7 @@ namespace sph::zstd::detail
             }
             bits.append(sequence.literal_length, literal_length_bits[ll]);
             bits.append(sequence.match_length - 3U, match_length_bits[ml]);
-            auto const encoded_offset{sequence.repeat_code != 0U ?
+            auto const encoded_offset{DirectOffBase ? sequence.offset : sequence.repeat_code != 0U ?
                 static_cast<std::uint32_t>(sequence.repeat_code) : sequence.offset + 3U};
             bits.append(encoded_offset, of);
         }
@@ -6097,7 +6097,7 @@ namespace sph::zstd::detail
             if (literal_table.mode == sequence_table_mode::run_length &&
                 offset_table.mode == sequence_table_mode::run_length)
             {
-                write_sequence_bitstream<false, false, true>(parsed, workspace, literal_table,
+                write_sequence_bitstream<false, false, true, DirectOffBase>(parsed, workspace, literal_table,
                     offset_table, match_length_table, output);
 #ifdef SPH_ZSTDPP_TRACE_PHASES
                 entropy_trace.bits_ns += entropy_trace_elapsed(entropy_phase_start);
@@ -6108,10 +6108,10 @@ namespace sph::zstd::detail
         if constexpr (AdaptiveWideWrites)
         {
             if (literal_size <= parsed.sequences.size() * 8U)
-                write_sequence_bitstream<true, true>(parsed, workspace, literal_table,
+                write_sequence_bitstream<true, true, false, DirectOffBase>(parsed, workspace, literal_table,
                     offset_table, match_length_table, output);
             else
-                write_sequence_bitstream<false, false>(parsed, workspace, literal_table,
+                write_sequence_bitstream<false, false, false, DirectOffBase>(parsed, workspace, literal_table,
                     offset_table, match_length_table, output);
 #ifdef SPH_ZSTDPP_TRACE_PHASES
             entropy_trace.bits_ns += entropy_trace_elapsed(entropy_phase_start);
