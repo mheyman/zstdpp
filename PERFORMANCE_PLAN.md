@@ -2,6 +2,10 @@
 
 Track ongoing optimization tasks and new experiment results here; keep the [README](README.md) focused on using the library and its current performance tables. Older progress notes are preserved in [development history](PERFORMANCE_HISTORY.md), and detailed measurements belong in the [benchmark report](BENCHMARKS.md).
 
+## Where to record updates
+
+Keep the README focused on library capabilities, getting started, and current performance. Record task status and next steps in the performance work list, and dated experiments—including rejected changes and their measurements—in the benchmark report. The development history is the archive of the former working README. When a retained change updates published performance, refresh the corresponding README tables and detailed benchmark matrix together.
+
 ## Current performance work
 
 ### Latest status and experiment history (newest first)

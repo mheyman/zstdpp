@@ -104,9 +104,11 @@ Measured 2026-11-06 with optimized GCC 13 against the bundled reference on five 
 
 Level-3 compression was refreshed on 2026-11-07. Levels 3 and 4 use six alternating 3,000-frame compression trials per input.
 
-Decompression was refreshed on 2026-11-07 after bounded short-overlap copying: three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured levels 18, 20, and 21 (100,000). The change improves structured level 1 but trades about 2.70% of mixed level-3 throughput against the previous C++ build; see the [experiment report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
+Decompression was measured on 2026-11-07 using three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured levels 18, 20, and 21 (100,000). Measurement details and optimization tradeoffs are recorded in the [benchmark report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
 
 Memory is whole-process peak resident set size (RSS), including the benchmark worker. On Linux, this is the current executable's `VmHWM`, excluding peaks inherited from its launcher. Code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
+
+The main matrix covers zero-filled, repeated, structured, pseudo-random, and mixed data. Additional tables below cover varied data and shorter inputs. Results depend on the compiler, input, and level; the C++ implementation does not yet outperform reference in every case.
 
 ### Compression (% of reference)
 
@@ -398,6 +400,38 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 </details>
 
 <details>
+<summary>Varied-input compression at all 22 levels</summary>
+
+Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 2, 8, and 9 use six longer alternating trials; other levels use three screening trials. High levels have very few frames, so these screening results are not confirmed performance wins. Every compression trial matched reference bytes, and both decoders recovered the input at each level. A corresponding varied-input decompression performance matrix has not been measured in this report. See the [measurement report](BENCHMARKS.md#current-all-level-varied-compression-screen-and-confirmations-2026-11-07) for corpus identity and conditions.
+
+| Level | Trials × frames | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 3 × 1164 | 3197.90 | 3193.74 | 100.13% | 5.22 | 5.95 | 87.73% | 127.60 | 632.52 | 20.17% |
+| 2 | 6 × 6743 | 3387.19 | 3739.03 | 90.59% | 5.34 | 6.15 | 86.82% | 127.95 | 632.52 | 20.23% |
+| 3 | 3 × 827 | 2606.64 | 2533.02 | 102.91% | 6.02 | 6.64 | 90.64% | 127.74 | 632.52 | 20.20% |
+| 4 | 3 × 485 | 2712.80 | 2489.31 | 108.98% | 7.58 | 7.86 | 96.52% | 127.74 | 632.52 | 20.20% |
+| 5 | 3 × 62 | 319.12 | 238.12 | 134.02% | 7.58 | 8.41 | 90.15% | 127.63 | 632.52 | 20.18% |
+| 6 | 3 × 83 | 320.46 | 307.06 | 104.37% | 7.57 | 8.38 | 90.39% | 119.20 | 632.52 | 18.85% |
+| 7 | 3 × 72 | 249.23 | 248.32 | 100.37% | 10.10 | 10.89 | 92.79% | 119.20 | 632.52 | 18.85% |
+| 8 | 6 × 390 | 192.79 | 194.91 | 98.91% | 10.07 | 10.89 | 92.50% | 119.20 | 632.52 | 18.85% |
+| 9 | 6 × 342 | 164.99 | 179.87 | 91.73% | 15.08 | 15.86 | 95.12% | 119.20 | 632.52 | 18.85% |
+| 10 | 3 × 44 | 136.30 | 126.40 | 107.83% | 15.10 | 15.91 | 94.87% | 119.21 | 632.52 | 18.85% |
+| 11 | 3 × 25 | 96.55 | 80.89 | 119.36% | 15.10 | 15.85 | 95.24% | 119.21 | 632.52 | 18.85% |
+| 12 | 3 × 29 | 99.79 | 82.06 | 121.61% | 15.10 | 15.85 | 95.24% | 119.21 | 632.52 | 18.85% |
+| 13 | 3 × 39 | 154.63 | 114.28 | 135.30% | 21.10 | 21.86 | 96.52% | 123.23 | 632.52 | 19.48% |
+| 14 | 3 × 24 | 103.29 | 72.46 | 142.55% | 21.07 | 21.88 | 96.32% | 123.23 | 632.52 | 19.48% |
+| 15 | 3 × 17 | 61.47 | 46.00 | 133.63% | 21.09 | 21.85 | 96.55% | 123.23 | 632.52 | 19.48% |
+| 16 | 3 × 3 | 9.48 | 8.45 | 112.22% | 21.32 | 21.75 | 98.04% | 149.02 | 632.52 | 23.56% |
+| 17 | 3 × 4 | 9.51 | 8.55 | 111.26% | 21.29 | 21.81 | 97.60% | 149.02 | 632.52 | 23.56% |
+| 18 | 3 × 2 | 5.96 | 6.05 | 98.48% | 21.78 | 22.32 | 97.60% | 145.41 | 632.52 | 22.99% |
+| 19 | 3 × 1 | 2.95 | 1.83 | 160.76% | 21.81 | 22.32 | 97.72% | 145.41 | 632.52 | 22.99% |
+| 20 | 3 × 1 | 3.03 | 1.83 | 165.63% | 21.80 | 22.25 | 97.98% | 145.41 | 632.52 | 22.99% |
+| 21 | 3 × 1 | 2.94 | 1.81 | 162.39% | 21.78 | 22.29 | 97.70% | 145.41 | 632.52 | 22.99% |
+| 22 | 3 × 1 | 2.96 | 1.82 | 162.67% | 21.78 | 22.23 | 98.00% | 145.41 | 632.52 | 22.99% |
+
+</details>
+
+<details>
 <summary>Level-3 compression on short inputs</summary>
 
 Measured 2026-11-07 using optimized GCC 13 workers. The 64 KiB rows use six rotating old/current/reference trials of 50,000 frames; the 256 KiB rows use six alternating current/reference trials of 12,000 frames. Values use median elapsed time and peak RSS. Every trial matched reference bytes; both decoders recovered the input. Mixed inputs contain all four patterns at each size. See [benchmark details](BENCHMARKS.md).
@@ -576,5 +610,3 @@ Each cell gives **speed / peak memory / executable size** as C++ percentages of 
 | [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
 
 The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/).
-
-Keep this README focused on library capabilities, getting started, and current performance. Record task status and next steps in the performance work list, and dated experiments—including rejected changes and their measurements—in the benchmark report. The development history is the archive of the former working README. When a retained change updates published performance, refresh the corresponding README tables and detailed benchmark matrix together.
