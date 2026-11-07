@@ -2024,3 +2024,36 @@ Candidate/reference paired ratios are 99.08% (1/6 wins) for varied and 107.54% (
 Longer confirmation used six alternating old/candidate pairs of 60,000 frames per input. Varied falls **1.51%** paired (2/6 wins; old 3588.55, candidate 3522.83 MiB/s). Mixed improves **6.63%** (6/6; old 2128.41, candidate 2266.85 MiB/s). All 24 timed workers match the already reference-verified frame and pass allocation guards; four decoder checks pass. The earlier screen plus confirmation therefore covers 60 timed workers and eight decoder checks. The candidate is **not retained** because it worsens the unresolved varied-input deficit. No broader level-3/smaller-input qualification was run after that rejection; no production or README metrics changed.
 
 The profile still identifies a useful opportunity: raw-literal assembly pays a placement-sensitive large-copy cost. The next candidate should target that copy or its destination without changing the literal source used by Huffman. Check against both short mixed and varied inputs, with isolated-worker confirmation and existing correctness/allocation guards. Avoid treating aligned source storage as a universal improvement or repeating the rejected candidate unchanged.
+
+## Raw-literal chunked append experiment (2026-11-07)
+
+Reference `ZSTD_noCompressLiterals` writes its header and calls `ZSTD_memcpy` directly into destination storage. The C++ encoder appends the payload through vector range insertion, then swaps that vector into the block output. Following the context profiles, two isolated candidates replaced that single raw-literal insert with a loop appending spans of 256 or 1,024 bytes and one final remainder. Huffman source storage, allocation policy, headers, sequence coding and callback behavior were unchanged. All source reads stay within the input span. Both candidates are under `out/raw-literal-chunks-20261107/`; production headers are unchanged.
+
+This experiment uses GCC 13 `-O3 -DNDEBUG`, level 2 with a true 256-KiB pledge, CPU 2, and separate production-style workers. The chunk loop is unconditional at the raw-literal append site in the candidate header; it has not been qualified for other levels. Four rotating old/256/1024/reference 20,000-frame trials per input gave:
+
+| Input | 256-byte paired change / wins | 1,024-byte paired change / wins |
+| --- | ---: | ---: |
+| Varied | +0.27% / 3 of 4 | −1.07% / 1 of 4 |
+| Mixed | +3.52% / 4 of 4 | +5.24% / 4 of 4 |
+
+The 256-byte version was selected for longer confirmation because its varied-input screen was neutral. Six alternating old/candidate 60,000-frame pairs gave:
+
+| Input | Old MiB/s | Candidate MiB/s | Paired change | Wins / 6 |
+| --- | ---: | ---: | ---: | ---: |
+| Varied | 3524.89 | 3531.38 | −0.15% | 3 |
+| Mixed | 2101.44 | 2238.04 | +5.10% | 6 |
+
+Qualification then checked four further deterministic inputs (first 256 KiB of the corresponding main-matrix input), with six rotating old/candidate/reference trials of 10,000 frames:
+
+| Input | Old MiB/s | Candidate MiB/s | Reference MiB/s | Paired change vs old | Wins / 6 | Paired % reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Zero | 26586.01 | 25529.84 | 9689.99 | −4.81% | 1 | 264.03% |
+| Repeated | 22449.48 | 22670.11 | 7736.43 | +0.67% | 4 | 292.35% |
+| Structured | 864.80 | 833.04 | 829.63 | −2.63% | 0 | 101.66% |
+| Random | 3336.65 | 3330.99 | 2671.29 | −2.08% | 1 | 128.61% |
+
+Ratios use medians of per-trial ratios, so they need not equal ratios of independent throughput medians. Zero-filled runs are short and have not received longer confirmation; that RLE input does not directly exercise the changed copy loop. Its apparent change cannot be attributed to copy-loop cost. Structured input loses in all six pairs and reduces its margin over reference, while mixed retains its gain. These results do not establish whether register pressure, code placement, timing variability, or copy call overhead explains the regressions.
+
+The unconditional candidate is **not retained**. Both candidate executables remain 133.289 KiB (same whole-file size as baseline; this does not imply unchanged instructions). All 128 timed workers across screening, confirmation and qualification passed allocation guards and byte comparisons; confirmation frames were additionally hashed against reference output. Sixteen reciprocal decoder checks passed. This rejected candidate did not receive broad all-level or sanitizer qualification. The prepared `zero-confirm.py` was not run after the broader tradeoff was established. No README metrics change.
+
+Next: compare generated code around raw-literal assembly and test a separate non-inlined chunk helper, so the loop's temporaries do not extend into the surrounding encoder. Treat reduced register pressure as a hypothesis until assembly and measurements support it. If that passes mixed/varied/structured controls, enable only the measured short level-2 specialization, run full acceptance tests, and publish all nine metrics from isolated reference comparisons. Evidence: `out/raw-literal-chunks-20261107/{screen,confirmation,other-shapes}/`, preparation/run scripts and copied candidate headers.
