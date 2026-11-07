@@ -2,6 +2,8 @@
 
 Measured 2026-11-06 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. Decompression was refreshed on 2026-11-07 after bounded short-overlap copying: three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured levels 18, 20, and 21 (100,000). The change improves structured level 1 but trades about 2.70% of mixed level-3 throughput against the previous C++ build; see the [experiment report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
 
+Structured level-5 compression was reconfirmed on 2026-11-07 with six alternating 10,000-frame pairs; this refresh is stronger measurement evidence, not a code change. See the [report](BENCHMARKS.md#structured-level-5-confirmation-and-decoder-profile-2026-11-07).
+
 Linux memory measurements use `/proc/self/status` `VmHWM` for the current executable, excluding launcher peaks inherited across execution. This includes the whole worker, not just library allocations; reporting occurs outside the timed operation.
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
@@ -74,7 +76,7 @@ Levels 8 and 9 compression were refreshed on 2026-11-07 after keeping the row-in
 | structured | 2 | 947.05 | 861.70 | 109.90% | 5.50 | 6.23 | 88.24% | 129.11 | 632.52 | 20.41% |
 | structured | 3 | 781.37 | 741.73 | 105.34% | 6.19 | 6.76 | 91.59% | 127.75 | 632.52 | 20.20% |
 | structured | 4 | 710.16 | 701.63 | 101.21% | 7.76 | 7.99 | 97.04% | 127.75 | 632.52 | 20.20% |
-| structured | 5 | 1059.77 | 1065.72 | 99.44% | 7.73 | 8.47 | 91.24% | 127.64 | 632.52 | 20.18% |
+| structured | 5 | 1059.29 | 1041.81 | 101.68% | 7.74 | 8.52 | 90.81% | 127.64 | 632.52 | 20.18% |
 | structured | 6 | 2662.04 | 2049.38 | 129.89% | 7.60 | 8.40 | 90.49% | 119.21 | 632.52 | 18.85% |
 | structured | 7 | 2324.73 | 1603.54 | 144.97% | 10.08 | 10.86 | 92.86% | 119.21 | 632.52 | 18.85% |
 | structured | 8 | 1690.19 | 1252.23 | 134.97% | 10.10 | 10.85 | 93.03% | 119.21 | 632.52 | 18.85% |

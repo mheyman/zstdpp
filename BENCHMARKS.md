@@ -1,5 +1,15 @@
 # Benchmark results
 
+## Structured level-5 confirmation and decoder profile (2026-11-07)
+
+Six alternating current/reference level-5 compression pairs, 10,000 frames each, generic optimized GCC 13 on CPU 2, measured structured input at 1059.29/1041.81 MiB/s. Median paired throughput is 101.37% of reference, with five of six wins. The old 99.4% screening result does not establish a stable deficit. All 12 workers produced reference-identical frames and passed allocation guards; both decoders recovered the input. No implementation changed. The README and detailed matrix now show all nine metrics from this longer confirmation: C++/reference RSS 7.73828125/8.521484375 MiB, executable size 127.640625/632.515625 KiB. Evidence and identities: `out/l5-structured-confirm-20261107/`.
+
+The remaining structured decoder deficit has stronger prior confirmation. Fresh matched level-18 profiles each decoded 200,000 frames on CPU 2 using `perf record -e cycles:u -c 1000003`. Both workers passed output/allocation checks; both profiles have zero lost and zero throttled samples. Approximate sampled cycles: C++ 46.718 billion, reference 46.286 billion. C++ self shares are sequence decoder 57.20%, enclosing `parse()` 29.13%, exact small-match helper 9.53%, libc copy 3.39%. Reference self shares are sequence decoder 88.83%, safe copy 5.14%, FSE table construction 4.69%. Function boundaries differ; those shares cannot be subtracted as equivalent-stage costs.
+
+Assembly localizes nearly all of the C++ `parse()` samples to its inlined 32-byte forward-copy loop for overlapping matches with offset at least 1024 and length at least 64. The hot range is `d528`–`d549`; the loop computes source/destination addresses from an integer position each iteration and uses two 16-byte loads/stores. This is evidence to investigate long-copy execution, not evidence of table-building or allocation overhead in `parse()`. Sampling skid prevents attributing the cost to a single load or compare. Profile data, annotation, and throttle audit: `out/structured-decoder-current-20261107/`.
+
+Next compare the hot loop against prior long-copy experiments and reference `ZSTD_wildcopy`. Test only a distinct dataflow change, preserving forward overlap order, exact output bounds, and no new allocations. Keep structured18/shared19–22, mixed3, and structured1 controls; previously rejected wider copies, whole-decoder batching, and mask-table variants are not justified by this profile alone. The all-level goal remains open.
+
 ## Compact level-1 paired-state batching retained (2026-11-07)
 
 GCC 13's compact fast path now tries the existing paired LL/ML FSE writer when LL is non-RLE, OF is RLE code zero, and there are more than 256 sequences. The helper validates common length codes and zero-bit transition spans before changing output; ineligible blocks retain the scalar writer. No persistent workspace or heap allocation is added. Other compiler policies are unchanged.
