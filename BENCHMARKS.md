@@ -1,5 +1,31 @@
 # Benchmark results
 
+## MSVC zero-literal sequence specialization, 2026-11-06
+
+Tracing the structured level-16 frame found three blocks containing 2,972 sequences whose literal-length table is constant zero. The retained general decoder performed literal-copy and length/state work for those sequences. An MSVC-only specialization now recognizes explicit zero-symbol RLE tables or repeated zero-literal tables once per padded non-medium block, then uses a compile-time zero literal entry and omits literal copying and literal-state updates. All table loading, repeat eligibility, output/history bounds, and bitstream-end validation remain in place. Nonzero constant tables retain the general path. GCC's path is unchanged.
+
+This differs from the rejected arbitrary-entry cache and clone: zero literals also make the repeat-offset zero/nonzero decision constant and eliminate speculative padded literal copies. The selected block repeats its inexpensive count/header parsing but loads and validates tables only once.
+
+Four fresh executable copies per version and two rotating pairs per case produced 144 old/new C++ worker measurements on CPU 2. These percentages compare against the previous **C++ decoder**, not reference zstd. Each worker checks decoded output at warmup and rejects ordinary allocations during timing.
+
+| Input / frame level | Median paired throughput change | Faster pairs |
+| --- | ---: | ---: |
+| Structured 16 | +11.47% | 8/8 |
+| Structured 18 | +0.82% | 8/8 |
+| Structured 6 | +1.05% | 8/8 |
+| Structured 19 | +1.01% | 7/8 |
+| Structured 2 | +0.10% | 6/8 |
+| Mixed 3 | +0.61% | 5/8 |
+| Repeated 3 | -0.79% | 3/8 |
+| Zero 3 | +0.23% | 5/8 |
+| Random 2 | +2.63% | 6/8 |
+
+The four level-16 copy medians improve 8.75–12.72%. Keep the repeated-input tradeoff visible; raw-input copy medians are noisy (-0.47% to +8.57%), so that result does not establish a reliable gain. All cases use 30,000 decodes per worker except structured2 at 10,000 and random2 at 100,000. Inputs produce 1 MiB. Source snapshots, binaries, hashes, scripts and measurements are in `out/msvc-zero-literal-20261106/{multi-image,extended}` and its parent directory. Executable size increases from 102.50 to 106.00 KiB.
+
+Final validation passed: MSVC unit tests, 48,142 malformed-frame cases, and compression/interoperability acceptance (292.52 seconds total), plus all 14 GCC tests (27.26 seconds). The GCC worker is byte-identical to its prior build, SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`. The final native `.text` exactly matches the screened candidate: 74,225 bytes, SHA-256 `cbdc2cde840f1589aff7f5f4987f6e19414ed7fdda3c0c97f2893799b3376c92`. Logs and hash verification are preserved with the experiment artifacts.
+
+The final 678-trial native refresh updates all 110 level/input rows and all nine metrics in README and [BENCHMARKS_NATIVE.md](BENCHMARKS_NATIVE.md), preserving the GCC tables. Structured16 measures 21,673.98/19,540.50 MiB/s (110.92% of reference), with C++/reference memory 6.91/6.82 MiB (101.32%) and executable size 106.00/113.50 KiB (93.39%). Structured17/18/19 measure 109.71%/100.85%/101.98%; structured6 reaches 102.82%. Mixed3 measures 8,800.05/5,380.25 MiB/s (163.56%), memory 7.19/7.09 MiB (101.32%), and the same executable sizes. The native timing caveat still applies. Worker hashes match the recorded provenance; full trials are in `out/msvc-zero-literal-20261106/current-matrix/`. Remaining GCC and native deficits keep the all-level objective incomplete.
+
 ## Scoped MSVC long-overlap helper, 2026-11-06
 
 The general decoder now uses an outlined 32-byte pointer-copy loop for long overlapping matches. The medium-block specialization retains its original inline loop: outlining that specialization regressed the isolated first-block control by 4.23%. Chunk width, the exact final chunk, and the caller's offset/length checks are unchanged; this adds no allocations or output padding requirements. GCC keeps its original implementation.

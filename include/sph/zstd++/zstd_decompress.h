@@ -1266,7 +1266,11 @@ namespace sph::zstd
             }
         }
 
+#if defined(_MSC_VER)
+        template <bool LiteralsPadded, bool MediumMatchCopy = false, bool ZeroLiteral = false>
+#else
         template <bool LiteralsPadded, bool MediumMatchCopy = false>
+#endif
         [[nodiscard]] auto decode_sequences_impl(
             std::span<std::uint8_t const> source,
             std::span<std::uint8_t const> literals) -> std::span<std::uint8_t const>
@@ -1293,6 +1297,19 @@ namespace sph::zstd
             {
                 throw detail::entropy_error{"reserved Zstandard sequence-header bits are set"};
             }
+#if defined(_MSC_VER)
+            if constexpr (LiteralsPadded && !MediumMatchCopy && !ZeroLiteral)
+            {
+                // Dispatch before loading tables. The specialization still
+                // validates their symbols and repeat eligibility below.
+                auto const literal_mode{modes >> 6U};
+                if ((literal_mode == 1U && offset < source.size() && source[offset] == 0U) ||
+                    (literal_mode == 3U && literal_length_table_.table_log == 0U &&
+                        literal_length_table_.entries[0].base_value == 0U &&
+                        literal_length_table_.entries[0].additional_bits == 0U))
+                    return decode_sequences_impl<LiteralsPadded, MediumMatchCopy, true>(source, literals);
+            }
+#endif
             load_sequence_table(literal_length_table_, sequence_caches_->literal_length,
                 sequence_caches_->literal_length_extra,
                 static_cast<std::uint8_t>(modes >> 6U), source, offset,
@@ -1383,7 +1400,14 @@ namespace sph::zstd
                 std::memcpy(&offset_entry, offset_entries + offset_state, sizeof(offset_entry));
                 std::memcpy(&match_entry, match_entries + match_state, sizeof(match_entry));
 #else
+#if defined(_MSC_VER)
+                auto const literal_entry = [&] {
+                    if constexpr (ZeroLiteral) return detail::sequence_entry{};
+                    else return literal_entries[literal_state];
+                }();
+#else
                 auto const literal_entry{literal_entries[literal_state]};
+#endif
                 auto const offset_entry{offset_entries[offset_state]};
                 auto const match_entry{match_entries[match_state]};
 #endif
@@ -1468,7 +1492,14 @@ namespace sph::zstd
                 auto const* const sequence_literal_data{literal_data + literal_offset};
                 literal_offset += literal_length;
 #if defined(_MSC_VER)
-                if constexpr (LiteralsPadded && MediumMatchCopy)
+                if constexpr (ZeroLiteral)
+                {
+                    // No literal bytes belong to these sequences; avoid even
+                    // the padded path's speculative fixed-width literal copy.
+                    append_sequence<false, trusted_input, MediumMatchCopy>(output,
+                        sequence_literal_data, 0U, match_offset, match_length);
+                }
+                else if constexpr (LiteralsPadded && MediumMatchCopy)
                 {
                     if (literal_length == 3U && match_length == 146U && match_offset >= 146U)
                     {
@@ -1536,7 +1567,12 @@ namespace sph::zstd
                         (state_value & ((std::uint32_t{1} << offset_state_bits) - 1U));
 #else
 #if defined(_MSC_VER)
-                    if constexpr (MediumMatchCopy || LiteralsPadded)
+                    if constexpr (ZeroLiteral)
+                    {
+                        match_state = static_cast<std::size_t>(match_entry.next_state) +
+                            (match_entry.state_bits == 0U ? 0U : read_sequence_bits(match_entry.state_bits));
+                    }
+                    else if constexpr (MediumMatchCopy || LiteralsPadded)
                     {
                         // Pair the adjacent LL/ML fields, leaving OF independent
                         // to limit splitting work and live values in MSVC's loop.
