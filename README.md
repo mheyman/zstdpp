@@ -462,11 +462,11 @@ Measured 2026-11-07 using optimized GCC 13 workers. The 64 KiB rows use six rota
 <details>
 <summary>Level-2 compression on 256 KiB inputs</summary>
 
-Measured 2026-11-07 with optimized GCC 13 workers, six alternating C++/reference trials of 60,000 frames for varied input, and six rotating trials of 12,000 frames for mixed input. Every frame matched reference bytes and both decoders recovered the input. Values are median throughput, whole-process peak RSS, and complete executable size. See the [measurement report](BENCHMARKS.md#short-level-2-confirmation-and-folded-match-comparison-2026-11-07) for conditions and variability.
+Measured 2026-11-07 with optimized GCC 13 workers, six alternating C++/reference trials of 60,000 frames for varied input, and six rotating trials of 12,000 frames for mixed input. Every frame matched reference bytes and both decoders recovered the input. Values are median throughput, whole-process peak RSS, and complete executable size. See the [measurement report](BENCHMARKS.md#short-level-2-confirmation-and-folded-match-comparison-2026-11-07) for conditions and variability. The varied row uses the [fresh current-build confirmation](BENCHMARKS.md#fresh-short-level-2-baseline-and-fse-mode-audit-2026-11-07).
 
 | Input | Size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| varied | 256 | 3543.95 | 3569.72 | 99.28% | 4.48 | 4.47 | 100.22% | 133.29 | 632.52 | 21.07% |
+| varied | 256 | 3498.72 | 3631.33 | 96.35% | 4.50 | 4.48 | 100.39% | 133.29 | 632.52 | 21.07% |
 | mixed | 256 | 2123.26 | 2093.63 | 101.42% | 4.71 | 4.50 | 104.51% | 133.29 | 632.52 | 21.07% |
 
 </details>
