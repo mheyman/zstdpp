@@ -4187,6 +4187,48 @@ namespace sph::zstd::detail
             }
         }
 
+
+        // Describe contiguous zero-bit transitions with the same state increment.
+        // A missing limit means the caller must use ordinary FSE transitions.
+        struct linear_span {
+            struct range { std::uint16_t end; std::uint16_t delta; };
+            unsigned limit{};
+            unsigned count{};
+            std::array<range,8> ranges{};
+        };
+        [[nodiscard]] auto find_linear_span(unsigned symbol) const -> linear_span {
+            linear_span result;
+            if (table_->run_length_symbol) return result;
+            auto const t=table_->transforms[symbol];
+            if (t.delta_number_bits >= (1U<<16U)) return result;
+            auto const begin=1U<<table_->table_log;
+            auto const end=std::min(2U*begin,(1U<<16U)-t.delta_number_bits);
+            if(end<=begin) return result;
+            auto const offset=static_cast<std::uint32_t>(t.delta_find_state);
+            for(auto v=begin;v<end;++v) {
+                auto const delta=static_cast<std::uint32_t>(table_->states[v+offset])-v;
+                if(delta>begin) return result;
+                if(result.count==0U || result.ranges[result.count-1U].delta!=delta) {
+                    if(result.count==result.ranges.size()) return result;
+                    result.ranges[result.count++]={static_cast<std::uint16_t>(v+1U),static_cast<std::uint16_t>(delta)};
+                } else result.ranges[result.count-1U].end=static_cast<std::uint16_t>(v+1U);
+            }
+            result.limit=end;
+            return result;
+        }
+        struct zero_step { std::size_t count; unsigned delta; };
+        [[nodiscard]] auto zero_capacity(linear_span const& span, std::size_t maximum) const -> zero_step {
+            if(value_>=span.limit) return {0U,0U};
+            for(unsigned i{};i<span.count;++i) {
+                auto const r=span.ranges[i];
+                if(value_<r.end) return {r.delta==0U ? maximum : std::min(maximum,static_cast<std::size_t>((r.end-1U-value_)/r.delta+1U)),r.delta};
+            }
+            return {0U,0U};
+        }
+        void advance_zero(unsigned delta,std::size_t count) {
+            value_+=static_cast<std::uint32_t>(count)*delta;
+        }
+
     private:
         fse_compression_table const* table_{};
         std::uint32_t value_{};
@@ -5814,6 +5856,97 @@ namespace sph::zstd::detail
         basic_compression_workspace<AlignedLiterals>& workspace, std::vector<std::uint8_t>& output,
         bool optimal_depth = false, std::size_t minimum_gain = 0U) -> bool;
 
+    // The caller guarantees an OF-RLE zero code and more than 256 sequences.
+    // Keep batching state separate from the ordinary writer. Nothing is emitted
+    // until both symbol ranges have been validated; rejected tables use fallback.
+    template <bool DirectOffBase, bool AlignedLiterals, typename ParsedView>
+#if defined(__GNUC__)
+    [[gnu::noinline]]
+#elif defined(_MSC_VER)
+    __declspec(noinline)
+#endif
+    bool try_write_paired_sequence_bitstream(ParsedView const& parsed,
+        basic_compression_workspace<AlignedLiterals>& workspace,
+        selected_sequence_table const& literal_table,
+        selected_sequence_table const& offset_table,
+        selected_sequence_table const& match_selection,
+        std::vector<std::uint8_t>& output)
+    {
+        fse_compression_state literal_state{*literal_table.table};
+        fse_compression_state offset_state{*offset_table.table};
+        fse_compression_state match_state{*match_selection.table};
+        auto const last_index{parsed.sequences.size() - 1U};
+        auto const& last{parsed.sequences[last_index]};
+        auto const last_ll{workspace.literal_codes[last_index]};
+        auto const last_of{workspace.offset_codes[last_index]};
+        auto const last_ml{workspace.match_codes[last_index]};
+        auto const last_offset{DirectOffBase ? last.offset : last.repeat_code != 0U ?
+            static_cast<std::uint32_t>(last.repeat_code) : last.offset + 3U};
+        literal_state.initialize(last_ll);
+        offset_state.initialize(last_of);
+        match_state.initialize(last_ml);
+
+
+        auto const middle=last_index/2U;
+        auto const common_ll=workspace.literal_codes[middle];
+        auto const common_ml=workspace.match_codes[middle];
+        if(literal_length_bits[common_ll]!=0U || match_length_bits[common_ml]!=7U) return false;
+        auto const ll_span=literal_state.find_linear_span(common_ll);
+        auto const ml_span=match_state.find_linear_span(common_ml);
+        if(ll_span.limit==0U || ml_span.limit==0U) return false;
+        auto& bits=workspace.wide_sequence_bits;
+        bits.reset(output);
+        bits.append(last.literal_length,literal_length_bits[last_ll]);
+        bits.append(last.match_length-3U,match_length_bits[last_ml]);
+        bits.append(last_offset,last_of);
+        auto remaining=last_index;
+        auto emit_one=[&](std::size_t index) {
+            auto const ll=workspace.literal_codes[index];
+            auto const ml=workspace.match_codes[index];
+            auto const mb=match_state.template encode_bits<true>(ml);
+            auto const lb=literal_state.template encode_bits<true>(ll);
+            bits.append_unchecked(mb.value|(lb.value<<mb.count),mb.count+lb.count);
+            bits.append(parsed.sequences[index].literal_length,literal_length_bits[ll]);
+            bits.append(parsed.sequences[index].match_length-3U,match_length_bits[ml]);
+        };
+        auto const ll_pattern=std::uint64_t{0x0101010101010101ULL}*common_ll;
+        auto const ml_pattern=std::uint64_t{0x0101010101010101ULL}*common_ml;
+        while(remaining!=0U) {
+            auto first=remaining;
+            while(first>=8U) {
+                std::uint64_t lw,mw;
+                std::memcpy(&lw,workspace.literal_codes.data()+first-8U,8U);
+                std::memcpy(&mw,workspace.match_codes.data()+first-8U,8U);
+                if(lw!=ll_pattern || mw!=ml_pattern) break;
+                first-=8U;
+            }
+            while(first!=0U && workspace.literal_codes[first-1U]==common_ll && workspace.match_codes[first-1U]==common_ml) --first;
+            if(first==remaining) { emit_one(--remaining); continue; }
+            while(remaining>first) {
+                auto const capacity=literal_state.zero_capacity(ll_span,remaining-first);
+                auto const ml_capacity=match_state.zero_capacity(ml_span,capacity.count);
+                auto count=ml_capacity.count;
+                if(count==0U) { emit_one(--remaining); continue; }
+                literal_state.advance_zero(capacity.delta,count);
+                match_state.advance_zero(ml_capacity.delta,count);
+                while(count>=4U) {
+                    auto const a=(parsed.sequences[remaining-1U].match_length-3U)&127U;
+                    auto const b=(parsed.sequences[remaining-2U].match_length-3U)&127U;
+                    auto const c=(parsed.sequences[remaining-3U].match_length-3U)&127U;
+                    auto const d=(parsed.sequences[remaining-4U].match_length-3U)&127U;
+                    bits.append_unchecked(a|(b<<7U)|(c<<14U)|(d<<21U),28U);
+                    count-=4U;remaining-=4U;
+                }
+                while(count!=0U) {
+                    bits.append(parsed.sequences[--remaining].match_length-3U,7U);
+                    --count;
+                }
+            }
+        }
+        match_state.flush(bits);offset_state.flush(bits);literal_state.flush(bits);
+        bits.finish_into(output);return true;
+    }
+
     // Keep the entropy/table selection shared when a block chooses its bit writer.
     template <bool Wide, bool Grouped, bool DoubleRleShortcut = false, bool DirectOffBase = false,
         bool AlignedLiterals, typename ParsedView>
@@ -5824,6 +5957,12 @@ namespace sph::zstd::detail
         selected_sequence_table const& match_selection,
         std::vector<std::uint8_t>& output)
     {
+        if constexpr(Wide && Grouped) {
+            if(literal_table.mode!=sequence_table_mode::run_length &&
+               offset_table.mode==sequence_table_mode::run_length &&
+               parsed.sequences.size()>256U && workspace.offset_codes[parsed.sequences.size()-1U]==0U &&
+               try_write_paired_sequence_bitstream<DirectOffBase>(parsed,workspace,literal_table,offset_table,match_selection,output)) return;
+        }
         fse_compression_state literal_state{*literal_table.table};
         fse_compression_state offset_state{*offset_table.table};
         fse_compression_state match_state{*match_selection.table};

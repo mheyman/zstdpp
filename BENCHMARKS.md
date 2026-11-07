@@ -2,6 +2,33 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Paired length-state batching retained, 2026-11-07
+
+Retained the standalone LL/ML batching writer after broader input and short-input controls. The existing adaptive wide writer selects it only for non-RLE literal tables, OF-RLE code zero, and more than256 sequences. The helper validates up to eight contiguous constant-increment zero-bit ranges for the selected LL/ML codes before writing output. It then advances both states over bounded matching-code runs, packs four actual seven-bit match-length payloads at a time, and uses ordinary transitions for exceptions and emitting boundaries. Unsupported tables fall back without changing output. The helper owns its state separately from the ordinary writer; no heap allocation, persistent cache or workspace growth is added. Attributes are guarded for GCC-compatible compilers and MSVC. No native MSVC performance claim is made.
+
+The decision accepts measured structured/mixed costs to close the larger varied gap while keeping the five main1-MiB shapes faster than reference. Six rotating old/current/reference triples per input give paired changes: varied+7.24%(6/6),repeated+13.83%(6/6),zero+0.36%(4/6),random+0.51%(4/6),structured-5.66%(0/6),mixed-3.85%(0/6). Structured/mixed remain110.52%/118.26% of reference by paired medians. Varied remains98.78% reference paired, not a completed speed objective. These timing effects include generated-code changes outside the eligible batching path; do not attribute every input's gain or loss to fewer FSE transitions.
+
+Measurements use optimized GCC13 `-O3 -DNDEBUG`, CPU2, saved production baseline5655a4f. Each trial uses10,000 frames except structured2,000 and random4,000. All108 frames match reference and C++ workers pass ordinary/aligned allocation guards;12 decoder checks recover inputs. The integrated level2 worker is byte-identical to the measured standalone candidate (SHA256 `60cc554039441510da09e5d0dec7162e80e33eecc1bb8bba2e159030d068a3ea`); rebuilt1/3/18 workers are byte-identical to their predecessors. The executable grows904 bytes to129.1015625KiB. Ratios of speed medians below differ from paired medians above; memory is whole-process peak RSS.
+
+| Input | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| varied | 3652.62 | 3708.97 | 98.48% | 5.33 | 6.11 | 87.33% | 129.10 | 632.52 | 20.41% |
+| mixed | 3180.48 | 2664.42 | 119.37% | 5.64 | 6.27 | 89.88% | 129.10 | 632.52 | 20.41% |
+| structured | 957.31 | 864.72 | 110.71% | 5.50 | 6.26 | 87.80% | 129.10 | 632.52 | 20.41% |
+| zero | 39569.14 | 11551.58 | 342.54% | 5.30 | 6.13 | 86.34% | 129.10 | 632.52 | 20.41% |
+| repeated | 26773.48 | 14091.64 | 190.00% | 5.34 | 6.13 | 87.09% | 129.10 | 632.52 | 20.41% |
+| random | 3670.40 | 2661.78 | 137.89% | 6.31 | 6.23 | 101.38% | 129.10 | 632.52 | 20.41% |
+
+Six rotating12,000-frame triples on genuine256-KiB inputs also pass all36 frame/allocation checks and four decoder checks. Varied improves1.69%(5/6),3464.94→3506.19MiB/s versus reference3594.19; mixed loses3.24%(0/6),2204.12→2120.19 versus reference2081.59. Paired reference ratios are98.29%/102.13%; the short mixed lead is narrow. Full nine-metric short results are in `short/results/summary.json`, alongside raw trials and identities.
+
+Strict unit, compact-sequence, FSE-transition and all22-level byte-parity/interoperability tests pass in19.49s (acceptance18.56s). Permanent FSE tests now include2,160 scalar-versus-paired stream cases with table logs5/7/9, rare counts-1/1/2/3/7/15, changing payloads, interrupted runs, dispatch boundaries and output prefixes. The full FSE test binary passes ASan/UBSan, including the existing3,676,128 randomized index cases and612 zero-extra run stream cases. Acceptance also exercises256-KiB level2.
+
+Two additional controls were not retained. Forcing the ordinary sequence writer inline gives varied+7.85%(6/6),mixed-6.31%(1/6), and grows the worker to132.7109375KiB. Extending batching to non-RLE offset states for the first varied block passes6,480 sanitizer stream cases but yields varied+6.06%(6/6),mixed-4.88%(1/6), worker133.7421875KiB. Each control's36 timing frames and four decoder checks pass. Neither improves the standalone tradeoff; avoid more inlining variants without new evidence.
+
+README and BENCHMARKS_INPUTS refresh all nine metrics for level2's main five inputs; README also refreshes varied2. Other levels and all decoder rows are preserved. Artifacts: `out/standalone-paired-fse-20261107/` (`final/`, `controls/`, `short/`, `integrated/`, renderer and validation scripts); rejected controls under `out/paired-fse-inline-writer-20261107/` and `out/three-state-fse-runs-20261107/`.
+
+Next compare fresh matched integrated/reference phase profiles for the remaining varied2 gap. The earlier standalone profile places52.39% of cycles in parsing and only2.70% in the new helper; its small residual cost does not justify an endless sequence of batching microvariants. High-level decoder and other near-parity gaps remain open. This is an incremental retained improvement, not completion of the all-level goal.
+
 ## Mixed-input batching regression and state-isolation controls, 2026-11-07
 
 Continuing the paired LL/ML experiment, sampled mixed-input cycles with the saved production baseline and outlined candidate for 30,000 frames each. Both captures have zero lost samples and zero throttle records. Approximate sampled totals are 40.893B versus 45.061B cycles. The candidate has separate `encode_bits<true>` (7.06%), `count_matching_bytes` (6.74%) and dominant-prefix counting (5.75%) symbols above the report threshold; none appears separately above 0.5% in the baseline. Baseline parser/encoder shares are 60.29%/23.92%, candidate 49.80%/18.59%. Different inlining means these percentages cannot be compared as equal source scopes, nor do they prove code alignment is the cause. Annotated assembly confirms changed FSE call sites; both binaries still have some non-inlined FSE transitions.
@@ -201,6 +228,8 @@ The candidate is rejected: recovering an already-leading repeated workload does 
 These notes record which measurements populate the current README tables. Keep future refresh history here, with implementation decisions and next steps in [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md). The README presents the library and the latest published comparisons.
 
 Measured 2026-11-06 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
+
+Level-2 compression was refreshed on 2026-11-07 with six rotating trials per input after [paired length-state batching](#paired-length-state-batching-retained-2026-11-07): 10,000 frames per trial except structured (2,000) and random (4,000). Varied uses 10,000; the additional 256 KiB level-2 rows use 12,000.
 
 Level-3 compression was refreshed on 2026-11-07. Levels 3 and 4 use six alternating 3,000-frame compression trials per input.
 

@@ -16,14 +16,14 @@ Six-trial compression confirmations on 2026-11-07 refresh structured levels 2, 5
 
 Level-1 compression was refreshed on 2026-11-07 with six rotating old/current/reference trials per input after the fixed-length FSE writer change; see the [measurement report](BENCHMARKS.md#fixed-length-fse-writer-retained-2026-11-07).
 
-Level-2 compression was refreshed on 2026-11-07 after batching zero-extra-bit FSE runs, using six rotating old/current/reference trials per input. See the [retained-change report](BENCHMARKS.md#batched-zero-extra-bit-fse-runs-retained-2026-11-07) for conditions and tradeoffs.
+Level-2 compression was refreshed on 2026-11-07 after batching paired length-state FSE runs, using six rotating old/current/reference trials per input. See the [retained-change report](BENCHMARKS.md#paired-length-state-batching-retained-2026-11-07) for conditions and tradeoffs.
 
 ## Compression
 
 | Input | Level | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | zero | 1 | 40606.25 | 8546.58 | 475.12% | 5.20 | 5.90 | 88.11% | 127.79 | 632.52 | 20.20% |
-| zero | 2 | 39355.72 | 11367.36 | 346.22% | 5.33 | 6.12 | 87.19% | 128.22 | 632.52 | 20.27% |
+| zero | 2 | 39569.14 | 11551.58 | 342.54% | 5.30 | 6.13 | 86.34% | 129.10 | 632.52 | 20.41% |
 | zero | 3 | 19775.78 | 7408.62 | 266.93% | 5.98 | 6.57 | 91.03% | 127.74 | 632.52 | 20.20% |
 | zero | 4 | 20058.71 | 7477.82 | 268.24% | 7.56 | 7.87 | 96.10% | 127.74 | 632.52 | 20.20% |
 | zero | 5 | 9457.89 | 4685.44 | 201.86% | 7.56 | 8.41 | 89.92% | 127.63 | 632.52 | 20.18% |
@@ -45,7 +45,7 @@ Level-2 compression was refreshed on 2026-11-07 after batching zero-extra-bit FS
 | zero | 21 | 6933.35 | 1454.68 | 476.62% | 21.77 | 22.20 | 98.06% | 145.41 | 632.52 | 22.99% |
 | zero | 22 | 6918.63 | 1442.57 | 479.61% | 21.77 | 22.27 | 97.77% | 145.41 | 632.52 | 22.99% |
 | repeated | 1 | 23712.82 | 9944.85 | 238.44% | 5.21 | 5.92 | 87.99% | 127.79 | 632.52 | 20.20% |
-| repeated | 2 | 23301.69 | 14002.40 | 166.41% | 5.31 | 6.14 | 86.57% | 128.22 | 632.52 | 20.27% |
+| repeated | 2 | 26773.48 | 14091.64 | 190.00% | 5.34 | 6.13 | 87.09% | 129.10 | 632.52 | 20.41% |
 | repeated | 3 | 14523.56 | 7851.18 | 184.99% | 6.00 | 6.63 | 90.51% | 127.74 | 632.52 | 20.20% |
 | repeated | 4 | 15039.63 | 8032.12 | 187.24% | 7.58 | 7.81 | 97.00% | 127.74 | 632.52 | 20.20% |
 | repeated | 5 | 8286.91 | 5051.70 | 164.04% | 7.58 | 8.34 | 90.94% | 127.63 | 632.52 | 20.18% |
@@ -67,7 +67,7 @@ Level-2 compression was refreshed on 2026-11-07 after batching zero-extra-bit FS
 | repeated | 21 | 1831.10 | 1457.36 | 125.64% | 21.77 | 22.29 | 97.68% | 145.41 | 632.52 | 22.99% |
 | repeated | 22 | 1823.61 | 1446.32 | 126.09% | 21.77 | 22.26 | 97.79% | 145.41 | 632.52 | 22.99% |
 | structured | 1 | 741.18 | 684.54 | 108.28% | 5.32 | 6.14 | 86.61% | 127.79 | 632.52 | 20.20% |
-| structured | 2 | 989.03 | 844.95 | 117.05% | 5.48 | 6.23 | 87.84% | 128.22 | 632.52 | 20.27% |
+| structured | 2 | 957.31 | 864.72 | 110.71% | 5.50 | 6.26 | 87.80% | 129.10 | 632.52 | 20.41% |
 | structured | 3 | 781.37 | 741.73 | 105.34% | 6.19 | 6.76 | 91.59% | 127.74 | 632.52 | 20.20% |
 | structured | 4 | 710.16 | 701.63 | 101.21% | 7.76 | 7.99 | 97.04% | 127.74 | 632.52 | 20.20% |
 | structured | 5 | 1059.77 | 1065.72 | 99.44% | 7.73 | 8.47 | 91.24% | 127.63 | 632.52 | 20.18% |
@@ -89,7 +89,7 @@ Level-2 compression was refreshed on 2026-11-07 after batching zero-extra-bit FS
 | structured | 21 | 229.28 | 193.81 | 118.30% | 21.85 | 22.25 | 98.21% | 145.41 | 632.52 | 22.99% |
 | structured | 22 | 225.04 | 193.74 | 116.16% | 21.85 | 22.35 | 97.75% | 145.41 | 632.52 | 22.99% |
 | random | 1 | 3829.86 | 2889.39 | 132.55% | 6.16 | 6.00 | 102.70% | 127.79 | 632.52 | 20.20% |
-| random | 2 | 3687.32 | 2947.63 | 125.09% | 6.29 | 6.22 | 101.10% | 128.22 | 632.52 | 20.27% |
+| random | 2 | 3670.40 | 2661.78 | 137.89% | 6.31 | 6.23 | 101.38% | 129.10 | 632.52 | 20.41% |
 | random | 3 | 3548.64 | 2559.98 | 138.62% | 6.97 | 6.66 | 104.63% | 127.74 | 632.52 | 20.20% |
 | random | 4 | 3561.16 | 2677.44 | 133.01% | 8.55 | 7.97 | 107.30% | 127.74 | 632.52 | 20.20% |
 | random | 5 | 2510.75 | 1881.33 | 133.46% | 8.54 | 8.45 | 101.18% | 127.63 | 632.52 | 20.18% |
@@ -111,7 +111,7 @@ Level-2 compression was refreshed on 2026-11-07 after batching zero-extra-bit FS
 | random | 21 | 12.31 | 11.61 | 106.07% | 23.00 | 22.38 | 102.73% | 145.41 | 632.52 | 22.99% |
 | random | 22 | 14.17 | 11.50 | 123.15% | 22.99 | 22.41 | 102.61% | 145.41 | 632.52 | 22.99% |
 | mixed | 1 | 2584.80 | 2204.58 | 117.25% | 5.50 | 6.14 | 89.57% | 127.79 | 632.52 | 20.20% |
-| mixed | 2 | 3286.82 | 2666.22 | 123.28% | 5.65 | 6.24 | 90.60% | 128.22 | 632.52 | 20.27% |
+| mixed | 2 | 3180.48 | 2664.42 | 119.37% | 5.64 | 6.27 | 89.88% | 129.10 | 632.52 | 20.41% |
 | mixed | 3 | 2105.95 | 1731.30 | 121.64% | 6.30 | 6.69 | 94.16% | 127.74 | 632.52 | 20.20% |
 | mixed | 4 | 2013.67 | 1645.96 | 122.34% | 7.85 | 8.00 | 98.14% | 127.74 | 632.52 | 20.20% |
 | mixed | 5 | 2493.45 | 2119.91 | 117.62% | 7.97 | 8.45 | 94.36% | 127.63 | 632.52 | 20.18% |
