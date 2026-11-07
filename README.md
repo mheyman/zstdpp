@@ -10,8 +10,6 @@ The library provides streaming compression and decompression, Huffman and FSE en
 
 The current benchmark matrix checks byte-for-byte compressed output at levels 1–22 on five deterministic inputs. The acceptance tests also check decoding in both directions.
 
-For optimization priorities and completed work, see the [performance work list](PERFORMANCE_PLAN.md). The [development history](PERFORMANCE_HISTORY.md) preserves the progress notes and experiments previously tracked in this README.
-
 ## Get started
 
 Add `include` to your C++23 include path, or link the header-only `sph::zstdpp` CMake target. Output is delivered to a callback whose span remains valid for that invocation. Call `finish()` explicitly; destructors do not emit or validate output.
@@ -98,6 +96,19 @@ out/build/msvc-release-eval/eval/bin/zstdpp_pair.exe --level 3 --input path/to/f
 
 For GCC, use the `gcc-release-eval` configure preset and `gcc-pair` build preset, then run `out/build/gcc-release-eval/eval/bin/zstdpp_pair`. The tables below use 1 MiB inputs. See the [benchmark report](BENCHMARKS.md) for measurement conditions and reproduction details.
 
+## Documentation and development
+
+| Document | Contents |
+| --- | --- |
+| [Current benchmark matrix](BENCHMARKS_INPUTS.md) | Absolute measurements for every level and input, input definitions, and measurement conditions. |
+| [Native Windows decoder matrix](BENCHMARKS_NATIVE.md) | MSVC decompression speed, memory, and executable size at every frame level and input. |
+| [Benchmark report](BENCHMARKS.md) | Reproduction instructions, focused comparisons, and dated measurements. |
+| [Performance work list](PERFORMANCE_PLAN.md) | Current priorities, completed tasks, and recent experiment outcomes. |
+| [Development history](PERFORMANCE_HISTORY.md) | Archived progress notes and earlier results formerly kept in this README. |
+| [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
+
+The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/).
+
 ## Performance
 
 The tables compare optimized GCC 13 builds of C++ and bundled reference zstd at **levels 1–22** on five deterministic **1 MiB inputs**: zero-filled, repeated, structured, pseudo-random, and mixed data. Additional tables cover varied data and shorter inputs. Measurements were collected on 2026-11-06–07; per-row trial counts and refresh dates are recorded in the [benchmark report](BENCHMARKS.md#readme-matrix-measurement-provenance).
@@ -111,6 +122,8 @@ Each summary cell gives **speed / peak memory / executable size** as C++ percent
 Expand the absolute tables for C++ values, reference values, and their ratios for all three metrics. Linux memory uses the worker's `VmHWM`, excluding peaks inherited from its launcher. Decompression levels identify the settings used to compress each frame.
 
 Every measured compression frame matched reference bytes, and both decoders recovered the original input. Short trials are screening measurements; results near parity remain timing-sensitive. Performance depends on the compiler, level, and input—the C++ implementation does not yet outperform reference in every case. See the [input definitions and measurement conditions](BENCHMARKS_INPUTS.md) before comparing results across machines.
+
+[Compression summary](#compression-of-reference) · [Decompression summary](#decompression-of-reference) · [Absolute measurements](#absolute-measurements) · [Varied input](#varied-input) · [Short inputs](#short-inputs) · [Native Windows](#native-windows-decompression)
 
 ### Compression (% of reference)
 
@@ -166,8 +179,10 @@ Every measured compression frame matched reference bytes, and both decoders reco
 | 21 | 140.5% / 101.1% / 59.8% | 461.1% / 100.1% / 59.8% | 99.9% / 100.6% / 59.8% | 108.9% / 100.0% / 59.8% | 145.1% / 100.7% / 59.8% |
 | 22 | 147.5% / 100.8% / 59.8% | 475.8% / 100.7% / 59.8% | 101.5% / 100.5% / 59.8% | 109.7% / 100.5% / 59.8% | 143.0% / 100.1% / 59.8% |
 
+### Absolute measurements
+
 <details>
-<summary>Absolute C++ and reference measurements for every level and input</summary>
+<summary>Speed, memory, and executable size for all 22 levels and five input types</summary>
 
 #### Compression
 
@@ -401,6 +416,8 @@ Every measured compression frame matched reference bytes, and both decoders reco
 
 </details>
 
+### Varied input
+
 <details>
 <summary>Varied-input compression at all 22 levels</summary>
 
@@ -432,6 +449,8 @@ Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 1, 2,
 | 22 | 3 × 1 | 2.96 | 1.82 | 162.67% | 21.78 | 22.23 | 98.00% | 145.41 | 632.52 | 22.99% |
 
 </details>
+
+### Short inputs
 
 <details>
 <summary>Level-3 compression on short inputs</summary>
@@ -599,16 +618,3 @@ Each cell gives **speed / peak memory / executable size** as C++ percentages of 
 | mixed | 22 | 15346.89 | 10619.75 | 144.51% | 7.18 | 7.08 | 101.43% | 106.00 | 113.50 | 93.39% |
 
 </details>
-
-## Documentation and development
-
-| Document | Contents |
-| --- | --- |
-| [Current benchmark matrix](BENCHMARKS_INPUTS.md) | Absolute measurements for every level and input, input definitions, and measurement conditions. |
-| [Native Windows decoder matrix](BENCHMARKS_NATIVE.md) | MSVC decompression speed, memory, and executable size at every frame level and input. |
-| [Benchmark report](BENCHMARKS.md) | Reproduction instructions, focused comparisons, and dated measurements. |
-| [Performance work list](PERFORMANCE_PLAN.md) | Current priorities, completed tasks, and recent experiment outcomes. |
-| [Development history](PERFORMANCE_HISTORY.md) | Archived progress notes and earlier results formerly kept in this README. |
-| [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
-
-The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/).
