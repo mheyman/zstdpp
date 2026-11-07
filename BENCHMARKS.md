@@ -2,6 +2,25 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Fixed four-sequence decode batch rejected, 2026-11-07
+
+Implemented an isolated GCC13 medium-block decoder that decodes four sequence records into a fixed stack array, then executes their existing validated copies. The prototype preserves FSE/repeat-offset order and final-sequence handling; length validation uses a pending logical output size while offset validation remains in copy execution. Records retain literal pointers and three lengths/offsets, requiring 128 bytes of stack scratch on this target and no heap allocation. Other block paths retain the ordinary loop.
+
+All 110 current reference frames pass exact decoded-output and worker allocation checks. Six alternating current/candidate pairs per control yield:
+
+| Input / frame level | Frames per trial | Median paired throughput change | Candidate wins |
+| --- | ---: | ---: | ---: |
+| Structured / 18 | 30,000 | -15.79% | 0/6 |
+| Structured / 20 | 30,000 | -16.09% | 0/6 |
+| Mixed / 3 | 20,000 | -0.18% | 2/6 |
+| Structured / 1 | 3,000 | -3.71% | 0/6 |
+
+All 48 timed workers passed exact-output/allocation guards. One additional matched 100,000-frame structured18 counter pair measured current/candidate 24.975/28.259 billion cycles, 112.040/127.530 billion instructions, 17.575/18.847 billion branches, and 10.965/32.380 million branch misses. Instructions increased about 13.8%, cycles about 13.1%, with nearly unchanged IPC; this is added work, not evidence of a latency-only regression. A single pair cannot apportion costs among scratch writes, loop control, validation, and code generation.
+
+The prototype is rejected before full malformed-input/sanitizer qualification. Valid-frame checks do not establish malformed-input correctness. No production headers, binaries, or README metrics changed. Artifacts: `out/decode-batch4-20261107/` contains source generation, isolated headers, all valid-frame checks, controls and counters. Do not repeat the same batch with arbitrary batch-size tuning without evidence that the extra work can be removed.
+
+Next bounded idea: audit the two variable mask constructions used to split grouped FSE states. A small constexpr mask table for validated state widths could replace shift/subtract dependencies without sequence scratch or extra allocations. This is distinct from the rejected reverse-reader mask change: keep the bit reader and its bounds/reload behavior untouched. Verify the table-width invariant, inspect generated instructions, and test medium-block controls before any retention; an extra table load can still be slower.
+
 ## Longer structured decoder confirmations, 2026-11-07
 
 After retaining bounded short-overlap copying, six alternating CPU2 current/reference pairs of 100,000 frames each confirmed the three remaining short-screen deficits. All 36 workers passed exact output and allocation guards. No library change was made in this follow-up.
