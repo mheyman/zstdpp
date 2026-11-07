@@ -1,6 +1,6 @@
 # Current benchmark matrix: all input shapes
 
-Measured 2026-11-06 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. Decompression was refreshed on 2026-11-07 after bounded short-overlap copying: three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured level 18 (30,000). The change improves structured level 1 but trades about 2.70% of mixed level-3 throughput against the previous C++ build; see the [experiment report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
+Measured 2026-11-06 with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results. Decompression was refreshed on 2026-11-07 after bounded short-overlap copying: three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured levels 18, 20, and 21 (100,000). The change improves structured level 1 but trades about 2.70% of mixed level-3 throughput against the previous C++ build; see the [experiment report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
 
 Linux memory measurements use `/proc/self/status` `VmHWM` for the current executable, excluding launcher peaks inherited across execution. This includes the whole worker, not just library allocations; reporting occurs outside the timed operation.
 
@@ -192,10 +192,10 @@ Level-3 compression rows were refreshed on 2026-11-07 with six alternating 3,000
 | structured | 15 | 27186.67 | 26098.53 | 104.17% | 5.73 | 5.71 | 100.34% | 126.34 | 211.24 | 59.81% |
 | structured | 16 | 23068.19 | 23044.64 | 100.10% | 5.76 | 5.71 | 100.89% | 126.34 | 211.24 | 59.81% |
 | structured | 17 | 23002.26 | 22355.00 | 102.90% | 5.76 | 5.71 | 100.75% | 126.34 | 211.24 | 59.81% |
-| structured | 18 | 19248.87 | 19619.18 | 98.11% | 5.75 | 5.72 | 100.41% | 126.34 | 211.24 | 59.81% |
+| structured | 18 | 19132.04 | 19414.80 | 98.54% | 5.76 | 5.73 | 100.65% | 126.34 | 211.24 | 59.81% |
 | structured | 19 | 19315.69 | 19066.23 | 101.31% | 5.77 | 5.68 | 101.44% | 126.34 | 211.24 | 59.81% |
-| structured | 20 | 19252.86 | 19600.49 | 98.23% | 5.77 | 5.70 | 101.23% | 126.34 | 211.24 | 59.81% |
-| structured | 21 | 18836.46 | 19455.44 | 96.82% | 5.76 | 5.73 | 100.55% | 126.34 | 211.24 | 59.81% |
+| structured | 20 | 19158.82 | 19357.15 | 98.98% | 5.76 | 5.70 | 101.10% | 126.34 | 211.24 | 59.81% |
+| structured | 21 | 19100.61 | 19114.55 | 99.93% | 5.75 | 5.72 | 100.65% | 126.34 | 211.24 | 59.81% |
 | structured | 22 | 19403.23 | 19115.80 | 101.50% | 5.72 | 5.70 | 100.48% | 126.34 | 211.24 | 59.81% |
 | random | 1 | 50871.97 | 44919.59 | 113.25% | 6.73 | 6.66 | 101.06% | 126.34 | 211.24 | 59.81% |
 | random | 2 | 49255.93 | 45438.84 | 108.40% | 6.70 | 6.70 | 100.00% | 126.34 | 211.24 | 59.81% |

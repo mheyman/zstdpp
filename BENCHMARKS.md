@@ -2,6 +2,26 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Longer structured decoder confirmations, 2026-11-07
+
+After retaining bounded short-overlap copying, six alternating CPU2 current/reference pairs of 100,000 frames each confirmed the three remaining short-screen deficits. All 36 workers passed exact output and allocation guards. No library change was made in this follow-up.
+
+| Structured frame level | C++ MiB/s | Reference MiB/s | Median paired throughput | C++ wins |
+| ---: | ---: | ---: | ---: | ---: |
+| 18 | 19132.04 | 19414.80 | 98.33% | 1/6 |
+| 20 | 19158.82 | 19357.15 | 98.55% | 2/6 |
+| 21 | 19100.61 | 19114.55 | 99.66% | 2/6 |
+
+Speeds use median elapsed time; paired percentages use per-pair ratios and therefore differ from the README's ratio of median speeds. Replaced only these three README/detailed-matrix decoder rows, including measured RSS and executable sizes, and corrected their trial-count note. This is stronger measurement evidence, not a new optimization.
+
+The current four-artifact identity audit (C++ binary, reference binary, encoded frame, expected output) groups all 110 cases into 30 distinct workloads. Structured19–22 are one identical workload; structured18 is separate. Thus level20/21 results are repeated observations of the same algorithm and data, not independent level-specific bottlenecks. Executable paths and runtime placement can still affect timing, so their measurements remain separately reported.
+
+Three additional alternating 100,000-frame level18 hardware-counter pairs all show higher C++ cycles; median paired cycle cost is 100.71% of reference. Median C++/reference totals: 23.280/23.116 billion cycles, 112.040/95.574 billion instructions, 17.575/13.647 billion branches, and 10.572/5.237 million branch misses. The instruction excess is much larger than the cycle excess; avoid treating every extra instruction as an equivalent latency penalty.
+
+Next architectural experiment: audit and prototype a bounded stack batch of sequence metadata, separating entropy decoding from existing validated copy execution. Start with a small fixed batch, no heap allocation, unchanged repeat-offset/FSE order, and exact final-sequence handling. This differs from the rejected mere movement of FSE updates before each copy: the intended separation must actually reduce live decoder state during copying. Extra scratch writes and bounds bookkeeping may outweigh any gain; test structured18 and the shared structured19–22 workload, plus mixed3 and the retained structured1 improvement. Preserve malformed/truncated-frame and output-capacity checks. Do not repeat whole-decoder BMI2, standalone register-mask, or broad tiny-copy changes already rejected.
+
+Artifacts: `out/structured-high-confirm-20261107/` contains raw timings/counters, all four identity hashes per group, current summary, and report-update script. Remaining compression and decoder gaps keep the goal open.
+
 ## Bounded short-overlap copy retained, 2026-11-07
 
 The earlier broad overlap-seed helper extension regressed mixed input. This narrower GCC13 change applies only to the non-medium decoder after nonoverlapping matches have already returned: for overlapping matches of at most eight bytes and offsets at least four, perform two ordered exact four-byte copies. Overlap guarantees `length > offset >= 4`, so the first four bytes are available, the second copy can consume bytes written by the first, and neither copy crosses the requested match end. Offsets below four, longer matches, medium blocks, other compilers, and all validation remain on their existing paths.

@@ -104,7 +104,7 @@ Measured 2026-11-06 with optimized GCC 13 against the bundled reference on five 
 
 Level-3 compression was refreshed on 2026-11-07. Levels 3 and 4 use six alternating 3,000-frame compression trials per input.
 
-Decompression was refreshed on 2026-11-07 after bounded short-overlap copying: three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured level 18 (30,000). The change improves structured level 1 but trades about 2.70% of mixed level-3 throughput against the previous C++ build; see the [experiment report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
+Decompression was refreshed on 2026-11-07 after bounded short-overlap copying: three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured levels 18, 20, and 21 (100,000). The change improves structured level 1 but trades about 2.70% of mixed level-3 throughput against the previous C++ build; see the [experiment report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
 
 Memory is whole-process peak resident set size (RSS), including the benchmark worker. On Linux, this is the current executable's `VmHWM`, excluding peaks inherited from its launcher. Code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
 
@@ -156,10 +156,10 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | 15 | 138.7% / 100.2% / 59.8% | 547.1% / 100.7% / 59.8% | 104.2% / 100.3% / 59.8% | 105.1% / 100.4% / 59.8% | 191.0% / 100.0% / 59.8% |
 | 16 | 138.3% / 101.3% / 59.8% | 259.4% / 100.7% / 59.8% | 100.1% / 100.9% / 59.8% | 109.4% / 99.7% / 59.8% | 137.1% / 100.7% / 59.8% |
 | 17 | 136.6% / 100.5% / 59.8% | 274.1% / 100.1% / 59.8% | 102.9% / 100.8% / 59.8% | 113.5% / 99.7% / 59.8% | 128.3% / 100.7% / 59.8% |
-| 18 | 139.6% / 101.4% / 59.8% | 477.0% / 100.3% / 59.8% | 98.1% / 100.4% / 59.8% | 111.4% / 99.7% / 59.8% | 141.0% / 100.3% / 59.8% |
+| 18 | 139.6% / 101.4% / 59.8% | 477.0% / 100.3% / 59.8% | 98.5% / 100.6% / 59.8% | 111.4% / 99.7% / 59.8% | 141.0% / 100.3% / 59.8% |
 | 19 | 139.5% / 101.3% / 59.8% | 485.7% / 99.7% / 59.8% | 101.3% / 101.4% / 59.8% | 110.6% / 100.5% / 59.8% | 146.3% / 100.1% / 59.8% |
-| 20 | 133.7% / 100.5% / 59.8% | 468.0% / 100.1% / 59.8% | 98.2% / 101.2% / 59.8% | 109.0% / 101.1% / 59.8% | 144.8% / 100.1% / 59.8% |
-| 21 | 140.5% / 101.1% / 59.8% | 461.1% / 100.1% / 59.8% | 96.8% / 100.5% / 59.8% | 108.9% / 100.0% / 59.8% | 145.1% / 100.7% / 59.8% |
+| 20 | 133.7% / 100.5% / 59.8% | 468.0% / 100.1% / 59.8% | 99.0% / 101.1% / 59.8% | 109.0% / 101.1% / 59.8% | 144.8% / 100.1% / 59.8% |
+| 21 | 140.5% / 101.1% / 59.8% | 461.1% / 100.1% / 59.8% | 99.9% / 100.6% / 59.8% | 108.9% / 100.0% / 59.8% | 145.1% / 100.7% / 59.8% |
 | 22 | 147.5% / 100.8% / 59.8% | 475.8% / 100.7% / 59.8% | 101.5% / 100.5% / 59.8% | 109.7% / 100.5% / 59.8% | 143.0% / 100.1% / 59.8% |
 
 <details>
@@ -345,10 +345,10 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
 | structured | 15 | 27186.67 | 26098.53 | 104.17% | 5.73 | 5.71 | 100.34% | 126.34 | 211.24 | 59.81% |
 | structured | 16 | 23068.19 | 23044.64 | 100.10% | 5.76 | 5.71 | 100.89% | 126.34 | 211.24 | 59.81% |
 | structured | 17 | 23002.26 | 22355.00 | 102.90% | 5.76 | 5.71 | 100.75% | 126.34 | 211.24 | 59.81% |
-| structured | 18 | 19248.87 | 19619.18 | 98.11% | 5.75 | 5.72 | 100.41% | 126.34 | 211.24 | 59.81% |
+| structured | 18 | 19132.04 | 19414.80 | 98.54% | 5.76 | 5.73 | 100.65% | 126.34 | 211.24 | 59.81% |
 | structured | 19 | 19315.69 | 19066.23 | 101.31% | 5.77 | 5.68 | 101.44% | 126.34 | 211.24 | 59.81% |
-| structured | 20 | 19252.86 | 19600.49 | 98.23% | 5.77 | 5.70 | 101.23% | 126.34 | 211.24 | 59.81% |
-| structured | 21 | 18836.46 | 19455.44 | 96.82% | 5.76 | 5.73 | 100.55% | 126.34 | 211.24 | 59.81% |
+| structured | 20 | 19158.82 | 19357.15 | 98.98% | 5.76 | 5.70 | 101.10% | 126.34 | 211.24 | 59.81% |
+| structured | 21 | 19100.61 | 19114.55 | 99.93% | 5.75 | 5.72 | 100.65% | 126.34 | 211.24 | 59.81% |
 | structured | 22 | 19403.23 | 19115.80 | 101.50% | 5.72 | 5.70 | 100.48% | 126.34 | 211.24 | 59.81% |
 | random | 1 | 50871.97 | 44919.59 | 113.25% | 6.73 | 6.66 | 101.06% | 126.34 | 211.24 | 59.81% |
 | random | 2 | 49255.93 | 45438.84 | 108.40% | 6.70 | 6.70 | 100.00% | 126.34 | 211.24 | 59.81% |
