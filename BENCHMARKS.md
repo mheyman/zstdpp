@@ -1988,3 +1988,39 @@ On mixed input the advantage follows the first-created context in all six runs, 
 All twelve runs (1,200 pairs / 1,200,000 timed frames) passed reference parameters, final-frame byte equality for each batch, reciprocal decoding, and allocation guards. Six one-frame smoke runs cover all three modes and both construction orders, checking CSV construction/order metadata. Three invalid-order/argument-count cases reject. Artifacts: `out/batch-construction-20261107/`, including `run.py`, `smoke.py`, raw CSVs, logs and `summary.json`; build log in `out/batch-diagnostic-20261107/order-build.log`. No production library change or published performance-table refresh.
 
 Next: isolate first- and second-created contexts in long profiling loops while keeping both allocated; record allocation addresses and hardware counters to locate the mixed-input cost. Test any resulting allocation-layout candidate in the original isolated workers, including short varied input where level 2 still trails reference, before retaining it. Reversing order is a diagnostic control, not a correction factor for measured gains.
+
+## Context profiling and short literal-alignment candidate (2026-11-07)
+
+An experiment-only driver derived from `zstdpp_batch` keeps both contexts alive, warms both, then runs only A or B in one long guarded batch selected by `SPH_PROFILE_SIDE`. It uses the same baseline function for both labels. The inherited success message still says two pairs, but this driver performs **one selected-context batch**, not paired timing; its CSV and source record that distinction. No production or permanent diagnostic code changed.
+
+Four 100,000-frame `perf stat` runs in A/B/B/A order on short mixed input reproduce the gap. A elapsed times are 11.849/11.952 seconds and B 12.575/12.528 seconds. A cycles are 53.101/53.804 billion; B 57.153/56.225 billion. Instructions are essentially identical at 172.880 billion in every run, with 20.541 billion branches. Generic cache misses vary across runs and do not consistently increase for B, so those counters do not prove cache conflicts. Context addresses vary with ASLR but consistently end at page offsets `0x5c0` and `0xfc0` in these runs.
+
+Separate 150,000-frame cycle profiles (period 1,000,003) have zero reported lost samples:
+
+| Scope | A self samples | B self samples |
+| --- | ---: | ---: |
+| Double-fast parser | 35.70% | 34.23% |
+| Enclosing run/frame code | 19.37% | 18.58% |
+| Huffman literals | 14.80% | 13.85% |
+| libc memory copy | 10.51% | 15.36% |
+
+Total sampled cycles are 80.543 and 86.242 billion. Multiplying those totals by rounded self shares puts about 4.79 billion of the 5.70-billion difference in memory copying. This is sampled attribution, not an exact phase timer. A 100,000-frame DWARF callgraph and a second 50,000-frame call-site capture identify the dominant copy beneath vector range insertion. Of 395 copy stacks with a run caller in the second capture, 335 return to `run+0xf81`; assembly at `0x10fdd` calls range insertion after raw-literal header emission, then swaps the raw-literal and output vectors. This corresponds to raw-literal assembly in the sequence encoder, rather than the callback sink. The parser accounts for another 25 such copy stacks. Full context allocation addresses were captured; individual internal buffer addresses have not yet been recorded.
+
+`perf report --header-only` emitted an `Invalid HEADER_EVENT_DESC` warning, while normal reports and call stacks were readable. The final call-site data is preserved under `out/context-profile-20261107/callsite.data`; earlier temporary `/tmp` data did not survive subsequent WSL calls, so their textual reports are the retained evidence. Scripts, selected-context logs, counters, call stacks and disassembly are in that directory.
+
+### Alignment screen
+
+The candidate reuses the existing 64-byte literal allocator for double-fast minimum-match-5 settings with a compiled source pledge at most 256 KiB. Minimum-match-4 alignment and larger-source behavior remain as before. This changes allocation layout, not compressed bytes, allocation count during compression, or the parser. It is isolated under `out/short-literal-alignment-20261107/include`; production headers are unchanged. The condition also affects some smaller level-3 presets, which need qualification before integration.
+
+Six rotating old/candidate/reference 20,000-frame trials per 256-KiB input:
+
+| Input | Old MiB/s | Candidate MiB/s | Reference MiB/s | Paired candidate / old | Wins / 6 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Varied | 3563.25 | 3529.32 | 3587.10 | 100.07% | 3 |
+| Mixed | 2121.11 | 2246.78 | 2108.14 | 106.16% | 6 |
+
+Candidate/reference paired ratios are 99.08% (1/6 wins) for varied and 107.54% (6/6) for mixed. Ratios of independent medians differ from paired ratios. Candidate worker size remains 133.289 KiB, reference 632.516 KiB. Median candidate/reference peak RSS is 4.500/4.492 MiB varied and 4.691/4.479 MiB mixed. All 36 timed workers passed allocation guards and produced reference-identical frames; both decoders recovered each input. This is a promising mixed-input screen, not a retained optimization or a resolution of the varied-input deficit.
+
+Longer confirmation used six alternating old/candidate pairs of 60,000 frames per input. Varied falls **1.51%** paired (2/6 wins; old 3588.55, candidate 3522.83 MiB/s). Mixed improves **6.63%** (6/6; old 2128.41, candidate 2266.85 MiB/s). All 24 timed workers match the already reference-verified frame and pass allocation guards; four decoder checks pass. The earlier screen plus confirmation therefore covers 60 timed workers and eight decoder checks. The candidate is **not retained** because it worsens the unresolved varied-input deficit. No broader level-3/smaller-input qualification was run after that rejection; no production or README metrics changed.
+
+The profile still identifies a useful opportunity: raw-literal assembly pays a placement-sensitive large-copy cost. The next candidate should target that copy or its destination without changing the literal source used by Huffman. Check against both short mixed and varied inputs, with isolated-worker confirmation and existing correctness/allocation guards. Avoid treating aligned source storage as a universal improvement or repeating the rejected candidate unchanged.
