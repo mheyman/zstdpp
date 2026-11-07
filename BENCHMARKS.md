@@ -2,6 +2,25 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Aligned sequence-code slab diagnostic rejected, 2026-11-07
+
+Following the tag-placement audit, an isolated GCC 13 level-2/256-KiB prototype replaced three LL/OF/ML byte vectors with one 64-byte-aligned owning vector. Each region's stride rounds up to 64 bytes; views are computed from the current owner, with no stored spans. A second variant also omits the unused fixed-minimum-match-5 tag allocations. Production headers were unchanged. The reference reserves its three code arrays from its shared workspace (`reference_zstd/lib/compress/zstd_compress.c`, `ZSTD_cwksp_reserve_buffer` calls); this prototype consolidates only the code arrays, not that entire workspace design.
+
+Three rotating baseline/slab/slab-without-tags trials per input and placement used 8,000 frames on CPU 2. All 72 workers matched reference compressed bytes and passed allocation guards. Median paired throughput changes relative to the current layout:
+
+| Pre-construction padding (bytes) | Mixed: slab | Mixed: slab without tags | Varied: slab | Varied: slab without tags |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | +1.68% | -6.37% | -2.49% | -3.68% |
+| 64 | +0.36% | -9.05% | -4.71% | -5.68% |
+| 256 | -2.26% | -7.00% | -4.91% | -1.80% |
+| 2048 | +7.57% | +7.10% | -3.48% | -1.45% |
+
+The slab's LL/OF/ML page offsets were 64/2816/1472 in the recorded trials, with or without tags. Thus stabilizing these offsets did not eliminate sensitivity to removing tags; other allocation placement and generated-code differences remain uncontrolled. This does not identify a hardware cause. Padding remains diagnostic only. Aligned-allocation counts were 4 for baseline, 5 for slab, and 3 for slab without tags: the slab adds one aligned allocation while replacing three ordinary allocations. These counts are not total allocation counts.
+
+A separate assertion-enabled check passed alignment, growth at capacities 1/65/43691, independent copying, copy/move assignment and construction, and reuse after moving. The prototype remains rejected on performance grounds; no production or README measurement changes. Artifacts, source overlays, per-worker address logs and measurements: `out/code-slab-20261107/`.
+
+Next: obtain fresh paired phase/cycle evidence for current level-2/256-KiB varied input before expanding the arena design. In particular, separate parser and entropy work from placement effects; fewer construction allocations alone have not demonstrated lower steady-state cost. Any full-workspace arena proposal must account for reference buffer ordering, growth, and ownership rather than transplanting this failed slab.
+
 ## Tag allocation and buffer-placement diagnostic, 2026-11-07
 
 The audit confirms that fixed minimum-match-5 GCC13 ordinary, collecting and direct-offBase parser entry points do not use byte tags. Runtime minimum-match selection, other compilers and the ordinary minimum-match-4 parser still require them. History already rejected both empty tag members and merely skipping their resizes after cross-input regressions; this turn therefore investigated placement rather than repeating an uninstrumented removal claim.
