@@ -2,6 +2,33 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-2 instruction sampling and encoder mask lookup, 2026-11-07
+
+Collected matched optimized GCC13 level-2 instruction profiles on 10,000 varied 1-MiB frames. Initial period-100,003 captures reported zero lost samples but contained PERF_RECORD_THROTTLE events: sampled periods represented only 20.95B C++ and 15.41B reference instructions, versus approximately 46.33B and 39.68B from counters. Zero lost samples alone is not sufficient evidence of complete sampling coverage.
+
+Repeated at period 1,000,003. Both captures have zero lost samples and zero throttle records; their sampled-period totals are 46,333,138,999 and 39,684,119,052, consistent with earlier counter runs. Every profiled output matches reference. Use these lower-rate captures for instruction attribution:
+
+| Function or scope | C++ instruction sample share | Reference instruction sample share |
+| --- | ---: | ---: |
+| Fast parser | 49.20% | 58.15% |
+| Broad C++ sequence encoder / reference sequence bit writer | 27.35% | 17.52% |
+| Reference sequence-code conversion (separate function) | Included above | 4.07% |
+| Huffman stream writer | 6.76% | 4.03% |
+| Huffman tree construction | 3.47% | 5.40% |
+
+Scopes differ: C++ gathers literals in its encoder, while reference stores literals during parsing; the broad encoder includes several inlined operations. These percentages therefore do not establish matched per-stage speed ratios. Scaling shares by their separate instruction totals suggests approximately 22.80B/23.08B parser instructions and 3.13B/1.60B Huffman stream instructions (C++/reference), useful for prioritization rather than cycle attribution. Sample skid also prevents identifying one stack store as the cause of a hotspot. Captures, annotations, metadata audit, executable identities, and scripts: `out/l2-instruction-profile-20261107/`, especially `low-rate/`.
+
+The FSE encoder annotation shows repeated variable-mask construction during grouped state emission. An isolated candidate replaces that mask expression in `encode_bits` with a 33-entry constexpr uint32 mask table, leaving RLE validation, state transitions, and bit-writer policy unchanged. Current built FSE tables cap tableLog at 9, so valid emission widths fit the lookup. Disassembly confirms indexed mask-table use. This is an encoder trial, distinct from the rejected decoder state-mask lookup.
+
+| Input | Median paired throughput change | Candidate pair wins | Production median MiB/s | Candidate median MiB/s |
+| --- | ---: | ---: | ---: | ---: |
+| Varied, 1 MiB | -0.47% | 3/6 | 3451.42 | 3406.56 |
+| Mixed, 1 MiB | -0.08% | 3/6 | 2940.58 | 2952.30 |
+
+Six alternating CPU-2-pinned 10,000-frame pairs per input pass exact reference frames and worker allocation guards (24 timed workers). Percentage changes are medians of pair ratios, not ratios of the displayed medians. Neither input demonstrates a repeatable gain. Rejected before broader correctness gates; production and README metrics are unchanged. Artifacts: `out/fse-encoder-masks-20261107/`.
+
+NEXT: use the unthrottled profiles for the broader entropy-dataflow investigation. Audit reference BMI2 dispatch and C++ writer code generation against the previously tested native-CPU and Huffman writer variants before selecting another change; do not repeat mask substitutions, rejected loop duplication, or source-level state scheduling solely because a sampled instruction appears hot.
+
 ## Fast-parser whole-record copy rejected, 2026-11-07
 
 Disassembly of the production level-2 fast parser and the preceding direct-offBase candidate identifies packed-field construction work at the normal vector append. Production around `0x10624` masks match length, loads the destination packed word, preserves its upper two bits, stores the merged word, and then stores the byte containing the repeat code. The rejected direct-offset candidate still performs this read/modify/write work around `0x10567`, even though its repeat code is zero. This is direct assembly evidence, not proof that these stores dominate total runtime.
