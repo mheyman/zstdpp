@@ -2,6 +2,26 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Level-1 structured decoder profile and overlap-seed control, 2026-11-07
+
+Six alternating CPU2 comparisons of the current optimized GCC13 decoders on the 1-MiB structured level-1 reference frame (3,000 frames each) confirm a small deficit: C++/reference median speeds 1127.55/1154.24 MiB/s; median paired throughput 98.54%, with C++ winning 2/6. These are different aggregations; the ratio of medians is not the median paired ratio. Exact decoded-output checks passed throughout.
+
+One matched 10,000-frame counter pair measured C++/reference 37.889/37.039 billion cycles, 177.028/166.118 billion instructions, 37.277/24.391 billion branches, and 10.272/0.977 million branch misses. Separate zero-loss cycle profiles place 74.17% of C++ self samples in the padded non-medium sequence loop, 9.91% in the padded medium loop, 12.82% in libc copying, and 1.22% in the tiny-copy helper. Reference samples were 98.18% in sequence decoding and 1.43% in FSE table construction. Different function boundaries and inlining prevent direct matched-phase attribution.
+
+A separate untimed diagnostic identifies one medium block with 16,128 sequences, followed by fourteen non-medium blocks with 8,192 sequences each. Every match is 8–15 bytes; half of the later blocks' matches overlap. Later blocks have no sequence literals, and their first eight traced sequences alternate eight-byte matches at offsets 4,088 and 7. The first block has 256 short-literal sequences and 15,872 zero-literal sequences. These observations identify short overlap copying as a concrete lead rather than a generic allocation hypothesis.
+
+An isolated candidate extended the existing exact 1–7-byte overlap-seed helper from medium blocks to all block paths. Six alternating current/candidate pairs per case produced:
+
+| Input / compression level | Frames per trial | Median paired change | Candidate wins |
+| --- | ---: | ---: | ---: |
+| Structured / 1 | 3,000 | +8.33% | 6/6 |
+| Mixed / 3 | 20,000 | -6.67% | 0/6 |
+| Structured / 18 | 30,000 | +3.56% | 5/6 |
+
+All 36 workers passed exact-output and allocation guards. The mixed regression rejects the broad extension; production and README measurements remain unchanged. The candidate and trace headers are isolated under `out/l1-structured-decode-20261107/`, alongside scripts, profiles, counts, binary/frame hashes, and raw metrics.
+
+Next: audit and test a narrower exact-copy algorithm for overlapping 4–8-byte matches at offsets at least four, using two ordered four-byte copies with the second ending at the match boundary. Prove overlap and bounds behavior with a bytewise oracle before benchmarking; retain mixed3 and structured18 controls. Do not adopt a special case solely because it wins this structured corpus, and do not infer that all libc samples arise from the observed offset-7 matches.
+
 ## Reference-style double-fast catch-up guard rejected, 2026-11-07
 
 The branch-profile follow-up first audited earlier safe-address, branch-hint, repeat-guard, long-match-loop, PGO, and in-record offset-base experiments; those already failed controls. A distinct isolated trial changed backward match extension from two short-circuit boundary checks to the reference's bitwise combination of the two Boolean checks, still short-circuiting before reading either byte. Match insertion and repeat-offset behavior were unchanged.
