@@ -1,5 +1,22 @@
 # Benchmark results
 
+## Overlap-seed specialization and GCC scheduled reader rejected (2026-11-07)
+
+Two independent candidates started from unchanged production headers. Neither is retained. Each passed all110 existing reference-frame warmup checks and48 timed output/allocation-guarded workers. Measurements use optimized generic GCC13, CPU2, six alternating old/candidate pairs: structured18/20 at30,000 frames, mixed3 at20,000, structured1 at3,000. These are rejection screens, not completed malformed-input qualification or new published performance results.
+
+The first candidate inlines only the seven-byte overlap seed in the medium decoder with two exact four-byte copies at offsets0 and3. The ordinary match helper and fallback for other seed lengths are unchanged. This targets the measured caller distribution rather than replacing the shared switch. It adds no allocation or padding requirement, but performs worse on all structured controls:
+
+| Candidate | Structured18 gain (wins/6) | Structured20 gain (wins/6) | Mixed3 gain (wins/6) | Structured1 gain (wins/6) |
+| --- | ---: | ---: | ---: | ---: |
+| Inline seven-byte seed | -2.15% (1) | -3.32% (0) | +1.09% (4) | -0.80% (2) |
+| Scheduled medium reader | -7.69% (1) | -6.15% (0) | +4.04% (6) | -3.94% (0) |
+
+The second candidate enables the existing MSVC `scheduled_sequence_reader` for GCC13 medium blocks. It reloads after initial states and each non-final sequence, plus between ML/LL extra bits when the sum of OF/ML/LL widths is at least31. It retains GCC's packed table entries and grouped three-state bit read. With validated maximum state widths9/9/8, grouped transitions consume at most26 bits; the existing refill schedule bounds interior reads, while scheduled tail overflow is recorded and rejected at reload/final exact-end validation. The ordinary GCC reader remains for non-medium blocks. No trusted-input bypass or allocation change is introduced. Valid-frame parity passed, but the substantial structured regressions end this candidate before additional malformed-tail qualification.
+
+Artifacts: `out/overlap-seed7-20261107/` and `out/gcc-scheduled-sequences-20261107/` contain source generators, isolated headers, assembly, frame checks, and raw trials. Mixed gains do not prove either local mechanism is cheaper; the tiny-helper audit found no mixed3 helper calls. Production headers, binaries, and README metrics remain unchanged.
+
+Next return to the remaining short level2 compression gap with a fresh paired baseline and matched profiles. The last decoder trials rejected direct pointer copies, branch dispatch, isolated seed inlining, and the MSVC refill policy on GCC; do not repeat those source-level variants without new evidence. Keep structured18/shared19–22 decoder gaps open alongside compression, rather than declaring the all-level goal complete.
+
 ## Tiny-copy branch dispatcher rejected (2026-11-07)
 
 An isolated diagnostic counted both callers of the existing noinline 1–7-byte helper. Each run decoded one warmup plus one measured frame; the following counts are per frame. Structured18 nonoverlapping calls: length3=467, length4=767, length5=559, length6=1527; overlap seeds: length7=1029. Structured20: 476/768/548/1535 respectively, plus1024 seven-byte seeds. Structured1 has8192 seven-byte overlap seeds and no other helper calls; mixed3 has none. Diagnostic timings are not performance measurements. The two source/destination ranges are disjoint for both callers, including the initial overlap seed.
