@@ -6141,6 +6141,36 @@ namespace sph::zstd::detail
         bits.append(last.literal_length, literal_length_bits[last_literal_code]);
         bits.append(last.match_length - 3U, match_length_bits[last_match_code]);
         bits.append(last_offset_base, last_offset_code);
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+        // Fixed length symbols emit no FSE state bits. Keep their extra bits,
+        // but advance only the offset state in this measured compact path.
+        if constexpr (GroupFse && CollectedLiterals &&
+            std::is_same_v<ParsedView, compact_parsed_block_view>)
+        {
+            if (literal_table.mode == sequence_table_mode::run_length &&
+                match_length_table.mode == sequence_table_mode::run_length)
+            {
+                for (std::size_t index{last_index}; index-- > 0U;)
+                {
+                    auto const sequence{encoded_sequence_at(index)};
+                    auto const offset_code{offset_codes[index]};
+                    auto const of{offset_state.template encode_bits<true>(offset_code)};
+                    bits.append_unchecked(of.value, of.count);
+                    bits.append(sequence.literal_length, literal_length_bits[last_literal_code]);
+                    bits.append(sequence.match_length - 3U, match_length_bits[last_match_code]);
+                    bits.append(sequence.offset_base, offset_code);
+                }
+                match_state.flush(bits);
+                offset_state.flush(bits);
+                literal_state.flush(bits);
+                bits.finish_into(output);
+#ifdef SPH_ZSTDPP_TRACE_PHASES
+                entropy_trace.bits_ns += entropy_trace_elapsed(entropy_phase_start);
+#endif
+                return;
+            }
+        }
+#endif
         auto const use_grouped{AdaptiveGroupedWrites &&
             literal_size <= parsed.sequences.size() * 8U};
         for (std::size_t index{last_index}; index-- > 0U;)

@@ -97,10 +97,69 @@ void check_storage() {
     require(storage.front() == fast_parsed_sequence{0U,3U,1U,0U});
 }
 
+
+void check_fixed_length_tables() {
+    using namespace sph::zstd::detail;
+    for (auto ll : {0U, 16U, 32U}) {
+        for (auto ml : {3U, 8U, 35U, 67U}) {
+            for (auto count : {1U, 2U, 5U, 100U}) {
+                for (bool wide : {false, true}) {
+                    parsed_block logical;
+                    compact_parsed_block compact;
+                    compact.sequences.reserve(count);
+                    std::size_t input_size{};
+                    for (unsigned i{}; i < count; ++i) {
+                        auto const offset{1U << (i % 7U)};
+                        // Same symbols can carry different extra-bit values.
+                        auto const actual_ll{ll + (ll == 32U ? i % 2U : 0U)};
+                        auto const actual_ml{ml + (ml >= 35U ? i % 2U : 0U)};
+                        require(literal_length_symbol(actual_ll) == literal_length_symbol(ll));
+                        require(match_length_symbol(actual_ml) == match_length_symbol(ml));
+                        logical.sequences.push_back({actual_ll, actual_ml, offset, 0U});
+                        compact.sequences.push_back({actual_ll, actual_ml, offset, 0U});
+                        input_size += actual_ll + actual_ml;
+                    }
+                    std::vector<std::uint8_t> input(input_size);
+                    for (std::size_t i{}; i < input.size(); ++i)
+                        input[i] = static_cast<std::uint8_t>(i * 37U);
+                    logical.trailing_literal_position = input.size();
+                    compact.trailing_literal_position = input.size();
+                    compression_workspace baseline, candidate;
+                    baseline.reserve(input.size(), count);
+                    candidate.reserve(input.size(), count);
+                    std::size_t input_position{}, literal_position{};
+                    for (auto const& sequence : logical.sequences) {
+                        std::copy_n(input.data() + input_position, sequence.literal_length,
+                            candidate.literals.data() + literal_position);
+                        input_position += sequence.literal_length + sequence.match_length;
+                        literal_position += sequence.literal_length;
+                    }
+                    std::vector<std::uint8_t> expected, actual;
+                    if (wide) {
+                        encode_sequences_block<false,true,false,false,6U,false,true>(
+                            input,logical,baseline,expected);
+                        encode_sequences_block<false,true,true,false,6U,false,true>(
+                            input,compact,candidate,actual);
+                    } else {
+                        encode_sequences_block<false,true>(input,logical,baseline,expected);
+                        encode_sequences_block<false,true,true>(input,compact,candidate,actual);
+                    }
+                    require(actual == expected);
+                    if (count == 100U) {
+                        require(candidate.sequence_tables[0].run_length_symbol.has_value());
+                        require(candidate.sequence_tables[2].run_length_symbol.has_value());
+                        require(!candidate.sequence_tables[1].run_length_symbol.has_value());
+                    }
+                }
+            }
+        }
+    }
+}
 int main() {
     static_assert(sizeof(sph::zstd::detail::parsed_sequence) == 12U);
     static_assert(sizeof(sph::zstd::detail::compact_sequence) == 8U);
     check_storage();
+    check_fixed_length_tables();
     std::cout << check_parser<6U>() + check_parser<7U>() << " scoped parser/entropy blocks passed\n";
 }
 

@@ -2,6 +2,57 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Fixed-length FSE writer retained, 2026-11-07
+
+Fresh optimized level-1 structured profiles put 51.89% of C++ cycles in the enclosing compression/entropy function and 39.89% in its collected-literal fast parser. Reference spends 45.97% in sequence writing, 30.55% in parsing, and 14.78% in sequence-code conversion. A separate 500-frame phase trace plus warmup shows 7,014 of 7,515 blocks have both literal-length and match-length FSE tables in run-length mode; offset tables remain compressed. These fixed length states emit zero bits. This differs from the existing double-RLE shortcut for fixed literal-length and offset tables.
+
+The GCC13 compact collected-literal path now dispatches once per block to advance only the offset FSE state when both length tables are run-length encoded. It preserves each sequence's length extra bits and offset extra bits, initial/final state handling, and the general fallback. No workspace or allocation is added. The worker grows by 192 bytes (127.60 to 127.79 KiB).
+
+Six rotating saved-production/current/reference triples per input, pinned to CPU2, give these old/new paired changes:
+
+| Input | Frames/trial | Median paired change vs old C++ | Old/new wins |
+| --- | ---: | ---: | ---: |
+| structured | 2000 | 10.94% | 6/6 |
+| mixed | 6000 | 8.96% | 6/6 |
+| varied | 6000 | 1.79% | 6/6 |
+| zero | 10000 | -1.16% | 0/6 |
+| repeated | 10000 | -11.24% | 0/6 |
+| random | 4000 | 1.08% | 5/6 |
+
+Structured and mixed improvements hold in all six pairs; the independent initial screen also won 6/6 by 10.66% and 9.12%. Repeated input is an explicit 11.24% paired regression, but remains 238.44% of reference throughput by the ratio of medians. Zero input loses 1.16% paired and remains 475.12% of reference. These costs are retained in exchange for removing the structured deficit and improving mixed throughput. A separate single-sequence guard did not recover repeated throughput (-0.71%, 3/6 versus the retained candidate) and lost structured -0.88% (2/6); it is not integrated. Varied improves relative to saved C++ but remains near, slightly below, reference. This does not achieve the all-level objective.
+
+Current all-nine-metric results (ratios of medians, distinct from paired changes above):
+
+| Input | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| structured | 741.18 | 684.54 | 108.28% | 5.32 | 6.14 | 86.61% | 127.79 | 632.52 | 20.20% |
+| mixed | 2584.80 | 2204.58 | 117.25% | 5.50 | 6.14 | 89.57% | 127.79 | 632.52 | 20.20% |
+| varied | 3444.87 | 3482.34 | 98.92% | 5.23 | 5.90 | 88.52% | 127.79 | 632.52 | 20.20% |
+| zero | 40606.25 | 8546.58 | 475.12% | 5.20 | 5.90 | 88.11% | 127.79 | 632.52 | 20.20% |
+| repeated | 23712.82 | 9944.85 | 238.44% | 5.21 | 5.92 | 87.99% | 127.79 | 632.52 | 20.20% |
+| random | 3829.86 | 2889.39 | 132.55% | 6.16 | 6.00 | 102.70% | 127.79 | 632.52 | 20.20% |
+
+All 108 timed workers produced reference-identical frames and passed allocation guards; both production decoders recovered each of the six input shapes. Optimized GCC13 unit, compact-sequence, and all-level compression-parity tests passed (17.78 seconds combined). The new differential control covers 96 fixed-length-table cases against the ordinary-record/general writer, including varying extra-bit values within the same symbols, zero and nonzero literal lengths, varying offsets, small sequence counts, and narrow/wide bit writers. Its final strict rerun and ASan/UBSan suite pass, alongside the existing 152 parser/entropy blocks. Rebuilt neighboring level-2, level-3, and level-18 worker SHA-256s are unchanged. Other compilers retain their prior path.
+
+README and BENCHMARKS_INPUTS now contain the five updated level-1 rows and all nine metrics; README also refreshes the varied level-1 row. Source profiles: `out/structured1-compress-profile-20261107/`. Candidate, final rotating trials, identities, tests, and reporting scripts: `out/length-rle-writer-20261107/`. Rejected guard: `out/length-rle-single-guard-20261107/`.
+
+## Current compression gap confirmations, 2026-11-07
+
+Before the retained writer change, rechecked six screened deficits with six alternating current/reference pairs per case. All 72 timed compression workers matched reference bytes and passed allocation guards; 12 decoder checks recovered the inputs in both implementations. Structured1 used 2,000 frames/trial, structured2 2,500, structured5 3,000, structured17 1,500, mixed17 300, and random14 500. Input/binary identities and raw data: `out/compression-gap-confirm-20261107/`.
+
+| Input/level | Median paired C++/reference speed | C++ pair wins |
+| --- | ---: | ---: |
+| Structured 1, before retained change | 94.94% | 0/6 |
+| Structured 2 | 101.23% | 6/6 |
+| Structured 5 | 100.25% | 3/6 |
+| Structured 17 | 101.21% | 5/6 |
+| Mixed 17 | 113.93% | 6/6 |
+| Random 14 | 115.25% | 6/6 |
+
+These longer measurements supersede the corresponding short-screen README compression rows. Structured1's confirmation motivated the retained change above and is superseded there. Structured5 is near parity; its ratio of independent speed medians remains 99.44%, despite its paired median being slightly over 100%. Do not infer a stable win from either near-parity summary. These baseline confirmations are not source improvements.
+
+NEXT: the remaining varied level-2 deficit is still material. Keep near-parity varied1/9/18, structured5, and high-level structured decoding under confirmation; the goal is not complete. Repeated-input overhead from the new writer dispatch is a measured follow-up opportunity, but the tested single-sequence guard is not a solution.
+
 ## Level-18 varied confirmation and child-link prefetch, 2026-11-07
 
 Replaced the two-frame level-18 varied screening observation with six longer rounds of 30 frames, alternating both implementation order and plain/perf-stat mode order on CPU2. All 24 current/reference workers match compressed bytes and pass allocation guards. Plain medians are C++ 6.19027 and reference 6.19913 MiB/s (99.86%); median paired ratio is 99.87%, with 3/6 C++ wins. Counter-run medians are 6.21194/6.13323 MiB/s, paired ratio 100.58%, with 4/6 wins. These results establish near parity, not a repeatable C++ win or a significant deficit.
