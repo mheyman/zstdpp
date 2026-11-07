@@ -6,6 +6,26 @@ namespace
 {
 using namespace sph::zstd::detail;
 
+void compare_runs(fse_compression_table const& table, unsigned alphabet, unsigned initial)
+{
+    fse_compression_state checked{table}, batched{table};
+    checked.initialize(initial); batched.initialize(initial);
+    forward_bit_writer expected, actual;
+    unsigned random{12345U};
+    for (unsigned length : {0U, 1U, 7U, 8U, 127U, 128U, 511U, 512U, 1024U, 2048U}) {
+        random = random * 1664525U + 1013904223U;
+        unsigned const symbol = table.run_length_symbol ? *table.run_length_symbol :
+            ((length & 1U) == 0U ? initial : random % alphabet);
+        for (unsigned i{}; i < length; ++i) {
+            auto const emitted = checked.encode_bits(symbol);
+            expected.append_unchecked(emitted.value, emitted.count);
+        }
+        batched.encode_zero_extra_run(symbol, length, actual);
+    }
+    checked.flush(expected); batched.flush(actual);
+    if (expected.finish() != actual.finish()) throw std::runtime_error{"batched FSE payload or final state mismatch"};
+}
+
 void compare(fse_compression_table const& table, unsigned alphabet, unsigned initial)
 {
     fse_compression_state checked{table}, validated{table};
@@ -25,6 +45,50 @@ void compare(fse_compression_table const& table, unsigned alphabet, unsigned ini
     checked.flush(left);
     validated.flush(right);
     if (left.finish() != right.finish()) throw std::runtime_error{"FSE final state mismatch"};
+    compare_runs(table, alphabet, initial);
+}
+
+void compare_run_streams()
+{
+    std::size_t cases{};
+    for (unsigned table_kind{}; table_kind < 3U; ++table_kind)
+        for (unsigned count : {1U, 2U, 7U, 8U, 9U, 15U, 16U, 17U, 31U, 127U, 128U, 129U, 511U, 512U, 513U, 1024U, 4096U})
+            for (unsigned pattern{}; pattern < (table_kind == 2U ? 1U : 4U); ++pattern)
+                for (std::size_t prefix : {0U, 1U, 7U, 255U})
+                {
+                    auto const ll_table = make_run_length_fse_table(1U);
+                    auto const of_table = make_run_length_fse_table(0U);
+                    normalized_counts counts{};
+                    counts.table_log = 9U;
+                    counts.maximum_symbol = 35U;
+                    counts.values[12] = 511;
+                    counts.values[35] = -1;
+                    auto const ml_table = table_kind == 0U ? build_fse_compression_table(counts) :
+                        table_kind == 1U ? build_fse_compression_table(make_default_normalized_counts(match_length_default_norm, 6U)) :
+                        make_run_length_fse_table(12U);
+                    selected_sequence_table const ll{sequence_table_mode::run_length, &ll_table};
+                    selected_sequence_table const of{sequence_table_mode::run_length, &of_table};
+                    selected_sequence_table const ml{table_kind == 2U ? sequence_table_mode::run_length : sequence_table_mode::compressed, &ml_table};
+                    compression_workspace workspace;
+                    workspace.reserve(131072U, count);
+                    parsed_block parsed;
+                    for (unsigned i{}; i < count; ++i)
+                    {
+                        auto const exceptional = pattern == 1U ? i % 17U == 0U :
+                            pattern == 2U ? (i & 1U) != 0U : pattern == 3U && (i == 0U || i + 2U == count);
+                        auto const code = static_cast<std::uint8_t>(exceptional ? 35U : 12U);
+                        parsed.sequences.emplace_back(1U, match_length_base[code] + (exceptional ? (i & 1U) : 0U), 1U, 1U);
+                        workspace.literal_codes[i] = 1U;
+                        workspace.offset_codes[i] = 0U;
+                        workspace.match_codes[i] = code;
+                    }
+                    std::vector<std::uint8_t> expected(prefix, 0xA5U), actual(prefix, 0xA5U);
+                    write_sequence_bitstream<false, false>(parsed, workspace, ll, of, ml, expected);
+                    write_sequence_bitstream<true, true>(parsed, workspace, ll, of, ml, actual);
+                    if (expected != actual) throw std::runtime_error{"batched sequence stream mismatch"};
+                    ++cases;
+                }
+    std::cout << cases << " batched sequence stream boundary cases passed\n";
 }
 
 void run_tests()
@@ -39,6 +103,11 @@ void run_tests()
         try { (void)checked.encode_bits((symbol + 1U) % 256U); }
         catch (entropy_error const&) { rejected = true; }
         if (!rejected) throw std::runtime_error{"checked API lost RLE validation"};
+        forward_bit_writer run_bits;
+        rejected = false;
+        try { checked.encode_zero_extra_run((symbol + 1U) % 256U, 1U, run_bits); }
+        catch (entropy_error const&) { rejected = true; }
+        if (!rejected) throw std::runtime_error{"batched API lost RLE validation"};
     }
     for (unsigned log{5U}; log <= 9U; ++log)
         for (unsigned alphabet : {2U, 7U, 17U, 29U})
@@ -111,7 +180,7 @@ void run_tests()
 
 int main()
 {
-    try { run_tests(); }
+    try { run_tests(); compare_run_streams(); }
     catch (std::exception const& error)
     {
         std::cerr << error.what() << '\n';

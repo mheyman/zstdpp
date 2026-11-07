@@ -4144,6 +4144,49 @@ namespace sph::zstd::detail
             return {emitted, number_bits};
         }
 
+        // Encode identical symbols with no interleaved extra bits. Validate
+        // an affine zero-bit state range once, then skip its transitions in
+        // batches. Nonlinear ranges and bit-emitting steps use the ordinary transition.
+        template <typename BitWriter>
+        void encode_zero_extra_run(unsigned symbol, std::size_t count, BitWriter& bits) {
+            if (table_->run_length_symbol) {
+                if (symbol != *table_->run_length_symbol)
+                    throw entropy_error{"symbol does not match Zstandard run-length FSE table"};
+                return;
+            }
+            auto const transform = table_->transforms[symbol];
+            unsigned limit{};
+            std::uint32_t delta{};
+            auto const begin = 1U << table_->table_log;
+            // A short run cannot amortize checking a full state range.
+            if (count >= begin && transform.delta_number_bits < (1U << 16U)) {
+                auto const end = std::min(2U * begin, (1U << 16U) - transform.delta_number_bits);
+                if (end > begin) {
+                    auto const offset = static_cast<std::uint32_t>(transform.delta_find_state);
+                    delta = static_cast<std::uint32_t>(table_->states[begin + offset]) - begin;
+                    if (delta <= begin) {
+                        limit = end;
+                        for (auto state = begin + 1U; state < end; ++state)
+                            if (static_cast<std::uint32_t>(table_->states[state + offset]) - state != delta) {
+                                limit = 0U; break;
+                            }
+                    }
+                }
+            }
+            while (count != 0U) {
+                if (value_ < limit) {
+                    if (delta == 0U) return;
+                    auto const skip = std::min(count, static_cast<std::size_t>((limit - 1U - value_) / delta + 1U));
+                    value_ += static_cast<std::uint32_t>(skip) * delta;
+                    count -= skip;
+                } else {
+                    auto const emitted = encode_bits<true>(symbol);
+                    bits.append_unchecked(emitted.value, emitted.count);
+                    --count;
+                }
+            }
+        }
+
     private:
         fse_compression_table const* table_{};
         std::uint32_t value_{};
@@ -5811,6 +5854,38 @@ namespace sph::zstd::detail
             if (literal_table.mode == sequence_table_mode::run_length &&
                 offset_table.mode == sequence_table_mode::run_length) [[likely]]
             {
+
+                // Fixed LL/OF symbols with no extra bits leave only the ML
+                // stream. Scan bounded runs without expanding sequence records.
+                if constexpr (Wide && Grouped) {
+                    if (literal_length_bits[last_ll] == 0U && last_of == 0U) {
+                        auto remaining = last_index;
+                        while (remaining != 0U) {
+                            auto const code = workspace.match_codes[remaining - 1U];
+                            if (match_length_bits[code] == 0U) {
+                                auto first = remaining;
+                                auto const repeated = std::uint64_t{0x0101010101010101ULL} * code;
+                                while (first >= 8U) {
+                                    std::uint64_t word;
+                                    std::memcpy(&word, workspace.match_codes.data() + first - 8U, sizeof(word));
+                                    if (word != repeated) break;
+                                    first -= 8U;
+                                }
+                                while (first != 0U && workspace.match_codes[first - 1U] == code) --first;
+                                match_state.encode_zero_extra_run(code, remaining - first, bits);
+                                remaining = first;
+                            } else {
+                                --remaining;
+                                auto const emitted = match_state.template encode_bits<true>(code);
+                                bits.append_unchecked(emitted.value, emitted.count);
+                                bits.append(parsed.sequences[remaining].match_length - 3U, match_length_bits[code]);
+                            }
+                        }
+                        match_state.flush(bits);
+                        bits.finish_into(output);
+                        return;
+                    }
+                }
                 for (std::size_t index{last_index}; index-- > 0U;)
                 {
                     auto const& sequence{parsed.sequences[index]};

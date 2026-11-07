@@ -2,6 +2,41 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Batched zero-extra-bit FSE runs retained, 2026-11-07
+
+The adaptive wide sequence writer now batches identical ML symbols when the existing LL/OF-RLE path has no literal or offset extra bits and the ML symbol has no extra bits. It scans matching code bytes with bounded8-byte loads plus an exact scalar tail. For each run, `encode_zero_extra_run` validates whether the zero-bit state range has a constant nonnegative increment, advances multiple states at once within that range, and uses the ordinary FSE transition at bit-emitting boundaries or on nonlinear tables. RLE validation, initial/final states, bit ordering and output capacity handling remain intact. Short runs skip range validation unless their length reaches the table size, bounding setup cost relative to useful work. No persistent cache, workspace growth or heap allocation is introduced.
+
+This removes iterations in long runs rather than adding the rejected per-symbol specialization. It is reached by the existing GCC13 level2 adaptive policy at1MiB and short double-fast sizes. Other production paths retain their previous behavior; rebuilt level1/3/18 executables are byte-identical to their saved versions. The level2 worker grows280 bytes,127.9453125→128.21875KiB. Memory figures below remain whole-process peak RSS and contain page-level variation, not evidence of a workspace change.
+
+Final optimized GCC13 `-O3 -DNDEBUG` CPU2 results use six rotating saved-production/current/reference triples per input. All108 compression workers match reference frames and pass ordinary/aligned allocation guards; all12 decoder checks recover the source bytes. These are measurements of the final short-run-bounded implementation, not the initial prototype.
+
+| Input | Frames/trial | Median paired change vs old C++ | Wins |
+| --- | ---: | ---: | ---: |
+| structured | 2000 | 14.42% | 6/6 |
+| mixed | 10000 | 11.63% | 6/6 |
+| varied | 10000 | -0.23% | 3/6 |
+| zero | 10000 | 0.65% | 5/6 |
+| repeated | 10000 | 0.14% | 3/6 |
+| random | 4000 | -1.21% | 1/6 |
+
+| Input | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| structured | 989.03 | 844.95 | 117.05% | 5.48 | 6.23 | 87.84% | 128.22 | 632.52 | 20.27% |
+| mixed | 3286.82 | 2666.22 | 123.28% | 5.65 | 6.24 | 90.60% | 128.22 | 632.52 | 20.27% |
+| varied | 3435.21 | 3740.78 | 91.83% | 5.36 | 6.11 | 87.60% | 128.22 | 632.52 | 20.27% |
+| zero | 39355.72 | 11367.36 | 346.22% | 5.33 | 6.12 | 87.19% | 128.22 | 632.52 | 20.27% |
+| repeated | 23301.69 | 14002.40 | 166.41% | 5.31 | 6.14 | 86.57% | 128.22 | 632.52 | 20.27% |
+| random | 3687.32 | 2947.63 | 125.09% | 6.29 | 6.22 | 101.10% | 128.22 | 632.52 | 20.27% |
+Structured and mixed improve14.42%/11.63% in all six pairs each. Varied is effectively unchanged (-0.23%,3/6 wins) and remains below reference; random loses1.21% (1/6), an explicit retained tradeoff while still125.09% of reference by ratio of medians. Repeated/zero are near-neutral. The initial unbounded prototype appeared to improve repeated13.59%; that gain did not survive the final source change and is not claimed for this implementation. Initial and final full matrices are stored separately under `out/fse-zero-runs-20261107/final/` and `bounded-final/`.
+
+The other affected256-KiB level2 specialization passes six alternating12,000-frame pairs per input: varied+0.05%(3/6;3445.50→3443.09MiB/s) and mixed+1.19%(6/6;2151.94→2176.39MiB/s). All24 frames/guards and four decoder checks pass. These controls use the established genuine mixed and varied short inputs from `out/l3-short-offbase-20261107/`; baseline headers come from commit9701edf. Per-trial paired changes and ratios of separate speed medians are different statistics.
+
+Strict optimized unit, compact-sequence, FSE-transition and all22-level byte-parity/interoperability tests pass (19.12s total,18.21s acceptance). Acceptance includes the256-KiB level2 cases. Permanent tests compare batched emitted streams/final states with the unchanged scalar transition across generated normalized and RLE tables, and compare wide batched streams with scalar streams in612 cases spanning run boundaries1/7/8/9/127/128/511/512/1024/4096, interrupting symbols with extra bits, nonlinear tables, and output prefixes. The expanded FSE tests pass ASan/UBSan; the existing index oracle covers3,676,128 generated/negative-one state cases. No MSVC throughput claim is made; its production policy does not select this adaptive wide path.
+
+README and BENCHMARKS_INPUTS now carry all nine final metrics for level2's five main shapes; README also refreshes the all-level varied table's level2 row. Other rows are preserved. Source, scripts, oracle, raw trials, binary/input identities and validation artifacts: `out/fse-zero-runs-20261107/`.
+
+Next audit runs of identical LL/ML/OF symbols and the actual seven-bit ML payload values in varied2 before attempting batching with a non-RLE literal table. Such an extension must preserve interleaving at every bit-emitting state boundary; symbol dominance alone does not prove constant payloads or permit skipping records. The varied2 gap and high-level decoder gaps remain open; this retained improvement does not complete the all-level objective.
+
 ## Dominant-symbol linear FSE transition control, 2026-11-07
 
 The isolated table audit inspects the actual selected table, dominant code, table log, and every incoming state in that code's zero-bit range. Each input uses one warmup plus one frame; all three diagnostic frames match reference. Varied level2 uses log7 length tables (128 states), correcting the earlier conservative512-state setup estimate. Dominant LL3 has either124 zero-bit incoming states with increments3–4 or126 with constant increment2. Dominant ML43 likewise alternates between constant+2 and increments3–4. OF is RLE in seven of eight blocks. Structured input instead has a mixed first block followed by14 blocks of4096 sequences: LL/OF are RLE, ML12 uses log9 with510 zero-bit states and constant increment1. Audit artifacts: `out/dominant-fse-audit-20261107/`.
