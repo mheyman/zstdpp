@@ -2,6 +2,45 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Current all-level varied compression screen and confirmations, 2026-11-07
+
+Rebuilt the optimized GCC13 evaluation workers from the current checkout (`Release`, `-O3 -DNDEBUG`, pledged size 1 MiB), then compared all 22 levels on the existing varied corpus, pinned to CPU2. Each level used one calibration frame per implementation followed by three alternating pairs with equal iteration counts, targeting roughly 350 ms per timed worker. The three lowest screen ratios (levels2/9/8) then received six longer pairs targeting roughly two seconds per worker. Slow high-level screen rows contain very few frames and must not be treated as confirmed wins.
+
+All **212 compression workers** emitted byte-identical reference frames and passed allocation guards; **44 decoder checks** recovered the corpus in both directions at every level. The table uses the longer confirmations where available and screening results elsewhere. Speeds use median elapsed time, RSS uses median current-process peak memory, and code size is the complete executable. This is a new measurement checkpoint, not a source optimization. Existing README five-pattern measurements are unchanged.
+
+| Level | Trials × frames | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 3 × 1164 | 3197.90 | 3193.74 | 100.13% | 5.22 | 5.95 | 87.73% | 127.60 | 632.52 | 20.17% |
+| 2 | 6 × 6743 | 3387.19 | 3739.03 | 90.59% | 5.34 | 6.15 | 86.82% | 127.95 | 632.52 | 20.23% |
+| 3 | 3 × 827 | 2606.64 | 2533.02 | 102.91% | 6.02 | 6.64 | 90.64% | 127.74 | 632.52 | 20.20% |
+| 4 | 3 × 485 | 2712.80 | 2489.31 | 108.98% | 7.58 | 7.86 | 96.52% | 127.74 | 632.52 | 20.20% |
+| 5 | 3 × 62 | 319.12 | 238.12 | 134.02% | 7.58 | 8.41 | 90.15% | 127.63 | 632.52 | 20.18% |
+| 6 | 3 × 83 | 320.46 | 307.06 | 104.37% | 7.57 | 8.38 | 90.39% | 119.20 | 632.52 | 18.85% |
+| 7 | 3 × 72 | 249.23 | 248.32 | 100.37% | 10.10 | 10.89 | 92.79% | 119.20 | 632.52 | 18.85% |
+| 8 | 6 × 390 | 192.79 | 194.91 | 98.91% | 10.07 | 10.89 | 92.50% | 119.20 | 632.52 | 18.85% |
+| 9 | 6 × 342 | 164.99 | 179.87 | 91.73% | 15.08 | 15.86 | 95.12% | 119.20 | 632.52 | 18.85% |
+| 10 | 3 × 44 | 136.30 | 126.40 | 107.83% | 15.10 | 15.91 | 94.87% | 119.21 | 632.52 | 18.85% |
+| 11 | 3 × 25 | 96.55 | 80.89 | 119.36% | 15.10 | 15.85 | 95.24% | 119.21 | 632.52 | 18.85% |
+| 12 | 3 × 29 | 99.79 | 82.06 | 121.61% | 15.10 | 15.85 | 95.24% | 119.21 | 632.52 | 18.85% |
+| 13 | 3 × 39 | 154.63 | 114.28 | 135.30% | 21.10 | 21.86 | 96.52% | 123.23 | 632.52 | 19.48% |
+| 14 | 3 × 24 | 103.29 | 72.46 | 142.55% | 21.07 | 21.88 | 96.32% | 123.23 | 632.52 | 19.48% |
+| 15 | 3 × 17 | 61.47 | 46.00 | 133.63% | 21.09 | 21.85 | 96.55% | 123.23 | 632.52 | 19.48% |
+| 16 | 3 × 3 | 9.48 | 8.45 | 112.22% | 21.32 | 21.75 | 98.04% | 149.02 | 632.52 | 23.56% |
+| 17 | 3 × 4 | 9.51 | 8.55 | 111.26% | 21.29 | 21.81 | 97.60% | 149.02 | 632.52 | 23.56% |
+| 18 | 3 × 2 | 5.96 | 6.05 | 98.48% | 21.78 | 22.32 | 97.60% | 145.41 | 632.52 | 22.99% |
+| 19 | 3 × 1 | 2.95 | 1.83 | 160.76% | 21.81 | 22.32 | 97.72% | 145.41 | 632.52 | 22.99% |
+| 20 | 3 × 1 | 3.03 | 1.83 | 165.63% | 21.80 | 22.25 | 97.98% | 145.41 | 632.52 | 22.99% |
+| 21 | 3 × 1 | 2.94 | 1.81 | 162.39% | 21.78 | 22.29 | 97.70% | 145.41 | 632.52 | 22.99% |
+| 22 | 3 × 1 | 2.96 | 1.82 | 162.67% | 21.78 | 22.23 | 98.00% | 145.41 | 632.52 | 22.99% |
+
+The longer ratios of median speeds confirm level2 at **90.59%**, level9 at **91.73%**, and level8 at **98.91%** of reference. Level18's 98.48% screen also remains an open confirmation target; it used only two frames per worker. Near-parity levels1/7 are not established wins either.
+
+Matched 1,000-frame level9 profiling produced exact frames with zero lost samples: C++ `find_best_match` accounts for88.58% of cycle samples, reference row matching85.47%. A separate counter pair measured C++/reference25.664/25.597B cycles,86.443/80.205B instructions,9.835/11.082B branches, and28.923/53.813M branch misses. Thus this pair has nearly equal cycle costs despite more C++ instructions and fewer branches/misses. The profiled worker times also reverse the unprofiled confirmation ordering (C++6.987s, reference7.338s). Do not equate the confirmed unprofiled throughput deficit with an8% excess in algorithmic cycle cost or infer a particular row-matcher instruction is responsible.
+
+Next prioritize the larger current **1-MiB level2** deficit, which is a different specialization from the repeatedly tested256-KiB collected-literal path. Inspect resolved parser/writer policies and obtain matched phase/counter evidence before reusing rejected short-input experiments. Keep varied levels8/9 and slow-screen18 on the work list; level9 needs repeated counter/unprofiled agreement before another row-layout microvariant.
+
+Corpus path: `out/zen3-sixlevel-20261025/pair-l9-varied/input.bin`; SHA-256 `34626ecb899a906ec37ad04087a6261c2471ccbf66fd461a7a5f8ae3914d0a07`. Reproduction scripts, iteration counts, all raw CSVs/frames, binary identities, summary, profiles and counters are under `out/varied-all-levels-20261107/`.
+
 ## Combined histogram metadata scans rejected, 2026-11-07
 
 Tested three isolated alternatives to `select_sequence_table`'s maximum-symbol scan followed by `max_element`: (1) accumulate both results in one loop, (2) express the highest nonzero symbol as an explicit maximum-index reduction, and (3) implement the combined scan with SSE2. These do not change histogram collection, table-selection rules, normalized counts, or allocation. Fresh optimized GCC13 level-2/256-KiB baselines were used with six alternating CPU2 20,000-frame pairs per input and variant.
