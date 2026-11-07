@@ -1,5 +1,22 @@
 # Benchmark results
 
+## Decoder workload identity and structured15 confirmation, 2026-11-06
+
+The short matrix reported structured15 decompression at 95.67% of reference. Six alternating CPU2-pinned 100,000-frame `perf stat` pairs on the retained decoder instead measured median paired throughput **106.89%** and cycle cost **93.65%**, with C++ faster in all six pairs. Median instructions/frame were C++/reference 587,641.09/565,285.55 and branch misses/frame 116.66/29.77. More instructions and branch misses did not imply slower decoding. The short-screen deficit is not confirmed; no code change is justified by it. These counter-instrumented results do not replace the uninstrumented README measurements.
+
+Added `eval/group_decoder_cases.py` to audit content identity without merging measurements. It hashes both decoder executables, the compressed frame, and the expected output for every level/input row, records exact paths and hashes, and fails for missing artifacts or duplicate case identities. Four tests verify grouping identical content at different paths, separating cases when any artifact changes (even at the same size), and rejecting missing or duplicate cases.
+
+The current 110 GCC decoder cases form **30 distinct artifact groups**. Structured11–15 form one group, so the structured15 confirmation applies to the same decoder code and frame used by those five rows; it is not five independent confirmations. Other groups include structured16–17, structured19–22, and random2–22. All row identities remain available in the manifest. Content identity does not eliminate process placement, timing variation or other run-condition differences, and the tool makes no automatic speed claims.
+
+Reproduce the audit after building and generating the matrix:
+
+```text
+python3 -m unittest eval.test_group_decoder_cases
+python3 eval/group_decoder_cases.py --matrix out/gcc-raw-copy-20261106/matrix --workers out/build/gcc13-all-levels/eval/bin --output out/decoder-groups.json
+```
+
+Use `--suffix .exe` for a complete set of Windows worker executables. Results and counters from this investigation are under `out/gcc-structured15-20261106/`. Library source and README metrics are unchanged. Next use the 30 groups to prioritize longer confirmations under consistent launch conditions, and investigate the remaining near-parity raw-copy workload rather than independent random-level algorithms. A raw-copy chunk-width experiment is distinct from the earlier rejected overlapping-match chunk changes: the raw source and destination are disjoint, and the recent frame-shaped placement benchmark supplies a reproducible target.
+
 ## GCC raw-block copy investigation, 2026-11-06
 
 Six 300,000-frame CPU2-pinned production-worker counter pairs on the identical random2 frame measured retained C++ at 100.75% median paired reference throughput (3/6 wins), with cycle cost 98.42%. Instructions/frame were 1,321.89/1,305.32 for C++/reference. This did not reproduce the short matrix's large raw-input deficits and does not establish a universal lead.
