@@ -1,5 +1,24 @@
 # Benchmark results
 
+## Tag allocation and buffer-placement diagnostic, 2026-11-07
+
+The audit confirms that fixed minimum-match-5 GCC13 ordinary, collecting and direct-offBase parser entry points do not use byte tags. Runtime minimum-match selection, other compilers and the ordinary minimum-match-4 parser still require them. History already rejected both empty tag members and merely skipping their resizes after cross-input regressions; this turn therefore investigated placement rather than repeating an uninstrumented removal claim.
+
+Built isolated level-2 256-KiB diagnostic workers with identical pre-timing address logging, retaining member layout in both. One skips the two unused tag-vector resizes; production remains unchanged. A retained padding allocation of 0, 64, 256 or 2048 bytes before compressor construction varies placement. Three rounds shuffle the eight input/padding cases and alternate worker order, using 8,000 frames each. All 48 timed workers matched reference frames and passed post-warmup allocation guards.
+
+The two removed tag arrays contain 32 KiB total and reduce aligned construction allocations from four to two. Long/short position-table page offsets remain equal between the two workers at each padding setting, but LL/OF/ML code arrays move backward by 128 bytes modulo 4096. With zero padding, table offsets are 1472/1536 and old code-array offsets are 1680/336/3088 versus 1552/208/2960 without tags. Input, output, parsed records and literals have page offset 16. Each configuration's observed offsets were stable across the three rounds despite different full addresses.
+
+| Pre-construction padding (bytes) | Mixed paired throughput change | Wins | Varied paired throughput change | Wins |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | -4.76% | 0/3 | -2.25% | 1/3 |
+| 64 | -3.48% | 0/3 | -2.22% | 1/3 |
+| 256 | -4.96% | 0/3 | -1.72% | 0/3 |
+| 2048 | +2.57% | 3/3 | +0.90% | 2/3 |
+
+This demonstrates placement sensitivity in the diagnostic and identifies an actual address change. It does not isolate a cache or aliasing mechanism, nor establish production speedup: logging alters constructor code, only three pairs were run per case, and the artificial padding is not a proposed production fix. RSS averages were modestly lower without tags, but savings varied with allocation behavior. No source or README performance rows changed.
+
+NEXT: prototype an owning, aligned slab for the three sequence-code arrays, with fixed relative offsets and a single allocation. Compare it both with and without unused tag storage under the same placement controls before considering production. Preserve scratch growth and copy/move semantics; avoid stored spans that would alias the wrong owner after a workspace copy. Audit prior work for equivalent slab designs first. The purpose is to reduce allocation count and make code-buffer placement intentional, not tune a magic padding value. Raw addresses, allocation counts, snapshots, metrics and exact frames: `out/tag-placement-20261107/`. Remaining compression/decompression speed gaps keep the overall goal open.
+
 ## GCC minimum-match-4 direct comparisons retained, 2026-11-07
 
 The history audit ruled out repeating canonical-code caching at commit and a two-container Huffman rewrite: both had already passed byte checks but failed throughput confirmation. Instead, the current profile identified the tagged double-fast parser as about half of 256-KiB level-3 samples. Its 18/16/16/4 window/hash/chain/minMatch specialization differed from the already direct minimum-match-5 path.
