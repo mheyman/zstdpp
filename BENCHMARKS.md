@@ -1,5 +1,24 @@
 # Benchmark results
 
+## Long overlapping-copy pointer traversal rejected (2026-11-07)
+
+The structured decoder profile motivated an isolated GCC 13 rewrite of the long-overlap loop. It retained 32-byte chunks, offset >= 1024, length >= 64, forward execution, and the exact final 32-byte copy. Source and destination pointers advanced directly instead of recomputing both addresses from an integer position. The bundled reference's `ZSTD_wildcopy` also advances pointers, but permits overcopy and peels an initial 16-byte copy; this experiment preserved our exact bounds. No allocation or workspace was added. Earlier wider-chunk and sequence-batching experiments were not repeated.
+
+Assembly confirms a different loop, but not fewer operations: candidate `parse()` at `d5a0`–`d5c1` has two pointer increments and two register moves in addition to the copy and comparison. Initial six-pair controls suggested structured18 +4.00% (4/6 wins), structured20 +1.29% (5/6), mixed3 +0.01% (3/6), and structured1 -2.26% (0/6). Those gains did not hold in longer confirmation:
+
+| Input / frame level | Frames per trial | Median paired gain | Wins / 6 | Previous C++ MiB/s | Candidate MiB/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| structured / 18 | 100,000 | +0.33% | 5 | 19116.12 | 19237.37 |
+| structured / 20 | 100,000 | +0.19% | 3 | 19394.24 | 19398.73 |
+| mixed / 3 | 50,000 | -0.01% | 3 | 9838.53 | 9788.02 |
+| structured / 1 | 10,000 | -0.56% | 1 | 1597.33 | 1586.84 |
+
+Measurements use alternating old/candidate order, optimized generic GCC 13, and CPU 2. Paired ratios differ from ratios of independently reported median speeds. All 110 reference-frame checks and 96 timed workers passed exact-output and allocation guards. An independent bytewise-copy oracle passed 4,480 cases under AddressSanitizer/UndefinedBehaviorSanitizer: 14 lengths including chunk boundaries and maximum block size, five offsets, and 64 destination alignments, with exact allocation ends. This validates the isolated copy mechanism, not the entire candidate's malformed-frame behavior.
+
+Reject the rewrite: the target gains shrink close to timing variation, while structured1 remains worse. Production headers, binaries, and README metrics are unchanged. Evidence: `out/long-copy-pointers-20261107/`, including candidate assembly, initial trials, `confirmation/`, and `oracle.cpp`.
+
+Next audit actual tiny-copy lengths and caller sites in the existing `copy_small_match` helper (9.53% in the current structured18 profile). Its jump-table dispatch and seven-byte body account for substantial samples, but samples alone do not establish invocation frequency. Count calls outside timed runs before considering a bounded branch-based exact-copy dispatcher; retain the 1–7-byte contract, overlap-seed semantics, and structured1/mixed3 controls. The all-level objective remains open.
+
 ## Structured level-5 confirmation and decoder profile (2026-11-07)
 
 Six alternating current/reference level-5 compression pairs, 10,000 frames each, generic optimized GCC 13 on CPU 2, measured structured input at 1059.29/1041.81 MiB/s. Median paired throughput is 101.37% of reference, with five of six wins. The old 99.4% screening result does not establish a stable deficit. All 12 workers produced reference-identical frames and passed allocation guards; both decoders recovered the input. No implementation changed. The README and detailed matrix now show all nine metrics from this longer confirmation: C++/reference RSS 7.73828125/8.521484375 MiB, executable size 127.640625/632.515625 KiB. Evidence and identities: `out/l5-structured-confirm-20261107/`.
