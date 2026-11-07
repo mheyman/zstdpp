@@ -1724,10 +1724,31 @@ namespace sph::zstd
             }
         }
 
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+        // Caller proves count >= 4096. Bounded vector copies avoid the large
+        // libc-copy slowdown seen with some source/destination page offsets.
+        // The final chunk ends exactly at count; neither buffer needs padding.
+        __attribute__((noinline)) static void copy_raw_block(
+            std::uint8_t* destination, std::uint8_t const* source, std::size_t count) noexcept
+        {
+            for (std::size_t position{}; position + 32U < count; position += 32U)
+                std::memcpy(destination + position, source + position, 32U);
+            std::memcpy(destination + count - 32U, source + count - 32U, 32U);
+        }
+#endif
+
         void emit_input(std::span<std::uint8_t const> input_bytes)
         {
             auto const output_begin{history_.size()};
-            history_.append(input_bytes);
+#if defined(__GNUC__) && !defined(__clang__) && defined(__x86_64__)
+            if (direct_output_ && input_bytes.size() >= 4096U)
+            {
+                auto const destination{history_.append_uninitialized(input_bytes.size())};
+                copy_raw_block(destination.data(), input_bytes.data(), input_bytes.size());
+            }
+            else
+#endif
+                history_.append(input_bytes);
             deliver(history_.bytes().subspan(output_begin));
             trim_history();
         }

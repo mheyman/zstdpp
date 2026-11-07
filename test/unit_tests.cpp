@@ -2904,6 +2904,30 @@ namespace
             verify(raw_literal_frame, capacity, true);
         verify(raw_literal_frame, input.size(), true);
 
+        // Explicit raw blocks exercise the large-copy threshold and every
+        // vector-tail remainder without depending on compressor decisions.
+        for (std::size_t tail{}; tail < 35U; ++tail)
+        {
+            auto const size{tail < 33U ? 4095U + tail : 131071U + (tail - 33U)};
+            input.resize(size);
+            for (std::size_t index{}; index < input.size(); ++index)
+                input[index] = static_cast<std::uint8_t>((index * 17U + index / 256U) & 255U);
+            std::vector<std::uint8_t> raw_frame;
+            raw_frame.reserve(input.size() + 12U);
+            raw_frame.insert(raw_frame.end(), {0x28U, 0xB5U, 0x2FU, 0xFDU, 0xA0U});
+            for (unsigned shift{}; shift < 32U; shift += 8U)
+                raw_frame.push_back(static_cast<std::uint8_t>(size >> shift));
+            auto const block_header{(size << 3U) | 1U};
+            for (unsigned shift{}; shift < 24U; shift += 8U)
+                raw_frame.push_back(static_cast<std::uint8_t>(block_header >> shift));
+            raw_frame.insert(raw_frame.end(), input.begin(), input.end());
+            check(reference_decompress(raw_frame, input.size()) == input,
+                "raw bounds fixture is a valid reference-decodable frame");
+            verify(raw_frame, 0U, true);
+            verify(raw_frame, input.size() - 1U, true);
+            verify(raw_frame, input.size(), true);
+        }
+
         // Long periodic matches cross their source range. Exercise every
         // 32-byte tail remainder with exact and undersized destinations.
         for (std::size_t period : {1024U, 2048U, 28672U})
