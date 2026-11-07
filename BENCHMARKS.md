@@ -2,6 +2,23 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## Fast-parser whole-record copy rejected, 2026-11-07
+
+Disassembly of the production level-2 fast parser and the preceding direct-offBase candidate identifies packed-field construction work at the normal vector append. Production around `0x10624` masks match length, loads the destination packed word, preserves its upper two bits, stores the merged word, and then stores the byte containing the repeat code. The rejected direct-offset candidate still performs this read/modify/write work around `0x10567`, even though its repeat code is zero. This is direct assembly evidence, not proof that these stores dominate total runtime.
+
+An isolated candidate keeps production's logical offsets, 12-byte `parsed_sequence`, bitfields, and encoder unchanged. Only fast-parser append changes: construct the sequence value, default-emplace its destination, then `memcpy` the complete trivially copyable record. Other block record types retain ordinary push_back. This tests complete-record transfer without enlarging storage or repeating the previously rejected 16-byte ordinary-field layout.
+
+GCC13 does emit full-width destination copies, but it also retains zero initialization and stack temporary stores/loads. The candidate normal append around `0x106e5–0x10742` materializes the record on the stack, zeros the destination with eight- and four-byte stores, then copies eight and four bytes from that temporary. Thus the source-level memcpy does not produce the intended minimal record-store sequence.
+
+| Input | Median paired throughput change | Candidate pair wins | Production median MiB/s | Candidate median MiB/s |
+| --- | ---: | ---: | ---: | ---: |
+| Varied, 1 MiB | -1.98% | 2/6 | 3470.60 | 3389.41 |
+| Mixed, 1 MiB | -5.47% | 0/6 | 3004.32 | 2827.56 |
+
+Both cases use six alternating CPU-2-pinned optimized GCC13 pairs of 10,000 frames. All 24 workers pass byte-for-byte comparison against independently generated reference frames and worker allocation guards. Percent changes are medians of pair ratios. The candidate is rejected before broader parser-history/sanitizer gates; production headers and README metrics are unchanged. Scripts, isolated headers, binaries, disassembly, and all measurements are in `out/sequence-record-copy-20261107/`; comparative original/direct-offset disassembly is in `out/fast-offbase-20261107/`.
+
+NEXT: avoid another emplace/copy spelling or the already tested larger plain record. Any proposed sequence-storage redesign must demonstrate fewer actual stores and loads in optimized assembly and preserve the measured mixed control. The main level-2 entropy cost still warrants a matched instruction profile to distinguish code gathering, FSE table work, and the reverse writer before selecting another optimization.
+
 ## Fast level-2 direct offBase trial rejected, 2026-11-07
 
 Reference fast parsing stores encoded offBase in its sequence records. C++ level-2 fast parsing instead stores a logical offset and repeat code, then reconstructs offBase in both code gathering and reverse sequence writing. An isolated candidate added an explicit parser policy and selected the existing DirectOffBase encoder policy only for GCC13 level 2 with a pledged 1 MiB source. All three fast-parser sequence emission sites were adapted, including initial RLE and immediate repeat matches; record size, allocation policy, and bit-writer selection stayed unchanged. This is distinct from the previously rejected 256-KiB double-fast trial.
