@@ -1,5 +1,21 @@
 # Benchmark results
 
+## Native raw-buffer placement control, 2026-11-06
+
+To investigate raw-copy regressions caused by changes outside the raw decoder path, a separate diagnostic worker records encoded-input and output addresses before timing. It uses the retained decoder header and MSVC `/O2 /Ob3`, with ordinary allocation or a caller-owned output span at a controlled offset from a 4 KiB boundary. Four byte-identical executable copies each ran two rotated trials per offset, pinned to CPU 2, decoding the same random level-2 frame 100,000 times per trial. All 40 workers passed warmup exact-output and timed ordinary-allocation checks.
+
+| Output offset within page | Median MiB/s | Minimum MiB/s | Maximum MiB/s |
+| --- | ---: | ---: | ---: |
+| Ordinary allocation: 96 | 42,312.04 | 40,560.15 | 46,074.72 |
+| 0 | 42,898.76 | 37,494.63 | 46,774.30 |
+| 16 | 42,558.09 | 37,063.82 | 46,739.35 |
+| 64 | 41,819.44 | 40,159.37 | 47,473.36 |
+| 2,048 | 42,770.12 | 37,391.84 | 48,776.44 |
+
+The encoded allocation starts at page offset 96 in every trial. Ordinary output allocations also consistently start at offset 96, so differing low-order buffer alignment cannot alone explain their spread. Controlled output offsets do not remove the variation. This does not rule out higher address bits, physical placement, code placement, frequency effects, or other execution effects, and does not identify a root cause. Encoded allocation alignment is not the alignment of every raw block payload: frame and block headers shift those payloads.
+
+This diagnostic changes the worker's output storage and generated code; it is not a direct replication of the production worker or a C++/reference comparison. Its medians are not replacement README benchmarks. No production or harness alignment change is retained. Source, runner, hashes, addresses, CPU times, individual measurements and summary are in `out/native-buffer-placement-20261106/` (`worker.cpp`, `run.ps1`, `hashes.json`, `trials.csv`, `summary.csv`). Next, prioritize the reproducible structured-frame regressions and their generated sequence/copy code rather than tuning alignment against these noisy raw results.
+
 ## Native level-2 raw-literal investigation, 2026-11-06
 
 The structured level-2 deficit persisted across four fresh copies of each implementation, three alternating CPU2 trials of 10,000 frames per copy. C++ lost all 12 pairs, with median paired throughput 9.01% below reference. Copy-median C++ rates were 1,758.26–1,769.59 MiB/s versus reference 1,933.57–1,948.44 MiB/s. `out/native-l2-confirm-20261106/multi-image/` contains hashes, image addresses, and results; `base` denotes reference and `cand` denotes current C++ in those files.
