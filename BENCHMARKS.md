@@ -2,6 +2,24 @@
 
 This is the detailed record of profiling, optimization experiments, and benchmark reproduction. Entries include rejected changes and historical measurements; they are not all results for the current implementation. See the [README](README.md#performance) for current performance tables, the [full input matrix](BENCHMARKS_INPUTS.md) and [Windows decoder matrix](BENCHMARKS_NATIVE.md) for their measurement conditions, and the [performance work list](PERFORMANCE_PLAN.md) for priorities and task status. Earlier progress notes are preserved in [development history](PERFORMANCE_HISTORY.md).
 
+## README matrix measurement provenance
+
+These notes record which measurements populate the current README tables. Keep future refresh history here, with implementation decisions and next steps in [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md). The README presents the library and the latest published comparisons.
+
+Measured 2026-11-06 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
+
+Level-3 compression was refreshed on 2026-11-07. Levels 3 and 4 use six alternating 3,000-frame compression trials per input.
+
+Decompression was measured on 2026-11-07 using three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured levels 18, 20, and 21 (100,000). Measurement details and optimization tradeoffs are recorded in the [benchmark report](#bounded-short-overlap-copy-retained-2026-11-07).
+
+Memory is whole-process peak resident set size (RSS), including the benchmark worker. On Linux, this is the current executable's `VmHWM`, excluding peaks inherited from its launcher. Code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
+
+The main matrix covers zero-filled, repeated, structured, pseudo-random, and mixed data. Additional tables below cover varied data and shorter inputs. Results depend on the compiler, input, and level; the C++ implementation does not yet outperform reference in every case.
+
+Six-trial compression confirmations on 2026-11-07 refresh structured levels 2, 5, and 17, mixed level 17, and random level 14. See the [confirmation report](#current-compression-gap-confirmations-2026-11-07) for iteration counts and variability. These update the measurements without a source change.
+
+Level-1 compression was refreshed on 2026-11-07 after specializing blocks with fixed length codes. Six rotating old/current/reference trials per input verified exact frames and both decoders; see the [measurement report](#fixed-length-fse-writer-retained-2026-11-07).
+
 ## Fixed-length FSE writer retained, 2026-11-07
 
 Fresh optimized level-1 structured profiles put 51.89% of C++ cycles in the enclosing compression/entropy function and 39.89% in its collected-literal fast parser. Reference spends 45.97% in sequence writing, 30.55% in parsing, and 14.78% in sequence-code conversion. A separate 500-frame phase trace plus warmup shows 7,014 of 7,515 blocks have both literal-length and match-length FSE tables in run-length mode; offset tables remain compressed. These fixed length states emit zero bits. This differs from the existing double-RLE shortcut for fixed literal-length and offset tables.

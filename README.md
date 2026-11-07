@@ -100,19 +100,17 @@ For GCC, use the `gcc-release-eval` configure preset and `gcc-pair` build preset
 
 ## Performance
 
-Measured 2026-11-06 with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
+The tables compare optimized GCC 13 builds of C++ and bundled reference zstd at **levels 1–22** on five deterministic **1 MiB inputs**: zero-filled, repeated, structured, pseudo-random, and mixed data. Additional tables cover varied data and shorter inputs. Measurements were collected on 2026-11-06–07; per-row trial counts and refresh dates are recorded in the [benchmark report](BENCHMARKS.md#readme-matrix-measurement-provenance).
 
-Level-3 compression was refreshed on 2026-11-07. Levels 3 and 4 use six alternating 3,000-frame compression trials per input.
+Each summary cell gives **speed / peak memory / executable size** as C++ percentages of reference:
 
-Decompression was measured on 2026-11-07 using three alternating 1,000-frame trials per row, with six longer trials for structured level 1 (3,000 frames), mixed level 3 (20,000), and structured levels 18, 20, and 21 (100,000). Measurement details and optimization tradeoffs are recorded in the [benchmark report](BENCHMARKS.md#bounded-short-overlap-copy-retained-2026-11-07).
+- **Speed:** above 100% is faster.
+- **Memory:** below 100% uses less whole-process peak resident memory (RSS).
+- **Code size:** below 100% means a smaller complete benchmark executable, not just library instructions.
 
-Memory is whole-process peak resident set size (RSS), including the benchmark worker. On Linux, this is the current executable's `VmHWM`, excluding peaks inherited from its launcher. Code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
+Expand the absolute tables for C++ values, reference values, and their ratios for all three metrics. Linux memory uses the worker's `VmHWM`, excluding peaks inherited from its launcher. Decompression levels identify the settings used to compress each frame.
 
-The main matrix covers zero-filled, repeated, structured, pseudo-random, and mixed data. Additional tables below cover varied data and shorter inputs. Results depend on the compiler, input, and level; the C++ implementation does not yet outperform reference in every case.
-
-Six-trial compression confirmations on 2026-11-07 refresh structured levels 2, 5, and 17, mixed level 17, and random level 14. See the [confirmation report](BENCHMARKS.md#current-compression-gap-confirmations-2026-11-07) for iteration counts and variability. These update the measurements without a source change.
-
-Level-1 compression was refreshed on 2026-11-07 after specializing blocks with fixed length codes. Six rotating old/current/reference trials per input verified exact frames and both decoders; see the [measurement report](BENCHMARKS.md#fixed-length-fse-writer-retained-2026-11-07).
+Every measured compression frame matched reference bytes, and both decoders recovered the original input. Short trials are screening measurements; results near parity remain timing-sensitive. Performance depends on the compiler, level, and input—the C++ implementation does not yet outperform reference in every case. See the [input definitions and measurement conditions](BENCHMARKS_INPUTS.md) before comparing results across machines.
 
 ### Compression (% of reference)
 
