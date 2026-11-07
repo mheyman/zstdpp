@@ -76,7 +76,10 @@ def main():
         "exact decoded bytes at warmup; the C++ worker also rejects ordinary allocations "
         "during timing. Short-screen and near-parity results remain timing-sensitive. "
         "These are native decompression measurements; the "
-        "[GCC compression/decompression matrix](BENCHMARKS_INPUTS.md) remains a separate comparison."
+        "[GCC compression/decompression matrix](BENCHMARKS_INPUTS.md) remains a separate comparison. "
+        "Native speed comparisons are provisional: an "
+        "[identical-binary control](BENCHMARKS.md#native-identical-binary-control-2026-11-06) "
+        "showed substantial timing differences between executable copies."
     )
     table = detailed_table(data, "decompress")
     section = ("## Native Windows decompression\n\n" + description +

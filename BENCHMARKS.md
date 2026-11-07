@@ -1,5 +1,13 @@
 # Benchmark results
 
+## Native identical-binary control, 2026-11-06
+
+A four-way CPU2-pinned comparison of the retained baseline, two individual experiments, and their combination initially suggested improvements in both structured controls. The mixed-input baseline was unexpectedly slow. A second rotating-order control compared two copies each of baseline and combined binaries, using equal-length executable names and 30,001 iterations per run. The baseline copies have identical SHA-256 `6126ccf646bb8b31032e25471801f722943fb4a1a41c9fb2f601bbf41ed0d082`, yet `baseline.exe` measured 6,123.94–7,481.25 MiB/s while `basecopy.exe` measured 8,459.36–8,592.23 MiB/s. The median paired difference was **21.86%**, with the duplicate faster in all four trials. The combined executable's two copies were much closer to one another.
+
+This does not establish the cause: executable mapping, process scheduling, or another host effect still needs investigation. It does establish that this apparent mixed-input gain cannot be attributed solely to changed C++ code. The combined change was not retained. Existing native tables preserve their measured numbers and provenance, but speed comparisons are provisional until this control discrepancy is resolved. GCC results were not part of this observation. Artifacts, equal-binary hashes, and scripts are under `out/msvc-combined-reader-20261106/`.
+
+The experiment also added permanent malformed-frame interoperability coverage: 36,578 cases flip each compressed-payload bit, shorten declared payloads to reach entropy decoding, compare reference/C++ acceptance and successful output, and verify output guards. This passed for the candidate and restored MSVC implementation, and for the restored GCC implementation.
+
 ## MSVC scheduled sequence reservoir, 2026-11-06
 
 The medium-block MSVC decoder now uses a byte-aligned 64-bit reservoir with a consumed-bit count. It reloads after initial FSE states and after each non-final sequence, with an extra reload between match/literal extras when their combined widths require it. The validated table-width bounds keep interior reads within the reservoir; short input heads retain per-read truncation checks. This implements the reference's x64 refill schedule rather than preparing the previous absolute-bit-position reader. No allocations are added.
