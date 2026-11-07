@@ -17,6 +17,28 @@ extern "C" {
 
 namespace
 {
+void test_raw_literal_copy_boundaries()
+{
+    for (std::size_t size : {0U, 1U, 255U, 256U, 257U, 511U, 512U, 513U,
+                            131071U, 131072U, 131073U})
+    for (std::size_t offset{}; offset < 8U; ++offset)
+    {
+        std::vector<std::uint8_t> storage(size + offset);
+        for (std::size_t i{}; i < storage.size(); ++i)
+            storage[i] = static_cast<std::uint8_t>(i * 37U + 19U);
+        auto const input = std::span<std::uint8_t const>{storage}.subspan(offset);
+        std::vector<std::uint8_t> output;
+        output.reserve(size + 3U);
+        output.assign(3U, 0xA5U);
+        auto const* original = output.data();
+        sph::zstd::detail::append_raw_literal_chunks(output, input);
+        if (output.data() != original || output.size() != size + 3U ||
+            output[0] != 0xA5U || output[1] != 0xA5U || output[2] != 0xA5U ||
+            !std::ranges::equal(input, std::span<std::uint8_t const>{output}.subspan(3U)))
+            throw std::runtime_error("raw literal copy boundary mismatch or allocation");
+    }
+}
+
 void test_sample_boundaries()
 {
     sph::zstd::detail::symbol_count_workspace workspace;
@@ -215,6 +237,7 @@ int main()
 {
     try
     {
+        test_raw_literal_copy_boundaries();
         test_sample_boundaries();
         test_reference_history();
         test_cpp_history();

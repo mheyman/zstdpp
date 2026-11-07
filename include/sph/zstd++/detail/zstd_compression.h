@@ -6113,13 +6113,32 @@ namespace sph::zstd::detail
         bits.finish_into(output);
     }
 
+    // Isolate the copy loop from the encoder's register allocation. Short
+    // chunks avoid a measured large-copy placement penalty on selected builds.
+#if defined(__GNUC__) || defined(__clang__)
+    [[gnu::noinline]]
+#elif defined(_MSC_VER)
+    __declspec(noinline)
+#endif
+    inline void append_raw_literal_chunks(std::vector<std::uint8_t>& output,
+        std::span<std::uint8_t const> literals)
+    {
+        while (literals.size() >= 256U)
+        {
+            auto const chunk = literals.first<256U>();
+            output.insert(output.end(), chunk.begin(), chunk.end());
+            literals = literals.subspan(256U);
+        }
+        output.insert(output.end(), literals.begin(), literals.end());
+    }
+
     template <bool CarefulSelection = false, bool GroupFse = false, bool CollectedLiterals = false,
         bool OptimalHuffmanDepth = false, unsigned LiteralGainLog = (OptimalHuffmanDepth ? 7U : 6U),
         bool DeferredCodes = false, bool WideSequenceBits = false,
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
         bool ValidateCodesOnce = false, bool DirectOffBase = false,
-        bool DoubleRleShortcut = false,
+        bool DoubleRleShortcut = false, bool ChunkRawLiterals = false,
         bool AlignedLiterals,
         typename ParsedView = parsed_block_view>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
@@ -6268,7 +6287,10 @@ namespace sph::zstd::detail
             auto& raw_literals{workspace.raw_literals};
             raw_literals.clear();
             append_raw_literals_header(raw_literals, literal_bytes.size());
-            raw_literals.insert(raw_literals.end(), literal_bytes.begin(), literal_bytes.end());
+            if constexpr (ChunkRawLiterals)
+                append_raw_literal_chunks(raw_literals, literal_bytes);
+            else
+                raw_literals.insert(raw_literals.end(), literal_bytes.begin(), literal_bytes.end());
             output.swap(raw_literals);
         }
 #ifdef SPH_ZSTDPP_TRACE_PHASES
@@ -6534,7 +6556,7 @@ namespace sph::zstd::detail
         bool PackedLengthBits = false, bool GroupedStateWrites = GroupFse,
         bool AdaptiveGroupedWrites = false, bool AdaptiveWideWrites = false,
         bool ValidateCodesOnce = false, bool DirectOffBase = false,
-        bool DoubleRleShortcut = false,
+        bool DoubleRleShortcut = false, bool ChunkRawLiterals = false,
         bool AlignedLiterals>
     inline void encode_sequences_block(std::span<std::uint8_t const> input,
         compact_parsed_block const& parsed, basic_compression_workspace<AlignedLiterals>& workspace,
@@ -6543,7 +6565,7 @@ namespace sph::zstd::detail
         encode_sequences_block<CarefulSelection, GroupFse, CollectedLiterals,
             OptimalHuffmanDepth, LiteralGainLog, DeferredCodes, WideSequenceBits,
             PackedLengthBits, GroupedStateWrites, AdaptiveGroupedWrites, AdaptiveWideWrites,
-            ValidateCodesOnce, DirectOffBase, DoubleRleShortcut,
+            ValidateCodesOnce, DirectOffBase, DoubleRleShortcut, ChunkRawLiterals,
             AlignedLiterals, compact_parsed_block_view>(
                 input, compact_parsed_block_view{parsed}, workspace, output);
     }

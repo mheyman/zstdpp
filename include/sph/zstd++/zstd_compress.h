@@ -776,7 +776,13 @@ namespace sph::zstd
                                Parameters.compression_level == 3 &&
                                (effective_parameters_.pledged_source_size == 1048576U ||
                                 effective_parameters_.pledged_source_size == 262144U))
+                            // Qualified short level-2 raw-literal copy path.
+                            , (effective_parameters_.strategy == compression_strategy::double_fast &&
+                               effective_parameters_.minimum_match == 5U &&
+                               Parameters.compression_level == 2 &&
+                               effective_parameters_.pledged_source_size == 262144U)
 #else
+                            , false
                             , false
                             , false
 #endif

@@ -2057,3 +2057,56 @@ Ratios use medians of per-trial ratios, so they need not equal ratios of indepen
 The unconditional candidate is **not retained**. Both candidate executables remain 133.289 KiB (same whole-file size as baseline; this does not imply unchanged instructions). All 128 timed workers across screening, confirmation and qualification passed allocation guards and byte comparisons; confirmation frames were additionally hashed against reference output. Sixteen reciprocal decoder checks passed. This rejected candidate did not receive broad all-level or sanitizer qualification. The prepared `zero-confirm.py` was not run after the broader tradeoff was established. No README metrics change.
 
 Next: compare generated code around raw-literal assembly and test a separate non-inlined chunk helper, so the loop's temporaries do not extend into the surrounding encoder. Treat reduced register pressure as a hypothesis until assembly and measurements support it. If that passes mixed/varied/structured controls, enable only the measured short level-2 specialization, run full acceptance tests, and publish all nine metrics from isolated reference comparisons. Evidence: `out/raw-literal-chunks-20261107/{screen,confirmation,other-shapes}/`, preparation/run scripts and copied candidate headers.
+
+## Outlined raw-literal copy retained (2026-11-07)
+
+The short level-2 GCC 13 path appends raw literals in 256-byte chunks through a separate non-inlined helper. The previous inlined loop improved mixed input but regressed structured input; separating the loop avoids that observed tradeoff in the selected specialization. This isolates loop temporaries from the surrounding encoder, but register pressure has not been proven to be the sole cause. Huffman source placement, raw-literal header bytes, sequence encoding, buffer reservation and allocation policy stay unchanged. The template flag defaults off and is enabled only for GCC 13, level 2, double-fast minimum-match 5, and a 262,144-byte compiled source pledge. Other compilers keep the previous path.
+
+Six rotating baseline/candidate/reference screening trials (20,000 frames for mixed/varied, 10,000 for structured) produced paired gains of 6.48%, 1.73%, and 0.80%, respectively. The integrated short worker's code and read-only data sections match that screened candidate exactly. The final six-input qualification below uses six rotating baseline/current/reference trials per row on CPU 2, optimized GCC 13 `-O3 -DNDEBUG`: 40,000 frames for varied/mixed, 10,000 for structured/random, and 100,000 for zero/repeated. Inputs are 256 KiB; the four pure patterns are prefixes of their main-matrix inputs, and mixed/varied use the existing short-input fixtures.
+
+### Final short level-2 measurements
+
+| Input | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| varied | 3463.93 | 3581.68 | 96.71% | 4.50 | 4.49 | 100.17% | 133.41 | 632.52 | 21.09% |
+| mixed | 2223.09 | 2095.79 | 106.07% | 4.71 | 4.48 | 104.92% | 133.41 | 632.52 | 21.09% |
+| structured | 885.31 | 836.92 | 105.78% | 4.59 | 4.62 | 99.28% | 133.41 | 632.52 | 21.09% |
+| zero | 26865.53 | 9560.01 | 281.02% | 4.48 | 4.48 | 100.09% | 133.41 | 632.52 | 21.09% |
+| repeated | 22466.01 | 7694.34 | 291.98% | 4.47 | 4.46 | 100.35% | 133.41 | 632.52 | 21.09% |
+| random | 3420.82 | 2663.80 | 128.42% | 4.70 | 4.60 | 102.25% | 133.41 | 632.52 | 21.09% |
+
+Tables use independent median throughput and whole-process peak RSS; code is the complete worker executable. Paired ratios below describe changes within matched trials and may differ from ratios of independent medians.
+
+| Input | Paired change vs previous C++ | Wins / 6 | Paired % reference | C++ wins vs reference / 6 |
+| --- | ---: | ---: | ---: | ---: |
+| varied | +0.25% | 4 | 96.08% | 0 |
+| mixed | +3.95% | 6 | 106.30% | 6 |
+| structured | +0.32% | 4 | 105.68% | 6 |
+| zero | -0.16% | 3 | 280.89% | 6 |
+| repeated | -0.26% | 3 | 294.95% | 6 |
+| random | +0.00% | 3 | 128.20% | 6 |
+
+Mixed improves 3.95% paired and beats reference in all six trials. Other input changes are near neutral in this qualification; varied still trails reference and is not claimed as a resolved deficit. The short worker grows by 120 bytes (133.289 to 133.406 KiB), with no added workspace or timed allocations.
+
+### Other specializations and validation
+
+Rebuilt 1 MiB workers at all 22 levels have identical read-only data to their previous builds. Code sections are identical at 21 levels; level 4's generated instructions change despite the feature being disabled. Thirteen worker files grow by eight bytes; the remaining nine retain their prior sizes. Full executable-size columns are refreshed rather than treating file size as instruction size.
+
+Level 4 therefore received six rotating 3,000-frame baseline/current/reference trials on all six inputs:
+
+| Input | Paired change vs previous C++ | Wins / 6 | Paired % reference | C++ wins vs reference / 6 |
+| --- | ---: | ---: | ---: | ---: |
+| structured | -0.14% | 2 | 99.92% | 3 |
+| mixed | -1.55% | 2 | 122.01% | 6 |
+| varied | -0.61% | 2 | 111.07% | 6 |
+| zero | +0.92% | 4 | 270.91% | 6 |
+| repeated | -1.70% | 2 | 186.12% | 6 |
+| random | +1.28% | 4 | 145.31% | 6 |
+
+The mixed/repeated level-4 changes trade about 1.6–1.7% against the previous build while retaining reference leads. Structured level 4 remains near parity: its independent median ratio is slightly above 100%, but the paired median is 99.92% and only three pairs win. It needs stronger confirmation before being considered faster than reference. The README and main matrix use these current measurements, not the earlier stronger-looking row.
+
+The 64 KiB level-3 worker's code/read-only data match the saved benchmark artifact; its executable size is refreshed. The 256 KiB level-3 worker differs from its older saved artifact, so its six-input table is refreshed with six alternating 12,000-frame current/reference pairs. That refresh is measurement maintenance, not a claimed direct benefit of the disabled copy path.
+
+Validation: optimized strict-warning build; unit, compact-sequence, all-level compression parity and literal-sampling tests pass. The new permanent test checks 88 copy-boundary/alignment cases, including empty input, chunk edges and the maximum-block boundary, preserving an existing prefix and preallocated output storage. An additional 4,360 exact-size/alignment cases pass ASan/UBSan. The full acceptance suite includes both 256 KiB level-2 fixtures and reciprocal decoding. All 342 timed workers across screening, final qualification and refreshes pass allocation guards and reference-byte comparisons; 42 decoder checks pass. No new speed claim is made for Windows.
+
+Artifacts: `out/raw-literal-helper-20261107/`, including preparation scripts, sanitizer boundary driver, build/test logs, code-section comparisons, and `results/`, `final/`, `level4/`, and `short3/` raw results. The comparison scripts and identities in final results record executable/corpus inputs. Next priorities remain the short level-2 varied deficit, near-parity structured level-4 compression, and structured high-level decompression. The overall performance objective remains open.
