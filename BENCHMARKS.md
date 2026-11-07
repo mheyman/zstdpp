@@ -1,5 +1,28 @@
 # Benchmark results
 
+## Short level-2 parser-to-entropy fusion rejected (2026-11-07)
+
+Fresh matched profiles of the retained `334bf31` short level-2 worker and reference used the same 256 KiB varied input, CPU2, 150,000 frames, and `cycles:u` sampling period 1,000,003. Both reports show zero lost samples (throttling was not audited). C++ sampled 47.462 billion cycles versus reference 47.332 billion. C++ self samples include double-fast parsing 37.47%, its separate match counter 8.71%, FSE `encode_bits` 6.78%, and Huffman literal selection 6.66%. Reference parsing accounts for 48.64%, sequence writing 13.07%, and sequence-to-code conversion 5.93%. Function boundaries differ, so these percentages do not establish individual phase speed ratios. Frames matched and both decoders recovered the input. Evidence: `out/short-varied-current-20261107/`.
+
+Tested computing LL/OF/ML symbols during double-fast parsing into the existing code buffers, then skipping the encoder's forward conversion loop. The prototype preserves 12-byte sequence records and adds one 8-byte literal-count workspace field, with no additional heap buffer. GCC outlined the new per-sequence store lambda. A second candidate forces only that lambda inline; symbol inspection confirms its standalone function is absent. Both candidates remain isolated under `out`; neither changes production headers.
+
+Six rotating baseline/candidate/reference triples per input used optimized generic GCC13 builds on CPU2, 20,000 frames for varied and mixed and 10,000 for structured. All inputs are 256 KiB. Throughputs below are medians; changes are medians of paired candidate/baseline ratios.
+
+| Candidate | Input | Baseline MiB/s | Candidate MiB/s | Reference MiB/s | Paired change | Wins / 6 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Outlined store | varied | 3501.90 | 3272.86 | 3538.27 | -6.35% | 0 |
+| Outlined store | mixed | 2165.68 | 1950.33 | 2039.31 | -9.67% | 0 |
+| Outlined store | structured | 888.36 | 775.76 | 833.60 | -12.24% | 0 |
+| Forced-inline store | varied | 3548.31 | 3509.04 | 3587.30 | -1.33% | 0 |
+| Forced-inline store | mixed | 2242.20 | 2278.01 | 2103.30 | +1.23% | 5 |
+| Forced-inline store | structured | 884.26 | 915.86 | 835.68 | +3.97% | 6 |
+
+The baseline executable is 133.40625 KiB; outlined and inline candidates are 133.96875 and 141.859375 KiB respectively. Inline varied performance remains 97.67% of reference by paired ratio, winning only one of six reference comparisons. Reject both versions: the target varied deficit worsens, despite inline gains on other shapes. This does not justify selecting an implementation based on benchmark input identity.
+
+Across the two screens, all 108 timed worker outputs match reference bytes and pass allocation guards; twelve decoder checks recover the inputs. Each candidate also passes six smoke-frame comparisons spanning varied, mixed, structured, zero, repeated, and random inputs. Three additional alternating 30,000-frame baseline/outlined pairs preserve exact bytes; their counters show more candidate cycles and branch misses, but do not establish register spills or a specific cache cause. Full all-level qualification and sanitizer testing were not run for these rejected candidates. Evidence, scripts, identities, per-trial speed/RSS/size, and symbols: `out/parser-sequence-codes-20261107/` and `out/parser-sequence-codes-inline-20261107/`.
+
+Next isolate a smaller dataflow change: transfer only the final collected-literal count once per block while retaining bulk symbol conversion. First verify generated assembly removes the encoder's literal-length accumulator without introducing per-sequence parser calls or stores. Require matched old/new/reference measurements and exact frames before considering retention. Published README metrics remain those of the retained code; the all-level performance objective remains open.
+
 ## Identical-binary control and weight FSE batching (2026-11-07)
 
 Ran the exact same short level2 production executable under both timing labels, using the same path (not two differently named copies), CPU2, six alternating100,000-frame pairs per input. SHA256 is `e86dfb36868d5ec92e548f8aa5955de555d42c780f116582fcd6f6a9385785a6`. The labels produced apparent paired changes with no implementation difference:
