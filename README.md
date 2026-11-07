@@ -2,7 +2,7 @@
 
 A header-only C++23 implementation of [Zstandard](https://facebook.github.io/zstd/) with compile-time compression settings and callback-driven streaming. The bundled reference implementation is used to check compressed bytes and measure performance at matching levels.
 
-[Get started](#get-started) · [Build and test](#build-and-test) · [Performance](#performance) · [Detailed measurements](BENCHMARKS_INPUTS.md) · [Development progress](PERFORMANCE_PLAN.md)
+[Get started](#get-started) · [Build and test](#build-and-test) · [Run a benchmark](#run-a-benchmark) · [Performance](#performance) · [Windows performance](#native-windows-decompression) · [Development progress](PERFORMANCE_PLAN.md)
 
 ## What it supports
 
@@ -81,6 +81,20 @@ ctest --preset msvc-acceptance
 ```
 
 The tests compare resolved compression parameters and compressed bytes, and check decoding in both directions. The public library target itself does not link reference zstd.
+
+## Run a benchmark
+
+The `zstdpp_pair` tool compares optimized C++ and reference workers at the same compression level on your input. It checks byte-for-byte compressed output and verifies that both decoders recover the original input before reporting performance.
+
+For Windows, run these commands from a Visual Studio x64 developer shell:
+
+```text
+cmake --preset msvc-release-eval
+cmake --build --preset msvc-pair
+out/build/msvc-release-eval/eval/bin/zstdpp_pair.exe --level 3 --input path/to/file --iterations 1000 --trials 6
+```
+
+For GCC, use the `gcc-release-eval` configure preset and `gcc-pair` build preset, then run `out/build/gcc-release-eval/eval/bin/zstdpp_pair`. The tables below use 1 MiB inputs. See the [benchmark report](BENCHMARKS.md) for measurement conditions and reproduction details.
 
 ## Performance
 
@@ -537,4 +551,4 @@ Each cell gives **speed / peak memory / executable size** as C++ percentages of 
 | [Development history](PERFORMANCE_HISTORY.md) | Archived progress notes and earlier results formerly kept in this README. |
 | [Reference zstd](reference_zstd/README.md) | The bundled reference implementation. |
 
-The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/). To benchmark a 1 MiB input, use the optimized `msvc-pair` or `gcc-pair` build preset and run `zstdpp_pair --level 3 --input path/to/file --iterations 1000 --trials 6`. The tool checks exact compressed bytes and both decoders.
+The headers are in [`include/sph/zstd++/`](include/sph/zstd++/), tests are in [`test/`](test/), and benchmark tools are in [`eval/`](eval/). Ongoing task status and experiment outcomes belong in the performance work list; this front page presents usage and the current benchmark tables.
