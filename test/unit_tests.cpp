@@ -1454,7 +1454,7 @@ namespace
         }
     }
 
-    template <unsigned MinimumMatch>
+    template <unsigned MinimumMatch, bool RowRelativeTag = false>
     void check_row_batch_boundaries()
     {
         using namespace sph::zstd::detail;
@@ -1478,9 +1478,9 @@ namespace
                      95U, 96U, 97U, 383U, 384U, 385U})
             {
                 auto const current{batched.next + gap};
-                auto const count{batched.find<MinimumMatch, 4U, true>(
+                auto const count{batched.find<MinimumMatch, 4U, true, RowRelativeTag>(
                     input, current, 0U, 14U, 15U, false, actual)};
-                auto const expected_count{scalar.find<MinimumMatch, 4U, false>(
+                auto const expected_count{scalar.find<MinimumMatch, 4U, false, RowRelativeTag>(
                     input, current, 0U, 14U, 15U, false, expected)};
                 check(count == expected_count && std::equal(actual.begin(),
                     actual.begin() + static_cast<std::ptrdiff_t>(count), expected.begin()),
@@ -3279,6 +3279,7 @@ int main()
         test_row_parser_workspace();
         check_row_batch_boundaries<4U>();
         check_row_batch_boundaries<5U>();
+        check_row_batch_boundaries<5U, true>();
         test_match_counter_boundaries();
         test_one_shot_compression_state();
         test_reference_rle_golden_frame();

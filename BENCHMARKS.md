@@ -1,5 +1,54 @@
 # Benchmark results
 
+## Local row-insertion cursor retained (2026-11-07)
+
+The GCC 13 lazy-depth-2 row matcher updated its workspace insertion cursor after every inserted position. Byte-sized tag stores can alias workspace fields, and the optimized loop repeatedly reloaded cursor/table state. The retained change keeps only the insertion cursor local and publishes it once after the catch-up loop. Hashing, salt observation, prefetching, cache replacement, insertion order, and table layout are unchanged. The existing broader batch-local optimization for greedy/depth-1 parsing is not enabled for depth 2.
+
+The policy is limited to GCC 13's 16-entry rows with minimum match 5 in the existing non-batched insertion branch. In the 1-MiB default matrix, this changes levels 8 and 9. It adds no persistent workspace, heap allocation, or executable-size growth. Other compiler policies retain their previous loop.
+
+Before the experiment, six alternating 3,000-frame level-8 varied current/reference pairs measured 193.43/192.29 MiB/s (100.14% paired, 3/6 wins): the published 98.91% short-run deficit was not stable. Matched 4,000-frame cycle profiles had zero lost/throttled samples and approximately 92.317/93.061 billion cycles. C++ attributed 87.96% to its row matcher; reference attributed 85.50% to its row finder and 4.94% to the lazy2 caller, with differing boundaries. Assembly showed the insertion cursor load/store round trip. These profiles motivated removing work, not a claim that C++ had an established whole-function cycle deficit. Baseline evidence: `out/l8-varied-confirm-20261107/`.
+
+Initial level-8 screening passed 36 exact-frame/allocation-guarded workers and four decoder checks; paired gains were varied +8.19% (6/6) and mixed +5.83% (5/6). Final qualification used six rotating baseline/candidate/reference trials per input and level, pinned to CPU 2, with optimized generic GCC 13 `-O3 -DNDEBUG` workers. Frames per trial: varied 1,500, mixed 6,000, structured/random 2,000, zero/repeated 10,000. All 216 final compression workers matched reference bytes and passed allocation guards, and 24 reciprocal-decoder checks recovered the inputs.
+
+| Level | Input | Paired gain over previous C++ | Wins / 6 |
+| ---: | --- | ---: | ---: |
+| 8 | varied | +8.34% | 6 |
+| 8 | mixed | +6.31% | 5 |
+| 8 | structured | +5.33% | 5 |
+| 8 | zero | -0.53% | 2 |
+| 8 | repeated | +2.59% | 6 |
+| 8 | random | +6.02% | 6 |
+| 9 | varied | +13.99% | 6 |
+| 9 | mixed | +2.50% | 5 |
+| 9 | structured | +3.75% | 6 |
+| 9 | zero | +0.32% | 6 |
+| 9 | repeated | +2.96% | 5 |
+| 9 | random | +4.45% | 4 |
+
+Both levels are ahead of reference on all six measured input shapes in this batch. Zero-filled level 8 is approximately neutral/slightly slower than the previous C++ build; its -0.53% paired result is retained alongside the larger varied, mixed, structured, repeated, and random gains. This does not establish universal superiority across levels, sizes, compilers, or inputs.
+
+Current measurements (median throughput, whole-process peak RSS, complete worker executable size; percentages are C++ / reference):
+
+| Level | Input | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 8 | varied | 208.62 | 194.37 | 107.34% | 10.10 | 10.85 | 93.04% | 119.21 | 632.52 | 18.85% |
+| 8 | mixed | 1665.17 | 1240.26 | 134.26% | 10.34 | 11.00 | 93.93% | 119.21 | 632.52 | 18.85% |
+| 8 | structured | 1690.19 | 1252.23 | 134.97% | 10.10 | 10.85 | 93.03% | 119.21 | 632.52 | 18.85% |
+| 8 | zero | 4967.11 | 1559.29 | 318.55% | 10.04 | 10.89 | 92.23% | 119.21 | 632.52 | 18.85% |
+| 8 | repeated | 2883.89 | 1654.26 | 174.33% | 10.04 | 10.88 | 92.33% | 119.21 | 632.52 | 18.85% |
+| 8 | random | 1959.05 | 1596.72 | 122.69% | 11.06 | 11.01 | 100.51% | 119.21 | 632.52 | 18.85% |
+| 9 | varied | 192.34 | 181.02 | 106.26% | 15.09 | 15.86 | 95.15% | 119.21 | 632.52 | 18.85% |
+| 9 | mixed | 1302.30 | 1014.95 | 128.31% | 15.35 | 15.98 | 96.09% | 119.21 | 632.52 | 18.85% |
+| 9 | structured | 1457.31 | 1137.24 | 128.14% | 15.08 | 15.88 | 94.96% | 119.21 | 632.52 | 18.85% |
+| 9 | zero | 4969.85 | 1548.44 | 320.96% | 15.07 | 15.79 | 95.42% | 119.21 | 632.52 | 18.85% |
+| 9 | repeated | 2894.68 | 1644.85 | 175.98% | 15.08 | 15.85 | 95.14% | 119.21 | 632.52 | 18.85% |
+| 9 | random | 1334.04 | 1139.30 | 117.09% | 16.07 | 15.97 | 100.57% | 119.21 | 632.52 | 18.85% |
+
+Validation: extended the existing independent batch-versus-scalar row-state test to the active relative-tag policy. It compares candidate order, complete position/tag tables, cursor, salt entropy, and all eight cache slots across odd/even insertion counts, cache wrap, 384-position skip boundaries, resets, repeated data, and high frame bases. Strict optimized unit tests, match-index epoch tests, and all-level compression parity pass (18.58 seconds total). The integrated level-8/9 `.text` and `.rodata` match the measured candidates exactly; all other 20 levels' code/data sections match their baselines. All 22 executable sizes are unchanged. Decoder, native Windows, short-input, and unrelated performance rows remain unchanged.
+
+Artifacts: `out/l8-local-cursor-20261107/` contains source prototypes, assembly, initial and six-shape qualification results, identities, integrated build/test logs, section audit, and table renderer. The README and detailed input matrix now publish all nine level-8/9 metrics. The all-level objective remains open: other near-parity compression cases and high-level structured decompression still need work. Next: confirm the remaining 1-MiB varied level-1 gap, then use source/assembly profiling to look for repeatedly published parser state or unnecessary work; do not assume the row-cursor change transfers to a different parser.
+
+
 ## Double-fast splitter arithmetic and merged scan rejected (2026-11-07)
 
 Audited `chunk_split_size<43,8>` against reference `ZSTD_splitBlock` and tested two isolated GCC 13 Release candidates on genuine 256-KiB varied and mixed inputs. Production remains unchanged.
@@ -369,6 +418,8 @@ All 108 timed compression workers pass exact reference-frame comparison and allo
 The candidate is rejected: recovering an already-leading repeated workload does not justify widening the varied-input deficit. Production headers and published README measurements are unchanged. No broad malformed-input or sanitizer qualification was performed for this rejected compiler-option candidate. Next: prioritize the confirmed varied level-2 entropy deficit; retain the placement evidence when interpreting future unrelated-source regressions, and do not repeat single-sequence guards or generic alignment sweeps without a distinct hypothesis.
 
 ## README matrix measurement provenance
+
+Levels 8 and 9 compression were refreshed on 2026-11-07 with six rotating trials per input after [local row-insertion cursor retention](#local-row-insertion-cursor-retained-2026-11-07): varied 1,500 frames, mixed 6,000, structured/random 2,000, zero/repeated 10,000.
 
 These notes record which measurements populate the current README tables. Keep future refresh history here, with implementation decisions and next steps in [PERFORMANCE_PLAN.md](PERFORMANCE_PLAN.md). The README presents the library and the latest published comparisons.
 

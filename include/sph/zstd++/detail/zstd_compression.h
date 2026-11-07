@@ -2319,15 +2319,34 @@ namespace sph::zstd::detail
                 return hash<MinimumMatch, RowLog>(input, index, hash_bits);
             };
             auto insert_until = [&](std::uint32_t end) {
-                // Greedy and depth-1 lazy parsing benefit from batch-local state
-                // and branch-free wrap. Deeper lazy parsing keeps its measured path.
+                // Greedy and depth-1 lazy parsing use batch-local hash/tag state
+                // and branch-free wrap. Deeper parsing retains its insertion path.
                 if constexpr (!BatchLocal || RowLog != 4U)
                 {
-                    while (next < end)
+#if defined(__GNUC__) && !defined(__clang__) && __GNUC__ == 13
+                    if constexpr (RowLog == 4U && MinimumMatch == 5U)
                     {
-                        auto const value{cache.next(next, hasher)};
-                        (void)table.insert_fixed<RowLog, RowRelativeTag>(value, frame_base + next + 1U);
-                        ++next;
+                        // Tag stores can alias the workspace's cursor. Keep the
+                        // insertion position local and publish it once; hashing
+                        // and cache replacement use the explicit position.
+                        auto cursor{next};
+                        while (cursor < end)
+                        {
+                            auto const value{cache.next(cursor, hasher)};
+                            (void)table.insert_fixed<RowLog, RowRelativeTag>(value, frame_base + cursor + 1U);
+                            ++cursor;
+                        }
+                        next = cursor;
+                    }
+                    else
+#endif
+                    {
+                        while (next < end)
+                        {
+                            auto const value{cache.next(next, hasher)};
+                            (void)table.insert_fixed<RowLog, RowRelativeTag>(value, frame_base + next + 1U);
+                            ++next;
+                        }
                     }
                 }
                 else
