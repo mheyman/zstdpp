@@ -1,5 +1,33 @@
 # Benchmark results
 
+## Weight-stage audit and fused preparation screen (2026-11-07)
+
+Added isolated diagnostic timers around weight preparation, histogramming, normalization, normalized-header writing, and the intermediate-buffer join. Three20,000-frame runs per short input, CPU2, optimized GCC13 with existing phase tracing enabled, produced reference-identical frames and passed allocation guards. Medians below divide accumulated time by20,001 calls (warmup included). Nested timers add overhead; these are attribution measurements, not throughput claims or directly equivalent reference scopes.
+
+| Weight stage | Varied microseconds/frame | Mixed microseconds/frame |
+| --- | ---: | ---: |
+| Prepare weights / validate tree | 0.4822 | 0.1526 |
+| Histogram / maximum weight | 0.5127 | 0.1729 |
+| Normalize counts | 0.1132 | 0.0580 |
+| Write normalized header | 0.1090 | 0.0484 |
+| Join description and stream | 0.0606 | 0.0407 |
+| Build weight FSE table (existing nested timer) | 0.4496 | 0.0232 |
+| Encode weight FSE stream (existing nested timer) | 1.0056 | 0.3019 |
+| Entire weight phase (includes nested overhead/other work) | 3.1121 | 1.0037 |
+
+Header writing and the intermediate join together are less than0.2us per varied frame; a new header serializer is not justified by this evidence. Preparation/counting is more substantial. An isolated `DeferredCodes` candidate counts weights during preparation, initializing zero-weight population from alphabet size, moving each present symbol into its weight bucket, and subtracting the final omitted symbol. It recovers maximum weight from the12-entry histogram. Non-deferred paths retain the old counting loop. Tree validation, emitted weights, normalization and output format are unchanged; no allocation or workspace member is added. The candidate also computes counts on repeat-tree preparation, whose cost is included.
+
+Initial six rotating baseline/candidate/reference triples per input,40,000 frames, gave varied+0.41%(4/6 wins) and mixed+0.53%(5/6). Six longer alternating100,000-frame baseline/candidate pairs did not establish a repeatable varied gain:
+
+| Input | Baseline MiB/s | Candidate MiB/s | Median paired gain | Wins / 6 |
+| --- | ---: | ---: | ---: | ---: |
+| varied | 3084.99 | 3083.44 | +0.73% | 3 |
+| mixed | 1990.15 | 2093.34 | +3.90% | 4 |
+
+Independent medians and paired ratios differ, especially in the more variable longer run. Both varied binaries ran materially slower than in screening (roughly3537 MiB/s), so do not compare absolute speeds across runs or assign that shift to the code change. The candidate stays unretained pending stronger timing evidence; no production headers or README performance rows change. Both executables are133.2890625 KiB. All60 initial/confirmation compression workers produced exact reference-compatible frames and passed allocation guards; eight decoder checks recovered the inputs. This is not full cross-level/sanitizer qualification of the candidate.
+
+Evidence: `out/weight-stage-audit-20261107/` contains timers, raw logs and stage summary; `out/weight-fused-counts-20261107/` contains isolated source, baseline/candidate identities and initial/confirmation trials. Next run identical-binary alternating controls under the same100,000-frame protocol to establish timing variability before evaluating another sub-percent change. After measurement stability is established, the weight-stream loop is a more substantial remaining weight cost: audit batching its four bounded FSE emissions per append versus reference's four-symbol flush schedule, preserving state order, tail and marker bits. The all-level goal remains open.
+
 ## Compact Huffman-weight FSE storage and scratch screens (2026-11-07)
 
 Audited both Huffman weight-table builders: weights are0–11 and the requested FSE table log is at most6. An isolated capacity template supplies64 states and12 transforms for weights while leaving sequence tables at512/256. The state encoder and byte compressor accept the table type; compact builder scratch uses13 cumulative entries and64 spread bytes. Explicit log/alphabet capacity checks precede indexing. The weight table shrinks from3084 to236 bytes; no normalization or symbol-spread algorithm changes.
