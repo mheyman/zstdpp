@@ -1,5 +1,15 @@
 # Benchmark results
 
+## GCC outer zero-literal dispatch controls, 2026-11-06
+
+Moved GCC's zero-literal selection to `decode_sequences`, before entering the general implementation. The specialized decoder still performs all header/table checks. Medium blocks bypass this dispatch. Six alternating CPU2-pinned 30,000-frame old/new pairs improved structured16 by 12.54% (6/6); mixed3 was nearly neutral at -0.24% (2/6). Six longer 100,000-frame mixed pairs confirmed -0.07% (3/6), resolving the preceding prototype's repeatable mixed regression.
+
+Medium-block controls still lost: structured18 -1.05% (1/6) and structured19 -1.59% (0/6), six 30,000-frame pairs each. Disassembly demonstrates that moving the dispatch outside the general decoder does not preserve its generated code: the padded-medium hot function shrinks from 0x1483 to 0x137a bytes, and the unpadded-medium function from 0x13f6 to 0x1223. Both retain their medium-block source path. The candidate introduces an out-of-line `read_sequence_count` call absent from the baseline padded-medium function. These observations identify compiler changes, not their runtime contribution.
+
+A second variant forced that parser inline on GCC x64. It worsened structured18 to -2.58% and structured19 to -3.28% (0/6 wins each, 30,000 frames). Reject both variants pending a solution for the medium-block tradeoff; the inlining experiment does not support blaming the parser call for the regression. The outer candidate executable is 129,656 bytes versus baseline 128,320.
+
+All timed workers passed decoded-output warmup and ordinary-allocation guards. Comprehensive mutation tests were not run for these rejected candidates. Restored source and production executable exactly to SHA-256 `83dfa13880328d2d64de9a1b57ea0be3a2f4bcf178fd64198874fc7738db4ba9`; README metrics remain unchanged. Artifacts, binaries, assembly, symbol tables, source snapshots and trial CSVs are in `out/gcc-zero-outer-20261106/`. Next obtain medium-block instruction/cycle measurements and profiles against the saved baseline before further code-generation changes. The outer-dispatch candidate remains available for that diagnostic work.
+
 ## GCC zero-literal specialization screen, 2026-11-06
 
 Longer checks of the retained GCC 13 Release decoder against reference used six alternating 100,000-frame pairs, pinned to CPU 2. Structured16 measured a median paired throughput ratio of 102.42% (4/6 wins), and structured19 measured 101.61% (4/6). These confirmations weaken the deficits in the shorter matrix, but do not prove every level/input is faster. Existing README measurements remain unchanged because no new implementation was retained.
