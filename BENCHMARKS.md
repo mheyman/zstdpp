@@ -1,5 +1,27 @@
 # Benchmark results
 
+## Parser literal-count transfer screening (2026-11-07)
+
+Following the rejected full symbol fusion, an isolated GCC13 level-2/256-KiB candidate transfers only the parser's final literal count to the encoder through one additional `size_t` workspace field. Existing sequence records, code buffers, and bulk LL/OF/ML conversion remain unchanged; there is no new heap buffer. This follows reference's use of its literal cursor to determine literal size instead of accumulating lengths during `ZSTD_seqToCodes`.
+
+Optimized disassembly verifies the intended change: the retained worker loads LL into `edx` at `0x9589` and adds it to the literal cursor with `add rdi,rdx` at `0x9592`; the candidate conversion loop has no corresponding accumulator addition. Worker size changes from 133.40625 to 133.421875 KiB (+16 bytes). These instruction savings alone do not establish an end-to-end win.
+
+Six rotating old/candidate/reference triples on CPU2, generic GCC13 `-O3 -DNDEBUG`, gave the following results. All inputs are 256 KiB. Throughputs are independent medians; changes are medians of paired candidate/old ratios, so the two need not agree in sign near parity.
+
+| Run | Input | Frames per worker | Old MiB/s | Candidate MiB/s | Reference MiB/s | Paired change | Wins / 6 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Screen | varied | 20,000 | 3536.92 | 3569.28 | 3556.72 | +0.74% | 4 |
+| Screen | mixed | 20,000 | 2227.24 | 2279.24 | 2088.57 | +2.93% | 5 |
+| Screen | structured | 10,000 | 889.89 | 901.03 | 833.76 | +1.52% | 5 |
+| Confirmation | varied | 60,000 | 3553.51 | 3530.73 | 3607.63 | +0.29% | 3 |
+| Confirmation | mixed | 40,000 | 2224.31 | 2289.47 | 2095.12 | +1.87% | 6 |
+
+Confirmation candidate/reference paired ratios are 98.30% for varied (0/6 wins) and 108.97% for mixed (6/6). Confirmation candidate/old/reference peak RSS is 4.4785/4.4766/4.4961 MiB on varied and 4.7227/4.7227/4.5117 MiB on mixed. Full reference executable size is 632.515625 KiB. The mixed gain is promising; the varied improvement is not established and the reference deficit remains.
+
+All 90 timed worker frames match reference bytes and pass allocation guards; ten decoder checks recover the inputs. Six additional smoke frames cover varied, mixed, structured, zero, repeated, and random. The candidate is not yet production-qualified: it uses an implicit encoder-policy combination to indicate that the count is available. Before retention, replace that with an explicit policy, cover empty/no-sequence/RLE and reset cases, run all-level byte/reciprocal-decode acceptance, and qualify the remaining input shapes against saved baseline workers. No production source or published README metrics changed. Evidence and reproduction scripts: `out/parser-literal-count-20261107/{prepare.py,smoke.py,run.py,confirm.py}`, assembly and notes beside them, and `results/` plus `confirmation/` containing identities and per-trial measurements.
+
+A separate opportunity observed during assembly review: the C++ conversion loop reloads LL/OF/ML vector data pointers after byte stores, while reference caches these pointers before conversion. Test local data-pointer snapshots as an independent candidate after resolving literal-count qualification; do not assume that reduced loads will outweigh register-pressure or placement effects.
+
 ## Short level-2 parser-to-entropy fusion rejected (2026-11-07)
 
 Fresh matched profiles of the retained `334bf31` short level-2 worker and reference used the same 256 KiB varied input, CPU2, 150,000 frames, and `cycles:u` sampling period 1,000,003. Both reports show zero lost samples (throttling was not audited). C++ sampled 47.462 billion cycles versus reference 47.332 billion. C++ self samples include double-fast parsing 37.47%, its separate match counter 8.71%, FSE `encode_bits` 6.78%, and Huffman literal selection 6.66%. Reference parsing accounts for 48.64%, sequence writing 13.07%, and sequence-to-code conversion 5.93%. Function boundaries differ, so these percentages do not establish individual phase speed ratios. Frames matched and both decoders recovered the input. Evidence: `out/short-varied-current-20261107/`.
