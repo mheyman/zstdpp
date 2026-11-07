@@ -117,6 +117,37 @@ set_target_properties(zstdpp_pair PROPERTIES
 )
 sph_zstdpp_enable_strict_warnings(zstdpp_pair)
 add_dependencies(zstdpp_pair ${eval_workers})
+
+# Opt-in diagnostic: two header revisions in separately named namespaces.
+# It deliberately reports no combined-process memory or executable-size ratios.
+option(SPH_ZSTDPP_BUILD_BATCH_DIAGNOSTIC "Build the in-process compression batch diagnostic" OFF)
+set(SPH_ZSTDPP_BATCH_LEVEL 2 CACHE STRING "Compression level for the batch diagnostic")
+set(SPH_ZSTDPP_BATCH_BASELINE_INCLUDE "${PROJECT_SOURCE_DIR}/include" CACHE PATH "Baseline header root")
+set(SPH_ZSTDPP_BATCH_CANDIDATE_INCLUDE "${PROJECT_SOURCE_DIR}/include" CACHE PATH "Candidate header root")
+if(SPH_ZSTDPP_BUILD_BATCH_DIAGNOSTIC)
+    if(NOT SPH_ZSTDPP_BATCH_LEVEL MATCHES "^[1-9][0-9]*$" OR SPH_ZSTDPP_BATCH_LEVEL GREATER 22)
+        message(FATAL_ERROR "SPH_ZSTDPP_BATCH_LEVEL must be 1 through 22")
+    endif()
+    foreach(side baseline candidate)
+        string(TOUPPER "${side}" upper_side)
+        set(header_root "${SPH_ZSTDPP_BATCH_${upper_side}_INCLUDE}")
+        if(NOT EXISTS "${header_root}/sph/zstd++/zstd_compress.h")
+            message(FATAL_ERROR "Missing ${side} headers: ${header_root}")
+        endif()
+        add_library(batch_${side} OBJECT batch_adapter.cpp)
+        target_compile_features(batch_${side} PRIVATE cxx_std_23)
+        target_include_directories(batch_${side} PRIVATE "${header_root}")
+        target_compile_definitions(batch_${side} PRIVATE
+            SPH_BATCH_NAMESPACE=sph_batch_${side}
+            SPH_BATCH_ENTRY=batch_${side}_api
+            SPH_EVAL_LEVEL=${SPH_ZSTDPP_BATCH_LEVEL}
+            SPH_EVAL_CORPUS_SIZE=${SPH_ZSTDPP_EVAL_CORPUS_SIZE})
+        sph_zstdpp_enable_strict_warnings(batch_${side})
+        target_compile_options(batch_${side} PRIVATE $<$<CXX_COMPILER_ID:MSVC>:/Ob3>)
+    endforeach()
+    sph_zstdpp_add_eval_worker(zstdpp_batch batch_diagnostic.cpp)
+    target_link_libraries(zstdpp_batch PRIVATE batch_baseline batch_candidate libzstd_static)
+endif()
 if(BUILD_TESTING AND CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
     list(GET SPH_ZSTDPP_EVAL_LEVELS 0 SPH_ZSTDPP_EVAL_SMOKE_LEVEL)
     add_test(NAME paired_benchmark_smoke

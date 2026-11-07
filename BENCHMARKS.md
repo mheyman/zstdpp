@@ -1928,3 +1928,44 @@ The evaluator updates the marked generated section above and writes `metrics.csv
 Pass `--input FILE` to run the same all-level evaluator on a different corpus. The file must have exactly `SPH_ZSTDPP_EVAL_CORPUS_SIZE` bytes; by default the evaluator generates its deterministic mixed input. For the [additional input matrix](BENCHMARKS_INPUTS.md), generate four files with `python3 eval/make_matrix_inputs.py out/matrix-inputs`, then run each through the all-level evaluator with a distinct empty output directory. `eval/render_current_matrix.py` renders their aggregate CSVs together with the mixed-input CSV into the README overview and detailed input report.
 
 For a single level and input, build `msvc-pair`, `gcc-pair`, or `gcc-native-pair` and run `zstdpp_pair --level N --input FILE --iterations 1000 --trials 6`. The input must match the configured `SPH_ZSTDPP_EVAL_CORPUS_SIZE` (1 MiB by default). The pair tool saves exact frames and checks byte-level compression equality and both decoder directions on every trial.
+
+## In-process batch diagnostic and controls (2026-11-07)
+
+The opt-in `zstdpp_batch` target alternates short compression batches in one process. It checks compiled pledges and all seven resolved compression parameters against reference, compares each batch's final compressed frame with reference, checks reciprocal decoding before timing, and rejects ordinary C++ allocations or changes in the library's aligned allocation/deallocation counters during timing. It does not intercept arbitrary `malloc` calls or every possible custom allocator. Two adapters compile headers under distinct root namespaces so different inline/template definitions cannot accidentally coalesce. The boundary contains only standard-library types.
+
+Build with optimized GCC 13 (commands run from the repository root):
+
+```sh
+cmake -S . -B out/batch -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 \
+  -DSPH_ZSTDPP_BUILD_TESTS=OFF -DSPH_ZSTDPP_BUILD_EVAL=ON \
+  -DSPH_ZSTDPP_EVAL_LEVELS=2 -DSPH_ZSTDPP_BATCH_LEVEL=2 \
+  -DSPH_ZSTDPP_EVAL_CORPUS_SIZE=262144 \
+  -DSPH_ZSTDPP_BUILD_BATCH_DIAGNOSTIC=ON
+cmake --build out/batch --target zstdpp_batch -j4
+taskset -c 2 out/batch/eval/bin/zstdpp_batch input.bin same.csv same 500 100
+taskset -c 2 out/batch/eval/bin/zstdpp_batch input.bin contexts.csv contexts 500 100
+taskset -c 2 out/batch/eval/bin/zstdpp_batch input.bin compare.csv compare 500 100
+```
+
+The input must match the compiled byte count. Arguments are input, output CSV, mode, frames per batch, and an even number of pairs. `same` uses one function and one context under both labels; `contexts` uses that function with two contexts; `compare` uses the two separately compiled adapters and contexts. Order alternates AB/BA. The CSV retains raw elapsed nanoseconds and `b_over_a`, the B/A throughput ratio (A elapsed / B elapsed). Both header roots default to the current `include` directory. To compare a different revision, configure `SPH_ZSTDPP_BATCH_BASELINE_INCLUDE` and/or `SPH_ZSTDPP_BATCH_CANDIDATE_INCLUDE` to an absolute header-root path, then rebuild. Always run identical-header controls first.
+
+These are diagnostic timings, not substitutes for isolated-worker reference comparisons. Code placement and context placement can change results even without an algorithm change. Do not publish combined-process RSS or executable size as per-implementation values, or subtract the control bias from a candidate result and treat that as a proven gain.
+
+### Identical-header controls
+
+GCC 13 Release, CPU 2, true 256 KiB pledge, 100 alternating pairs of 500 frames per label on each input. All six runs passed reference byte equality, reciprocal decoding, and allocation guards. Values below are medians of individual paired throughput ratios, not ratios of independent throughput medians.
+
+| Input | Mode | B/A throughput | B wins / 100 | Pair range |
+| --- | --- | ---: | ---: | ---: |
+| Varied | Same function, same context | 99.84% | 45 | 72.57–126.53% |
+| Varied | Same function, two contexts | 99.33% | 34 | 91.00–112.75% |
+| Varied | Separate adapters, identical headers | 102.74% | 82 | 81.10–127.59% |
+| Mixed | Same function, same context | 100.01% | 52 | 85.71–117.20% |
+| Mixed | Same function, two contexts | 92.28% | 5 | 81.89–112.46% |
+| Mixed | Separate adapters, identical headers | 89.89% | 2 | 71.29–107.94% |
+
+The two-context mixed-input difference persists in both order groups (AB 92.88%, BA 91.70%). This warrants experiments on context allocation order/address and cache behavior; it does not establish a cache-conflict cause. The separate-adapter control includes both data and code placement effects. No library optimization or README performance refresh is justified by these controls.
+
+Validation: strict-warning optimized build; six control runs (600 pairs / 600,000 timed frames); six additional two-pair smoke runs using current baseline headers and the previously unretained fused-weight-count candidate; symbol inspection confirming both namespace roots; six invalid-mode/count/pledge/report-path rejections, plus twelve signed/zero/malformed/overflow/empty numeric rejections after strict numeric parsing was added. Windows compilation is not yet validated. Artifacts: `out/batch-diagnostic-20261107/`, including raw CSVs, `controls.json`, validation scripts, build logs, and candidate symbol listing. Next: reverse context construction order and test controlled placement before evaluating small candidate gains with this harness.
