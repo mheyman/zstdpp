@@ -410,7 +410,7 @@ Every measured compression frame matched reference bytes, and both decoders reco
 <details>
 <summary>Varied-input compression at all 22 levels</summary>
 
-Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 1, 2, 8, 9, and 18 use six longer trials; other levels use three screening trials. High levels have very few frames, so these screening results are not confirmed performance wins. Every compression trial matched reference bytes, and both decoders recovered the input at each level. Level 18 uses the [30-frame confirmation](BENCHMARKS.md#level-18-varied-confirmation-and-child-link-prefetch-2026-11-07). The level-1 row uses [six rotating baseline/C++/reference trials](BENCHMARKS.md#compact-level-1-paired-state-batching-retained-2026-11-07). The level-8/9 rows use [six rotating baseline/C++/reference trials](BENCHMARKS.md#local-row-insertion-cursor-retained-2026-11-07). A corresponding varied-input decompression performance matrix has not been measured in this report. See the [measurement report](BENCHMARKS.md#current-all-level-varied-compression-screen-and-confirmations-2026-11-07) for corpus identity and conditions.
+Optimized GCC 13, 1 MiB input, measured 2026-11-07. Trial counts are shown below; short high-level runs are screening results, not confirmed wins. Varied-input decompression has not yet been measured. See the [measurement report](BENCHMARKS.md#current-all-level-varied-compression-screen-and-confirmations-2026-11-07) for conditions and the [row provenance](PERFORMANCE_HISTORY.md#readme-table-provenance) for subsequent confirmations.
 
 | Level | Trials × frames | C++ MiB/s | Reference MiB/s | Speed % | C++ MiB | Reference MiB | Memory % | C++ KiB | Reference KiB | Code % |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -444,7 +444,7 @@ Measured 2026-11-07 with optimized GCC 13 on a 1 MiB varied corpus. Levels 1, 2,
 <details>
 <summary>Level-3 compression on short inputs</summary>
 
-Measured 2026-11-07 using optimized GCC 13 workers. The 64 KiB rows use six rotating old/current/reference trials of 50,000 frames; the 256 KiB rows use six alternating current/reference trials of 12,000 frames. Values use median elapsed time and peak RSS. Every trial matched reference bytes; both decoders recovered the input. Mixed inputs contain all four patterns at each size. See [benchmark details](BENCHMARKS.md).
+Optimized GCC 13, measured 2026-11-07 with six trials per row. Mixed inputs contain all four patterns at each size. Values use median elapsed time and peak RSS. See [measurement conditions and trial lengths](PERFORMANCE_HISTORY.md#readme-table-provenance).
 
 | Input | Size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -462,7 +462,7 @@ Measured 2026-11-07 using optimized GCC 13 workers. The 64 KiB rows use six rota
 <details>
 <summary>Level-2 compression on 256 KiB inputs</summary>
 
-Measured 2026-11-07 with optimized GCC 13 workers, six alternating C++/reference trials of 60,000 frames for varied input, and six rotating trials of 12,000 frames for mixed input. Every frame matched reference bytes and both decoders recovered the input. Values are median throughput, whole-process peak RSS, and complete executable size. See the [measurement report](BENCHMARKS.md#short-level-2-confirmation-and-folded-match-comparison-2026-11-07) for conditions and variability. The varied row uses the [fresh current-build confirmation](BENCHMARKS.md#fresh-short-level-2-baseline-and-fse-mode-audit-2026-11-07).
+Optimized GCC 13, measured 2026-11-07 with six trials per row. Values are median throughput, whole-process peak RSS, and complete executable size. See [measurement conditions and trial lengths](PERFORMANCE_HISTORY.md#readme-table-provenance).
 
 | Input | Size (KiB) | C++ throughput (MiB/s) | Reference throughput (MiB/s) | % of Reference | C++ memory (MiB) | Reference memory (MiB) | % of Reference | C++ code (KiB) | Reference code (KiB) | % of Reference |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -473,7 +473,7 @@ Measured 2026-11-07 with optimized GCC 13 workers, six alternating C++/reference
 
 ## Native Windows decompression
 
-Measured 2026-11-06 using MSVC Release `/O2 /Ob3` decoder workers on Windows logical CPU 2, on the same five 1 MiB inputs and reference frames as the GCC matrix. Levels refer to the compression settings that produced each frame. Most rows use three alternating 1,000-frame trials; structured levels 16 and 18 and mixed level 3 use six 30,000-frame trials. Throughput uses median worker elapsed time. Memory is median process peak working set, and code size is the complete worker executable. Both workers check exact decoded bytes at warmup; the C++ worker also rejects ordinary allocations during timing. Short-screen and near-parity results remain timing-sensitive. These are native decompression measurements; the [GCC compression/decompression matrix](BENCHMARKS_INPUTS.md) remains a separate comparison. Native speed comparisons are provisional: an [identical-binary control](BENCHMARKS.md#native-identical-binary-control-2026-11-06) showed substantial timing differences between executable copies.
+MSVC Release `/O2 /Ob3`, measured 2026-11-06 on the same five 1 MiB inputs as the GCC matrix. Memory is whole-process peak working set; code size is the complete worker executable. Native speed comparisons are provisional: an [identical-binary control](BENCHMARKS.md#native-identical-binary-control-2026-11-06) showed substantial timing differences between executable copies. See the [native benchmark report](BENCHMARKS_NATIVE.md) for trial counts and measurement conditions.
 
 Each cell gives **speed / peak memory / executable size** as C++ percentages of reference. Higher speed and lower memory/code percentages are better.
 
