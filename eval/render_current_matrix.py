@@ -251,7 +251,7 @@ def main():
 
 Measured {args.date} with optimized GCC 13 against the bundled reference on five deterministic 1 MiB inputs at levels 1–22. Each cell gives **speed / peak memory / executable size**, in that order, as C++ percentages of reference. Above 100% means faster for speed; below 100% means less memory or smaller code for the other two values. Compression frames matched byte for byte, and both decoders recovered the input. Short trials are a screening comparison; near-parity rows remain timing-sensitive. Expand the absolute tables below for all nine C++ and reference metrics at every level and input. The [full benchmark report](BENCHMARKS_INPUTS.md) gives input definitions and longer confirmations.
 
-Memory is whole-process peak resident set size (RSS), including the benchmark worker; code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
+Memory is whole-process peak resident set size (RSS), including the benchmark worker. On Linux, this is the current executable's `VmHWM`, excluding peaks inherited from its launcher. Code size is the complete worker executable, not just library instructions. Decompression rows use frames produced at the indicated compression level.
 
 ### Compression (% of reference)
 
@@ -337,6 +337,8 @@ Memory is whole-process peak resident set size (RSS), including the benchmark wo
     details = f"""# Current benchmark matrix: all input shapes
 
 Measured {args.date} with optimized GCC 13 Release `-O3` workers from the current checkout on 1 MiB inputs. Mixed input used three alternating trials of 200 frames per row; the other inputs used two alternating trials of 100 frames. Each result uses the median elapsed time and peak resident set size. Code size is the complete worker executable. Percentages are C++ / reference × 100; higher throughput and lower RSS or code size are better. These short runs are a broad screening pass and should be repeated for close results.{confirmed_note}{structured_note}{random_decode_note}
+
+Linux memory measurements use `/proc/self/status` `VmHWM` for the current executable, excluding launcher peaks inherited across execution. This includes the whole worker, not just library allocations; reporting occurs outside the timed operation.
 
 Inputs: `zero` is all zero bytes; `repeated` repeats the benchmark phrase; `structured` uses `(index / 16 + index % 7) & 255`; `random` is Python's seeded pseudo-random byte stream (`0x5A17C0DE`); and `mixed` combines those patterns. Every compression trial produced the same bytes as reference, and both production decoders recovered the input from that common frame. Workers checked their own output and ordinary allocation counts after warmup. Generate inputs with `eval/make_matrix_inputs.py` and measure with `zstdpp_eval --input`.
 

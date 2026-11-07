@@ -3,6 +3,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <sstream>
 
 int main()
 {
@@ -38,6 +39,20 @@ int main()
         }
         trials[1].elapsed_nanoseconds = 0U;
         rejects([&] { (void)summarize_trials(trials); });
+        {
+            std::istringstream status{"Name:\tworker\nVmRSS:\t100 kB\nVmHWM:\t 1234 kB\n"};
+            require(parse_linux_peak_resident_bytes(status) == 1234U * 1024U);
+        }
+        for (auto const* text : {"VmRSS: 1234 kB\n", "VmHWM:\n", "VmHWM: 0 kB\n",
+            "VmHWM: -1 kB\n", "VmHWM: 2 MB\n", "VmHWM: 2 kB extra\n",
+            "VmHWM: 18446744073709551616 kB\n", "VmHWM: 18014398509481984 kB\n"})
+        {
+            std::istringstream status{text};
+            bool rejected{};
+            try { (void)parse_linux_peak_resident_bytes(status); }
+            catch (std::runtime_error const&) { rejected = true; }
+            require(rejected);
+        }
         std::cout << "Evaluation trial aggregation tests passed\n";
     }
     catch (std::exception const& error)

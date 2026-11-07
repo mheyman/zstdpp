@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -93,6 +94,31 @@ namespace sph::zstd::eval
         return result;
     }
 
+    inline auto parse_linux_peak_resident_bytes(std::istream& status) -> std::uint64_t
+    {
+        std::string line;
+        while (std::getline(status, line))
+        {
+            if (!line.starts_with("VmHWM:")) continue;
+            auto value{std::string_view{line}.substr(6U)};
+            auto const first{value.find_first_not_of(" \t")};
+            if (first == std::string_view::npos) break;
+            value.remove_prefix(first);
+            std::uint64_t kib{};
+            auto const parsed{std::from_chars(value.data(), value.data() + value.size(), kib)};
+            if (parsed.ec != std::errc{} || kib == 0U ||
+                kib > std::numeric_limits<std::uint64_t>::max() / 1024U) break;
+            auto units{std::string_view{parsed.ptr,
+                static_cast<std::size_t>(value.data() + value.size() - parsed.ptr)}};
+            auto const unit_begin{units.find_first_not_of(" \t\r")};
+            auto const unit_end{units.find_last_not_of(" \t\r")};
+            if (unit_begin == std::string_view::npos ||
+                units.substr(unit_begin, unit_end - unit_begin + 1U) != "kB") break;
+            return kib * 1024U;
+        }
+        throw std::runtime_error{"missing or invalid VmHWM in /proc/self/status"};
+    }
+
     inline auto peak_resident_bytes() -> std::uint64_t
     {
 #if defined(_WIN32)
@@ -103,6 +129,12 @@ namespace sph::zstd::eval
             throw std::runtime_error{"GetProcessMemoryInfo failed"};
         }
         return static_cast<std::uint64_t>(counters.PeakWorkingSetSize);
+#elif defined(__linux__)
+        // getrusage can retain a launcher's pre-exec high-water mark. VmHWM
+        // belongs to the worker's current memory image instead.
+        std::ifstream status{"/proc/self/status"};
+        if (!status) throw std::runtime_error{"cannot open /proc/self/status"};
+        return parse_linux_peak_resident_bytes(status);
 #else
         rusage usage{};
         if (getrusage(RUSAGE_SELF, &usage) != 0)
